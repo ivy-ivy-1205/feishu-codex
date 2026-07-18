@@ -24,11 +24,11 @@ const migrationSql = `
   CREATE TABLE IF NOT EXISTS meeting_todos (
     id TEXT PRIMARY KEY,
     summary_id TEXT NOT NULL REFERENCES meeting_summaries(id),
-    displayed_number INTEGER NOT NULL CHECK(displayed_number > 0),
+    displayed_number INTEGER NOT NULL CONSTRAINT meeting_todos_displayed_number_positive CHECK(displayed_number > 0),
     title TEXT NOT NULL,
     description TEXT NOT NULL,
-    risk TEXT NOT NULL CHECK(risk IN ('low', 'high')),
-    status TEXT NOT NULL DEFAULT 'proposed' CHECK(status IN ('proposed', 'authorized', 'running', 'completed', 'failed', 'needs_confirmation')),
+    risk TEXT NOT NULL CONSTRAINT meeting_todos_risk_allowed CHECK(risk IN ('low', 'high')),
+    status TEXT NOT NULL DEFAULT 'proposed' CONSTRAINT meeting_todos_status_allowed CHECK(status IN ('proposed', 'authorized', 'running', 'completed', 'failed', 'needs_confirmation')),
     created_at TEXT NOT NULL,
     UNIQUE(summary_id, displayed_number)
   );

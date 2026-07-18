@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
+import { getTableConfig } from 'drizzle-orm/sqlite-core';
+import { meetingTodos } from '../src/db/schema.js';
 import { createTestMeetingRepository } from './helpers/test-db.js';
 
 describe('MeetingRepository', () => {
+  it('declares every Todo CHECK constraint used by the SQLite migration', () => {
+    expect(getTableConfig(meetingTodos).checks.map((constraint) => constraint.name)).toEqual([
+      'meeting_todos_displayed_number_positive',
+      'meeting_todos_risk_allowed',
+      'meeting_todos_status_allowed'
+    ]);
+  });
+
   it('stores a minute only once', () => {
     const repo = createTestMeetingRepository();
 

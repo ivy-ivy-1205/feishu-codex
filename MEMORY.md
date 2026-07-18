@@ -44,6 +44,7 @@
 - Phase 1A 不提前安装飞书 SDK，也不执行真实 Todo；官方 SDK 与真实 Codex 分别留到后续集成计划。
 - MVP 采用 TypeScript + Fastify 单体、SQLite durable jobs/outbox、飞书官方 Node SDK、本地 Codex CLI worker。
 - `better-sqlite3` 是需要 native build script 的直接依赖；项目根 `pnpm-workspace.yaml` 以 `onlyBuiltDependencies: [better-sqlite3]` 明确白名单化，使新环境可复现地构建 SQLite binding，而不放开其他依赖脚本。
+- SQLite 的 Drizzle table declaration 与 `src/db/migrate.ts` 都是 schema source；两者必须使用相同名称与语义的约束，尤其是 `meeting_todos` 的编号、风险和状态 CHECK 约束。
 - 保留需求指定的 Webhook；入口只做验证、白名单、幂等落库和入队，Codex 在异步 worker 执行。
 - Codex 调用固定使用 read-only、ephemeral、ignore-user-config、output-schema、隔离工作目录和 stdin；应用层再次校验 JSON 与来源。
 - SQLite 是单机 MVP 默认；只有腾讯云已有可复用 PostgreSQL 时才切换。

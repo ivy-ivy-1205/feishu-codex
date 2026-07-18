@@ -1,4 +1,5 @@
-import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+import { check, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const feishuEvents = sqliteTable('feishu_events', {
   eventId: text('event_id').primaryKey(),
@@ -34,6 +35,12 @@ export const meetingTodos = sqliteTable('meeting_todos', {
   }).notNull().default('proposed'),
   createdAt: text('created_at').notNull()
 }, (table) => [
+  check('meeting_todos_displayed_number_positive', sql`${table.displayedNumber} > 0`),
+  check('meeting_todos_risk_allowed', sql`${table.risk} IN ('low', 'high')`),
+  check(
+    'meeting_todos_status_allowed',
+    sql`${table.status} IN ('proposed', 'authorized', 'running', 'completed', 'failed', 'needs_confirmation')`
+  ),
   uniqueIndex('meeting_todos_summary_displayed_number_unique')
     .on(table.summaryId, table.displayedNumber)
 ]);
