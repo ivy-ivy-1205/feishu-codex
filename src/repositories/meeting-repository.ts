@@ -73,8 +73,9 @@ export class MeetingRepository {
 
       const insertTodo = this.client.prepare(`
         INSERT INTO meeting_todos (
-          id, summary_id, displayed_number, title, description, risk, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          id, summary_id, displayed_number, title, description, risk, capability, status,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const todo of draft.todos) {
         insertTodo.run(
@@ -84,6 +85,7 @@ export class MeetingRepository {
           todo.title,
           todo.description,
           todo.risk,
+          todo.capability,
           todo.status,
           createdAt
         );
@@ -119,7 +121,8 @@ export class MeetingRepository {
 
   listTodos(summaryId: string): MeetingTodoRecord[] {
     const rows = this.client.prepare(`
-      SELECT id, summary_id, displayed_number, title, description, risk, status, created_at
+      SELECT id, summary_id, displayed_number, title, description, risk, capability, status,
+        created_at
       FROM meeting_todos
       WHERE summary_id = ?
       ORDER BY displayed_number ASC
@@ -131,10 +134,12 @@ export class MeetingRepository {
   findTodoByReply(summaryMessageId: string, displayedNumber: number): MeetingTodoRecord | null {
     const row = this.client.prepare(`
       SELECT todos.id, todos.summary_id, todos.displayed_number, todos.title,
-        todos.description, todos.risk, todos.status, todos.created_at
+        todos.description, todos.risk, todos.capability, todos.status, todos.created_at
       FROM meeting_todos AS todos
       INNER JOIN meeting_summaries AS summaries ON summaries.id = todos.summary_id
+      INNER JOIN outbox ON outbox.idempotency_key = 'minute-summary:' || summaries.minute_id
       WHERE summaries.summary_message_id = ? AND todos.displayed_number = ?
+        AND outbox.status = 'delivered' AND outbox.delivered_at IS NOT NULL
     `).get(summaryMessageId, displayedNumber) as TodoRow | undefined;
 
     return row ? toMeetingTodoRecord(row) : null;
@@ -143,10 +148,12 @@ export class MeetingRepository {
   listTodosByReply(summaryMessageId: string): MeetingTodoRecord[] {
     const rows = this.client.prepare(`
       SELECT todos.id, todos.summary_id, todos.displayed_number, todos.title,
-        todos.description, todos.risk, todos.status, todos.created_at
+        todos.description, todos.risk, todos.capability, todos.status, todos.created_at
       FROM meeting_todos AS todos
       INNER JOIN meeting_summaries AS summaries ON summaries.id = todos.summary_id
+      INNER JOIN outbox ON outbox.idempotency_key = 'minute-summary:' || summaries.minute_id
       WHERE summaries.summary_message_id = ?
+        AND outbox.status = 'delivered' AND outbox.delivered_at IS NOT NULL
       ORDER BY todos.displayed_number ASC
     `).all(summaryMessageId) as TodoRow[];
 
@@ -161,6 +168,7 @@ interface TodoRow {
   title: string;
   description: string;
   risk: MeetingTodoDraft['risk'];
+  capability: MeetingTodoDraft['capability'];
   status: MeetingTodoDraft['status'];
   created_at: string;
 }
@@ -181,6 +189,7 @@ function toMeetingTodoRecord(row: TodoRow): MeetingTodoRecord {
     title: row.title,
     description: row.description,
     risk: row.risk,
+    capability: row.capability,
     status: row.status,
     createdAt: row.created_at
   };

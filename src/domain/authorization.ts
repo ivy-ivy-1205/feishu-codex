@@ -1,4 +1,4 @@
-import type { MeetingTodoDraft } from './meeting.js';
+import type { MeetingTodoDraft, TodoCapability } from './meeting.js';
 
 export const highRiskCapabilities = [
   'code_write',
@@ -9,6 +9,7 @@ export const highRiskCapabilities = [
 ] as const;
 
 export type HighRiskCapability = typeof highRiskCapabilities[number];
+export const safeTodoCapabilities = ['content_draft'] as const satisfies readonly TodoCapability[];
 
 export type ReplyDecision =
   | TodoReplyDecision<'authorize_low_risk'>
@@ -43,10 +44,9 @@ export interface ReplyTodo extends MeetingTodoDraft {
 
 export function requiresHighRiskConfirmation(input: {
   risk: 'low' | 'high';
-  capability?: string;
+  capability?: unknown;
 }): boolean {
-  return input.risk === 'high' || (
-    input.capability !== undefined &&
-    highRiskCapabilities.some((capability) => capability === input.capability)
+  return input.risk !== 'low' || !safeTodoCapabilities.some(
+    (capability) => capability === input.capability
   );
 }

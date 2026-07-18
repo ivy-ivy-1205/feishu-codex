@@ -50,6 +50,7 @@ export async function processMinuteJob(
             title: todo.title,
             description: todo.description,
             risk: todo.risk,
+            capability: todo.capability,
             status: 'proposed' as const
           }))
         });

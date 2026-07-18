@@ -31,17 +31,20 @@ const summaryDraft: MeetingSummaryDraft = {
     {
       title: '整理核心信息',
       description: '整理本次会议的三条核心信息',
-      risk: 'low'
+      risk: 'low',
+      capability: 'content_draft'
     },
     {
       title: '起草用户提示',
       description: '起草转录未就绪时的用户提示',
-      risk: 'low'
+      risk: 'low',
+      capability: 'content_draft'
     },
     {
       title: '生成验收清单',
       description: '生成 Phase 1A 验收清单',
-      risk: 'low'
+      risk: 'low',
+      capability: 'content_draft'
     }
   ]
 };

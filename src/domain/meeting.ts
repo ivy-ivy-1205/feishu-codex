@@ -1,6 +1,15 @@
 import { z } from 'zod';
 
 export const todoRiskSchema = z.enum(['low', 'high']);
+export const todoCapabilitySchema = z.enum([
+  'unknown',
+  'content_draft',
+  'code_write',
+  'external_message',
+  'deploy',
+  'delete',
+  'production_access'
+]);
 export const todoStatusSchema = z.enum([
   'proposed',
   'authorized',
@@ -32,6 +41,7 @@ export const MeetingTodoDraft = z.object({
   title: z.string().trim().min(1),
   description: z.string().trim().min(1),
   risk: todoRiskSchema,
+  capability: todoCapabilitySchema,
   status: todoStatusSchema.default('proposed')
 });
 
@@ -46,4 +56,5 @@ export const MeetingSummaryDraft = z.object({
 export type MinuteGeneratedEvent = z.infer<typeof MinuteGeneratedEvent>;
 export type TranscriptSegment = z.infer<typeof TranscriptSegment>;
 export type MeetingTodoDraft = z.infer<typeof MeetingTodoDraft>;
+export type TodoCapability = z.infer<typeof todoCapabilitySchema>;
 export type MeetingSummaryDraft = z.infer<typeof MeetingSummaryDraft>;

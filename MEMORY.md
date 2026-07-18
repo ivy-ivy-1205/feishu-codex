@@ -62,6 +62,7 @@
 - Phase 1A Task 3 的妙记接收把事件插入、minute 去重和 `process_minute` durable job 写入放在同一 SQLite transaction；job 的稳定键为 `minute:<minuteId>`，并要求两个 repository 共用同一 SQLite client。
 - Phase 1A Task 3 的 SQLite migration 需要兼容 Task 2 旧版 `batch_jobs`：检测缺失 `stable_key` 后在 transaction 内重建表、保留所有旧 job，并用 `legacy:<id>` 回填唯一稳定键后再建立唯一索引。
 - Phase 1A Task 4 的 meeting worker 复用 `batch_jobs.updated_at` 表示下一次可执行时间或 60 秒 lease 到期时间；所有 ownership、persist 和状态 CAS 都要求相同决策时间满足 `leaseExpiresAt > now`，防止已到期但尚未被 reclaim 的 worker 落库。summary/Todos 与稳定键 `minute-summary:<minuteId>` 的 outbox 在同一 transaction 写入，delivery ack 再以单一 transaction 把真实消息 ID 绑定到 summary 并标记 outbox delivered，使回复能恢复 Todo；`meeting_summaries.minute_id` 唯一约束保证同一妙记只生成一次。
+- Phase 1A Task 6 的授权采用 capability fail-closed：Todo capability 是数据库持久化闭集，旧记录回填 `unknown`；只有明确安全的 `content_draft` 且 risk 为 low 才能直接授权，缺失、未知、risk high 或代码写入/外发消息/部署/删除/生产访问一律进入二次确认。回复 lookup 还必须关联同一 minute 的 `minute-summary` outbox，且只有 delivery ack 后 `status=delivered` 并存在 `delivered_at` 才能解析 Todo，不能把 `om_` 字符串格式当成投递证明。
 
 ## Phase 0 Preflight 结果
 

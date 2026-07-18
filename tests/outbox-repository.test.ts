@@ -65,6 +65,7 @@ function createDeliveryHarness() {
       title: '确认 reply lookup',
       description: '使用真实消息 ID 恢复 Todo',
       risk: 'low',
+      capability: 'content_draft',
       status: 'proposed'
     }]
   });
@@ -79,7 +80,8 @@ function createDeliveryHarness() {
     todos: [{
       title: '确认 reply lookup',
       description: '使用真实消息 ID 恢复 Todo',
-      risk: 'low'
+      risk: 'low',
+      capability: 'content_draft'
     }]
   });
 

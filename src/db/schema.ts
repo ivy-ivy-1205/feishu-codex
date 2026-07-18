@@ -31,6 +31,17 @@ export const meetingTodos = sqliteTable('meeting_todos', {
   title: text('title').notNull(),
   description: text('description').notNull(),
   risk: text('risk', { enum: ['low', 'high'] }).notNull(),
+  capability: text('capability', {
+    enum: [
+      'unknown',
+      'content_draft',
+      'code_write',
+      'external_message',
+      'deploy',
+      'delete',
+      'production_access'
+    ]
+  }).notNull().default('unknown'),
   status: text('status', {
     enum: ['proposed', 'authorized', 'running', 'completed', 'failed', 'needs_confirmation']
   }).notNull().default('proposed'),
@@ -38,6 +49,10 @@ export const meetingTodos = sqliteTable('meeting_todos', {
 }, (table) => [
   check('meeting_todos_displayed_number_positive', sql`${table.displayedNumber} > 0`),
   check('meeting_todos_risk_allowed', sql`${table.risk} IN ('low', 'high')`),
+  check(
+    'meeting_todos_capability_allowed',
+    sql`${table.capability} IN ('unknown', 'content_draft', 'code_write', 'external_message', 'deploy', 'delete', 'production_access')`
+  ),
   check(
     'meeting_todos_status_allowed',
     sql`${table.status} IN ('proposed', 'authorized', 'running', 'completed', 'failed', 'needs_confirmation')`

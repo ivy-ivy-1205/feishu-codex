@@ -31,6 +31,7 @@ const migrationSql = `
     title TEXT NOT NULL,
     description TEXT NOT NULL,
     risk TEXT NOT NULL CONSTRAINT meeting_todos_risk_allowed CHECK(risk IN ('low', 'high')),
+    capability TEXT NOT NULL DEFAULT 'unknown' CONSTRAINT meeting_todos_capability_allowed CHECK(capability IN ('unknown', 'content_draft', 'code_write', 'external_message', 'deploy', 'delete', 'production_access')),
     status TEXT NOT NULL DEFAULT 'proposed' CONSTRAINT meeting_todos_status_allowed CHECK(status IN ('proposed', 'authorized', 'running', 'completed', 'failed', 'needs_confirmation')),
     created_at TEXT NOT NULL,
     UNIQUE(summary_id, displayed_number)
@@ -72,6 +73,20 @@ export function migrateDatabase(client: Database.Database): void {
   migrateLegacyBatchJobs(client);
   client.exec(migrationSql);
   migrateOutboxDeliveryColumn(client);
+  migrateTodoCapabilityColumn(client);
+}
+
+function migrateTodoCapabilityColumn(client: Database.Database): void {
+  const columns = client.prepare('PRAGMA table_info(meeting_todos)').all() as TableColumn[];
+  if (columns.some((column) => column.name === 'capability')) {
+    return;
+  }
+  client.exec(`
+    ALTER TABLE meeting_todos
+    ADD COLUMN capability TEXT NOT NULL DEFAULT 'unknown'
+      CONSTRAINT meeting_todos_capability_allowed
+      CHECK(capability IN ('unknown', 'content_draft', 'code_write', 'external_message', 'deploy', 'delete', 'production_access'))
+  `);
 }
 
 function migrateOutboxDeliveryColumn(client: Database.Database): void {

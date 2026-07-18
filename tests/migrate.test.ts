@@ -76,4 +76,38 @@ describe('migrateDatabase', () => {
       delivered_at: null
     });
   });
+
+  it('backfills legacy Todos to an explicit fail-closed capability', () => {
+    const database = createSqliteDatabase(':memory:');
+    database.client.exec(`
+      CREATE TABLE meeting_todos (
+        id TEXT PRIMARY KEY,
+        summary_id TEXT NOT NULL,
+        displayed_number INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        risk TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'proposed',
+        created_at TEXT NOT NULL,
+        UNIQUE(summary_id, displayed_number)
+      );
+
+      INSERT INTO meeting_todos (
+        id, summary_id, displayed_number, title, description, risk, status, created_at
+      ) VALUES (
+        'todo_legacy_1', 'summary_legacy_1', 1, '旧任务', '没有能力分类', 'low',
+        'proposed', '2026-07-18T00:00:00.000Z'
+      );
+    `);
+
+    migrateDatabase(database.client);
+
+    expect(database.client.prepare(`
+      SELECT id, capability FROM meeting_todos WHERE id = 'todo_legacy_1'
+    `).get()).toEqual({ id: 'todo_legacy_1', capability: 'unknown' });
+    expect(() => database.client.prepare(`
+      UPDATE meeting_todos SET capability = 'invented_capability'
+      WHERE id = 'todo_legacy_1'
+    `).run()).toThrow(/CHECK constraint failed/);
+  });
 });

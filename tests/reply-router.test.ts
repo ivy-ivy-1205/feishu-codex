@@ -3,6 +3,7 @@ import {
   highRiskCapabilities,
   requiresHighRiskConfirmation
 } from '../src/domain/authorization.js';
+import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { createTestMeetingRepository } from './helpers/test-db.js';
 import { routeReply, type ReplyRouterDependencies } from '../src/services/reply-router.js';
 
@@ -92,9 +93,34 @@ describe('routeReply', () => {
     expect(decision).toMatchObject({
       kind: 'require_high_risk_confirmation',
       todoId: 'todo_a_2',
-      todo: { risk: 'high' }
+      todo: { capability: 'external_message' }
     });
     expect(decision.kind).not.toBe('authorize_low_risk');
+  });
+
+  it('requires confirmation when capability is unknown or risk remains high', () => {
+    const harness = createHarness();
+
+    expect(harness.route({
+      chatId: ivyPrivateChatId,
+      openId: ivyOpenId,
+      replyTo: 'om_summary_a',
+      text: '先干 5'
+    })).toMatchObject({
+      kind: 'require_high_risk_confirmation',
+      todoId: 'todo_a_5',
+      todo: { capability: 'unknown' }
+    });
+    expect(harness.route({
+      chatId: ivyPrivateChatId,
+      openId: ivyOpenId,
+      replyTo: 'om_summary_a',
+      text: '先干 6'
+    })).toMatchObject({
+      kind: 'require_high_risk_confirmation',
+      todoId: 'todo_a_6',
+      todo: { risk: 'high', capability: 'content_draft' }
+    });
   });
 
   it('rejects a command outside the configured Ivy private chat', () => {
@@ -158,7 +184,38 @@ describe('routeReply', () => {
     }).kind).toBe('clarify');
   });
 
-  it('clarifies unknown, undelivered, or non-command reply contexts', () => {
+  it('clarifies arbitrary om_ summaries that have no delivered outbox evidence', () => {
+    const harness = createHarness();
+    seedUntrustedSummary(harness.dependencies.meetingRepository, {
+      minuteId: 'min_direct',
+      eventId: 'evt_direct',
+      summaryId: 'summary_direct',
+      summaryMessageId: 'om_direct_only',
+      enqueueOutbox: false
+    });
+    seedUntrustedSummary(harness.dependencies.meetingRepository, {
+      minuteId: 'min_undelivered',
+      eventId: 'evt_undelivered',
+      summaryId: 'summary_undelivered',
+      summaryMessageId: 'om_undelivered',
+      enqueueOutbox: true
+    });
+
+    expect(harness.route({
+      chatId: ivyPrivateChatId,
+      openId: ivyOpenId,
+      replyTo: 'om_direct_only',
+      text: '先干 1'
+    }).kind).toBe('clarify');
+    expect(harness.route({
+      chatId: ivyPrivateChatId,
+      openId: ivyOpenId,
+      replyTo: 'om_undelivered',
+      text: '先干 1'
+    }).kind).toBe('clarify');
+  });
+
+  it('clarifies unknown, pending, or non-command reply contexts', () => {
     const harness = createHarness();
 
     expect(harness.route({
@@ -183,12 +240,15 @@ describe('routeReply', () => {
 });
 
 describe('requiresHighRiskConfirmation', () => {
-  it('treats every external-effect capability as high risk', () => {
+  it('allows only the explicit safe capability and fails closed otherwise', () => {
     for (const capability of highRiskCapabilities) {
       expect(requiresHighRiskConfirmation({ risk: 'low', capability })).toBe(true);
     }
-    expect(requiresHighRiskConfirmation({ risk: 'low', capability: 'content_draft' }))
-      .toBe(false);
+    expect(requiresHighRiskConfirmation({ risk: 'low' })).toBe(true);
+    expect(requiresHighRiskConfirmation({ risk: 'low', capability: 'invented_capability' }))
+      .toBe(true);
+    expect(requiresHighRiskConfirmation({ risk: 'low', capability: 'unknown' })).toBe(true);
+    expect(requiresHighRiskConfirmation({ risk: 'low', capability: 'content_draft' })).toBe(false);
     expect(requiresHighRiskConfirmation({ risk: 'high', capability: 'content_draft' }))
       .toBe(true);
   });
@@ -208,6 +268,7 @@ function createHarness(options: { approverOpenIds?: string[] } = {}) {
         title: '整理 A 的核心信息',
         description: '整理会议 A',
         risk: 'low' as const,
+        capability: 'content_draft' as const,
         status: 'proposed' as const
       },
       {
@@ -215,7 +276,8 @@ function createHarness(options: { approverOpenIds?: string[] } = {}) {
         displayedNumber: 2,
         title: '发给客户',
         description: '向客户发送会议结果',
-        risk: 'high' as const,
+        risk: 'low' as const,
+        capability: 'external_message' as const,
         status: 'proposed' as const
       },
       {
@@ -224,6 +286,7 @@ function createHarness(options: { approverOpenIds?: string[] } = {}) {
         title: '整理共享草稿',
         description: '第一份同名草稿',
         risk: 'low' as const,
+        capability: 'content_draft' as const,
         status: 'proposed' as const
       },
       {
@@ -232,6 +295,25 @@ function createHarness(options: { approverOpenIds?: string[] } = {}) {
         title: '整理共享草稿',
         description: '第二份同名草稿',
         risk: 'low' as const,
+        capability: 'content_draft' as const,
+        status: 'proposed' as const
+      },
+      {
+        id: 'todo_a_5',
+        displayedNumber: 5,
+        title: '未分类任务',
+        description: '能力分类缺失时不得直接授权',
+        risk: 'low' as const,
+        capability: 'unknown' as const,
+        status: 'proposed' as const
+      },
+      {
+        id: 'todo_a_6',
+        displayedNumber: 6,
+        title: '高风险内容任务',
+        description: '即使能力安全，风险仍需确认',
+        risk: 'high' as const,
+        capability: 'content_draft' as const,
         status: 'proposed' as const
       }
     ]
@@ -247,6 +329,7 @@ function createHarness(options: { approverOpenIds?: string[] } = {}) {
       title: '整理 B 的核心信息',
       description: '只属于会议 B',
       risk: 'low' as const,
+      capability: 'content_draft' as const,
       status: 'proposed' as const
     }]
   });
@@ -257,6 +340,7 @@ function createHarness(options: { approverOpenIds?: string[] } = {}) {
     approverOpenIds: options.approverOpenIds ?? [ivyOpenId]
   };
   return {
+    dependencies,
     route: (input: unknown) => routeReply(input, dependencies)
   };
 }
@@ -274,6 +358,8 @@ function seedMeeting(
       title: string;
       description: string;
       risk: 'low' | 'high';
+      capability: 'unknown' | 'content_draft' | 'code_write' | 'external_message' |
+        'deploy' | 'delete' | 'production_access';
       status: 'proposed';
     }>;
   }
@@ -282,8 +368,75 @@ function seedMeeting(
   meetingRepository.saveSummary({
     id: input.summaryId,
     minuteId: input.minuteId,
-    summaryMessageId: input.summaryMessageId,
+    summaryMessageId: `pending:minute-summary:${input.minuteId}`,
     content: input.summaryId,
     todos: input.todos
   });
+  const outboxRepository = new OutboxRepository(meetingRepository.client);
+  outboxRepository.enqueueMeetingSummary({
+    kind: 'ivy_meeting_summary',
+    minuteId: input.minuteId,
+    summaryId: input.summaryId,
+    targetChatId: ivyPrivateChatId,
+    coreInsights: ['测试回复绑定'],
+    confirmedDecisions: ['只授权已投递总结'],
+    risks: ['伪造 replyTo'],
+    todos: input.todos.map(({ title, description, risk, capability }) => ({
+      title,
+      description,
+      risk,
+      capability
+    }))
+  });
+  outboxRepository.acknowledgeMeetingSummaryDelivery({
+    minuteId: input.minuteId,
+    messageId: input.summaryMessageId,
+    deliveredAt: new Date('2030-07-18T04:00:00.000Z')
+  });
+}
+
+function seedUntrustedSummary(
+  meetingRepository: ReturnType<typeof createTestMeetingRepository>,
+  input: {
+    minuteId: string;
+    eventId: string;
+    summaryId: string;
+    summaryMessageId: string;
+    enqueueOutbox: boolean;
+  }
+): void {
+  meetingRepository.ingestMinute({ minuteId: input.minuteId, eventId: input.eventId });
+  const todo = {
+    id: `todo:${input.minuteId}:1`,
+    displayedNumber: 1,
+    title: '不可信任务',
+    description: '不能只相信 om_ 格式',
+    risk: 'low' as const,
+    capability: 'content_draft' as const,
+    status: 'proposed' as const
+  };
+  meetingRepository.saveSummary({
+    id: input.summaryId,
+    minuteId: input.minuteId,
+    summaryMessageId: input.summaryMessageId,
+    content: input.summaryId,
+    todos: [todo]
+  });
+  if (input.enqueueOutbox) {
+    new OutboxRepository(meetingRepository.client).enqueueMeetingSummary({
+      kind: 'ivy_meeting_summary',
+      minuteId: input.minuteId,
+      summaryId: input.summaryId,
+      targetChatId: ivyPrivateChatId,
+      coreInsights: ['尚未投递'],
+      confirmedDecisions: ['不能授权'],
+      risks: ['伪造消息 ID'],
+      todos: [{
+        title: todo.title,
+        description: todo.description,
+        risk: todo.risk,
+        capability: todo.capability
+      }]
+    });
+  }
 }
