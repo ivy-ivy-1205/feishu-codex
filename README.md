@@ -35,6 +35,8 @@ pnpm typecheck
 
 完整的环境、fixture、数据库重置和本地服务说明见 [docs/local-development.md](docs/local-development.md)。
 
+本地 `pnpm dev` 会先加载仓库根目录的 `.env`，并只为配置的 SQLite 文件创建其精确父目录；测试使用的 `:memory:` 模式不触碰文件系统目录。
+
 ## Phase 1A 明确不做
 
 - 不调用飞书 API，不校验真实飞书签名或解密真实事件，不发送真实私聊消息。

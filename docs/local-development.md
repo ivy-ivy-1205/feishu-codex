@@ -32,6 +32,8 @@ pnpm install --frozen-lockfile
 cp .env.example .env
 ```
 
+`pnpm dev` 使用 Node 的 `--env-file=.env` 在加载 `src/server.ts` 前读取该文件；缺少 `.env` 时会直接失败，而不会带着不完整配置启动。
+
 `.env.example` 中的 app ID、secret、verification token 和 encrypt key 只是本地占位值，不能用于真实飞书。私聊 `chat_id` 是消息目的地，不是 Ivy 身份；`FEISHU_APPROVER_OPEN_IDS` 保持空值时，reply router 只会返回 `identify_ivy`，不会授权。
 
 Phase 1A 测试直接注入依赖，不从 `.env` 读取真实凭据。不要把真实 secret、Codex 登录信息或客户数据库连接写入仓库。
@@ -75,14 +77,13 @@ rg -n "OPENAI_API_KEY|danger-full-access|docker push|kubectl|aws_|production" sr
 
 自动化测试使用 `:memory:`，每次运行都是新数据库，无需清理。若运行本地进程，默认持久化文件是 `data/aijia-context-bridge.sqlite`。
 
-需要重置时先停止进程，再把旧库移动成可恢复备份：
+启动时会在 SQLite 文件模式下递归创建配置文件的精确父目录；不会为 `:memory:` 创建目录，也不会删除或清空任何已有路径。需要重置时先停止进程，再把旧库移动成可恢复备份：
 
 ```sh
-mkdir -p data
 mv data/aijia-context-bridge.sqlite data/aijia-context-bridge.sqlite.backup
 ```
 
-文件不存在时无需执行移动。下次启动会重新建表。确认备份不再需要前不要删除它。
+文件或父目录不存在时无需手工创建或执行移动。下次启动会安全创建父目录并重新建表。确认备份不再需要前不要删除它。
 
 ## 本地 HTTP 服务的真实边界
 

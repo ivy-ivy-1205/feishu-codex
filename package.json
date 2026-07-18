@@ -7,7 +7,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "dev": "tsx src/server.ts"
+    "dev": "node --env-file=.env --import tsx src/server.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",

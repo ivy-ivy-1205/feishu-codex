@@ -235,6 +235,39 @@ describe('processMinuteJob', () => {
     expect(row.payload).not.toContain('secret transcript');
     expect(readResult(harness.client).outbox).toHaveLength(0);
   });
+
+  it('permanently fails a renderer-rejected capability without partial writes', async () => {
+    const harness = createHarness({
+      summary: {
+        ...summaryDraft,
+        todos: [
+          {
+            ...summaryDraft.todos[0]!,
+            title: '未知能力任务',
+            capability: 'unknown'
+          },
+          ...summaryDraft.todos.slice(1)
+        ]
+      }
+    });
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+
+    const row = harness.client.prepare(`
+      SELECT status, payload FROM batch_jobs WHERE stable_key = ?
+    `).get(harness.job.key) as { status: string; payload: string };
+    expect(row.status).toBe('failed');
+    expect(JSON.parse(row.payload)).toMatchObject({
+      minuteId: minuteFixture.minuteId,
+      failureReason: 'SUMMARY_RENDER_INVALID'
+    });
+    expect(row.payload).not.toContain('未知能力任务');
+    expect(readResult(harness.client)).toMatchObject({
+      summaryCount: 0,
+      todoCount: 0,
+      outboxCount: 0
+    });
+  });
 });
 
 function createHarness(options: {

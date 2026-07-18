@@ -2,6 +2,15 @@ import type { TodoCapability } from '../domain/meeting.js';
 
 const messageSizeLimitBytes = 28_000;
 
+export class MeetingSummaryRenderError extends Error {
+  readonly code = 'SUMMARY_RENDER_INVALID';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'MeetingSummaryRenderError';
+  }
+}
+
 export interface MeetingSummaryRenderInput {
   title: string;
   startedAt: string;
@@ -22,7 +31,7 @@ export function renderMeetingSummary(
   todos: readonly MeetingTodoRenderInput[]
 ): string {
   if (summary.coreInsights.length === 0) {
-    throw new Error('core insights must not be empty');
+    throw new MeetingSummaryRenderError('core insights must not be empty');
   }
   const title = normalizeLine(summary.title, 'meeting title');
   const startedAt = normalizeLine(summary.startedAt, 'meeting start time');
@@ -35,17 +44,21 @@ export function renderMeetingSummary(
   );
   const risks = summary.risks.map((risk) => normalizeLine(risk, 'risk'));
   if (todos.length > 5) {
-    throw new Error('meeting summary can contain at most five Todo items');
+    throw new MeetingSummaryRenderError(
+      'meeting summary can contain at most five Todo items'
+    );
   }
   if (todos.some((todo) => (
     todo.capability === 'human_only' || todo.capability === 'unknown'
   ))) {
-    throw new Error('unknown or human_only capability cannot be offered as executable');
+    throw new MeetingSummaryRenderError(
+      'unknown or human_only capability cannot be offered as executable'
+    );
   }
 
   const displayedNumbers = todos.map((todo) => todo.displayedNumber);
   if (new Set(displayedNumbers).size !== displayedNumbers.length) {
-    throw new Error('Todo displayed numbers must be unique');
+    throw new MeetingSummaryRenderError('Todo displayed numbers must be unique');
   }
 
   const sortedTodos = [...todos].sort(
@@ -71,7 +84,9 @@ export function renderMeetingSummary(
   ].join('\n');
 
   if (Buffer.byteLength(text, 'utf8') >= messageSizeLimitBytes) {
-    throw new Error('meeting summary exceeds the 28,000-byte safety limit');
+    throw new MeetingSummaryRenderError(
+      'meeting summary exceeds the 28,000-byte safety limit'
+    );
   }
   return text;
 }
@@ -82,7 +97,7 @@ function normalizeLine(value: string, label: string): string {
     .replace(/\s+/gu, ' ')
     .trim();
   if (!normalized) {
-    throw new Error(`${label} must not be empty`);
+    throw new MeetingSummaryRenderError(`${label} must not be empty`);
   }
   return normalized;
 }

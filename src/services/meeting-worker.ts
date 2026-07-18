@@ -7,7 +7,10 @@ import {
 import { JobRepository, type DurableJob } from '../repositories/job-repository.js';
 import { MeetingRepository } from '../repositories/meeting-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
-import { renderMeetingSummary } from './summary-renderer.js';
+import {
+  MeetingSummaryRenderError,
+  renderMeetingSummary
+} from './summary-renderer.js';
 
 const maximumRetryDelayMs = 60_000;
 
@@ -108,6 +111,12 @@ export async function processMinuteJob(
         'SUMMARIZER_OUTPUT_INVALID',
         operationNow
       );
+      return 'completed';
+    }
+
+    if (error instanceof MeetingSummaryRenderError) {
+      const operationNow = now();
+      dependencies.jobRepository.markFailed(job, error.code, operationNow);
       return 'completed';
     }
 
