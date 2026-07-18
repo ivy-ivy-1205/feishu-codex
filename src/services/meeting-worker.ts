@@ -7,6 +7,7 @@ import {
 import { JobRepository, type DurableJob } from '../repositories/job-repository.js';
 import { MeetingRepository } from '../repositories/meeting-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
+import { renderMeetingSummary } from './summary-renderer.js';
 
 const maximumRetryDelayMs = 60_000;
 
@@ -31,6 +32,24 @@ export async function processMinuteJob(
     const context = MinuteContext.parse(await dependencies.reader.getMinute(job.minuteId));
     const draft = MeetingSummaryDraft.parse(await dependencies.summarizer.summarize(context));
     const summaryId = `summary:${job.minuteId}`;
+    const meeting = {
+      title: context.title,
+      startedAt: context.startedAt,
+      endedAt: context.endedAt
+    };
+    const body = renderMeetingSummary(
+      {
+        ...meeting,
+        coreInsights: draft.coreInsights,
+        confirmedDecisions: draft.confirmedDecisions,
+        risks: draft.risks
+      },
+      draft.todos.map((todo, index) => ({
+        displayedNumber: index + 1,
+        title: todo.title,
+        capability: todo.capability
+      }))
+    );
     const operationNow = now();
 
     const persisted = dependencies.meetingRepository.client.transaction(() => {
@@ -61,6 +80,8 @@ export async function processMinuteJob(
         minuteId: job.minuteId,
         summaryId,
         targetChatId: dependencies.targetChatId,
+        meeting,
+        body,
         ...draft
       });
       return true;

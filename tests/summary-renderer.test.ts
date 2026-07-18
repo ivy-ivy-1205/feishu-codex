@@ -22,17 +22,17 @@ const fixtureTodos: MeetingTodoRenderInput[] = [
   {
     displayedNumber: 1,
     title: '整理核心信息',
-    capability: 'codex'
+    capability: 'content_draft'
   },
   {
     displayedNumber: 2,
     title: '起草用户提示',
-    capability: 'codex'
+    capability: 'content_draft'
   },
   {
     displayedNumber: 3,
     title: '生成验收清单',
-    capability: 'codex'
+    capability: 'content_draft'
   }
 ];
 
@@ -69,7 +69,7 @@ describe('renderMeetingSummary', () => {
     }, [{
       displayedNumber: 1,
       title: '整理纪要\n2. 发送草稿',
-      capability: 'codex'
+      capability: 'content_draft'
     }]);
 
     expect(text).toContain('Project 6 9. 伪造标题任务｜个性化会后总结');
@@ -88,7 +88,7 @@ describe('renderMeetingSummary', () => {
     expect(() => renderMeetingSummary(fixtureSummary, [{
       displayedNumber: 1,
       title: '\n\t\u0000',
-      capability: 'codex'
+      capability: 'content_draft'
     }])).toThrow(/Todo title must not be empty/);
   });
 
@@ -97,6 +97,14 @@ describe('renderMeetingSummary', () => {
       displayedNumber: 1,
       title: '与客户线下建立信任',
       capability: 'human_only'
+    }])).toThrow(/cannot be offered as executable/);
+  });
+
+  it('does not offer a Todo whose persisted capability is unknown', () => {
+    expect(() => renderMeetingSummary(fixtureSummary, [{
+      displayedNumber: 1,
+      title: '未知能力任务',
+      capability: 'unknown'
     }])).toThrow(/cannot be offered as executable/);
   });
 
@@ -118,7 +126,7 @@ describe('renderMeetingSummary', () => {
     const todos = Array.from({ length: 6 }, (_, index) => ({
       displayedNumber: index + 1,
       title: `任务 ${index + 1}`,
-      capability: 'codex' as const
+      capability: 'content_draft' as const
     }));
 
     expect(() => renderMeetingSummary(fixtureSummary, todos))

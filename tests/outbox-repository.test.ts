@@ -74,6 +74,12 @@ function createDeliveryHarness() {
     minuteId: 'min_delivery_1',
     summaryId: 'summary_delivery_1',
     targetChatId: 'oc_fixture_ivy',
+    meeting: {
+      title: 'Delivery ack fixture',
+      startedAt: '2030-07-18T03:00:00.000Z',
+      endedAt: '2030-07-18T03:30:00.000Z'
+    },
+    body: 'Delivery ack fixture body',
     coreInsights: ['测试 delivery ack'],
     confirmedDecisions: ['保存真实消息 ID'],
     risks: ['重复回调'],

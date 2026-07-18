@@ -1,3 +1,5 @@
+import type { TodoCapability } from '../domain/meeting.js';
+
 const messageSizeLimitBytes = 28_000;
 
 export interface MeetingSummaryRenderInput {
@@ -12,7 +14,7 @@ export interface MeetingSummaryRenderInput {
 export interface MeetingTodoRenderInput {
   displayedNumber: number;
   title: string;
-  capability: 'codex' | 'human_only';
+  capability: TodoCapability | 'human_only';
 }
 
 export function renderMeetingSummary(
@@ -35,8 +37,10 @@ export function renderMeetingSummary(
   if (todos.length > 5) {
     throw new Error('meeting summary can contain at most five Todo items');
   }
-  if (todos.some((todo) => todo.capability === 'human_only')) {
-    throw new Error('human_only capability cannot be offered as executable');
+  if (todos.some((todo) => (
+    todo.capability === 'human_only' || todo.capability === 'unknown'
+  ))) {
+    throw new Error('unknown or human_only capability cannot be offered as executable');
   }
 
   const displayedNumbers = todos.map((todo) => todo.displayedNumber);

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import type { MinuteContext } from '../ports/feishu.js';
 import type { MeetingSummaryDraft } from '../ports/summarizer.js';
 
 export interface IvyMeetingSummaryMessage extends MeetingSummaryDraft {
@@ -6,6 +7,8 @@ export interface IvyMeetingSummaryMessage extends MeetingSummaryDraft {
   minuteId: string;
   summaryId: string;
   targetChatId: string;
+  meeting: Pick<MinuteContext, 'title' | 'startedAt' | 'endedAt'>;
+  body: string;
 }
 
 export interface MeetingSummaryDeliveryAcknowledgement {

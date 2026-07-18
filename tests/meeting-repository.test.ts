@@ -154,6 +154,12 @@ function deliverSummary(
     minuteId: input.minuteId,
     summaryId: input.summaryId,
     targetChatId: 'oc_fixture_ivy',
+    meeting: {
+      title: input.title,
+      startedAt: '2030-07-18T00:00:00.000Z',
+      endedAt: '2030-07-18T00:30:00.000Z'
+    },
+    body: input.title,
     coreInsights: ['测试作用域'],
     confirmedDecisions: ['只接受已投递消息'],
     risks: ['跨会议编号'],

@@ -329,6 +329,12 @@ function seedDeliveredTodo(meetingRepository: MeetingRepository): void {
     minuteId: 'min_http',
     summaryId: 'summary_http',
     targetChatId: privateChatId,
+    meeting: {
+      title: 'HTTP 路由授权测试',
+      startedAt: '2030-07-18T05:00:00.000Z',
+      endedAt: '2030-07-18T05:30:00.000Z'
+    },
+    body: 'HTTP 路由授权测试 fixture',
     coreInsights: ['HTTP 路由只能返回授权 decision'],
     confirmedDecisions: ['不执行 Todo'],
     risks: ['身份或回复上下文不匹配必须拒绝'],
