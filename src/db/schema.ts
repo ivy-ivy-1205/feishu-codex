@@ -48,11 +48,14 @@ export const meetingTodos = sqliteTable('meeting_todos', {
 export const batchJobs = sqliteTable('batch_jobs', {
   id: text('id').primaryKey(),
   type: text('type').notNull(),
+  stableKey: text('stable_key').notNull(),
   payload: text('payload').notNull(),
   status: text('status').notNull().default('queued'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull()
-});
+}, (table) => [
+  uniqueIndex('batch_jobs_stable_key_unique').on(table.stableKey)
+]);
 
 export const outbox = sqliteTable('outbox', {
   id: text('id').primaryKey(),

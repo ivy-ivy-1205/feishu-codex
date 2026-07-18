@@ -19,10 +19,18 @@ export interface IngestMinuteInput {
   eventId: string;
 }
 
-export class MeetingRepository {
-  constructor(private readonly client: Database.Database) {}
+export interface IngestMinuteResult {
+  created: boolean;
+  minuteId: string;
+}
 
-  ingestMinute(input: IngestMinuteInput): { created: boolean; minuteId: string } {
+export class MeetingRepository {
+  constructor(readonly client: Database.Database) {}
+
+  ingestMinute(
+    input: IngestMinuteInput,
+    onMinuteCreated?: () => void
+  ): IngestMinuteResult {
     const now = new Date().toISOString();
     const ingest = this.client.transaction(() => {
       const event = this.client.prepare(`
@@ -41,7 +49,14 @@ export class MeetingRepository {
         ON CONFLICT(minute_id) DO NOTHING
       `).run(input.minuteId, input.eventId, now);
 
-      return { created: minute.changes === 1, minuteId: input.minuteId };
+      if (minute.changes === 1) {
+        onMinuteCreated?.();
+      }
+
+      return {
+        created: minute.changes === 1,
+        minuteId: input.minuteId
+      };
     });
 
     return ingest();

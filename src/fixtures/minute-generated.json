@@ -1,0 +1,13 @@
+{
+  "schema": "2.0",
+  "header": {
+    "event_id": "evt_minute_1",
+    "event_type": "minutes.minute.generated_v1",
+    "create_time": "2026-07-18T00:00:00.000Z"
+  },
+  "event": {
+    "minute": {
+      "minute_token": "min_fixture_1"
+    }
+  }
+}

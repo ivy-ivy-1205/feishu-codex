@@ -36,11 +36,15 @@ const migrationSql = `
   CREATE TABLE IF NOT EXISTS batch_jobs (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
+    stable_key TEXT NOT NULL,
     payload TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'queued',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS batch_jobs_stable_key_unique
+    ON batch_jobs(stable_key);
 
   CREATE TABLE IF NOT EXISTS outbox (
     id TEXT PRIMARY KEY,
