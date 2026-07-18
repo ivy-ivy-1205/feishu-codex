@@ -65,5 +65,50 @@ const migrationSql = `
 `;
 
 export function migrateDatabase(client: Database.Database): void {
+  migrateLegacyBatchJobs(client);
   client.exec(migrationSql);
+}
+
+function migrateLegacyBatchJobs(client: Database.Database): void {
+  const table = client.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'batch_jobs'
+  `).get();
+  if (!table) {
+    return;
+  }
+
+  const columns = client.prepare('PRAGMA table_info(batch_jobs)').all() as TableColumn[];
+  if (columns.some((column) => column.name === 'stable_key')) {
+    return;
+  }
+
+  client.transaction(() => {
+    client.exec(`
+      ALTER TABLE batch_jobs RENAME TO batch_jobs_legacy;
+
+      CREATE TABLE batch_jobs (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        stable_key TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT INTO batch_jobs (
+        id, type, stable_key, payload, status, created_at, updated_at
+      )
+      SELECT id, type, 'legacy:' || id, payload, status, created_at, updated_at
+      FROM batch_jobs_legacy;
+
+      DROP TABLE batch_jobs_legacy;
+    `);
+  })();
+}
+
+interface TableColumn {
+  name: string;
 }

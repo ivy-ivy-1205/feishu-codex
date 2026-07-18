@@ -60,6 +60,7 @@
 - 低风险内容工作可将 Ivy 的自然语言回复视为直接授权；高风险外部变更仍需明确影响说明与二次确认。
 - 私聊 `oc_d851c3e986007dc0f97ab582bcb2e7c8` 是会议总结默认目的地，不自动向会议项目群发布。
 - Phase 1A Task 3 的妙记接收把事件插入、minute 去重和 `process_minute` durable job 写入放在同一 SQLite transaction；job 的稳定键为 `minute:<minuteId>`，并要求两个 repository 共用同一 SQLite client。
+- Phase 1A Task 3 的 SQLite migration 需要兼容 Task 2 旧版 `batch_jobs`：检测缺失 `stable_key` 后在 transaction 内重建表、保留所有旧 job，并用 `legacy:<id>` 回填唯一稳定键后再建立唯一索引。
 
 ## Phase 0 Preflight 结果
 
