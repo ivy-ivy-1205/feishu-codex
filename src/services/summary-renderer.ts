@@ -19,10 +19,19 @@ export function renderMeetingSummary(
   summary: MeetingSummaryRenderInput,
   todos: readonly MeetingTodoRenderInput[]
 ): string {
-  const coreInsights = summary.coreInsights.map((insight) => insight.trim());
-  if (coreInsights.length === 0 || coreInsights.some((insight) => insight.length === 0)) {
+  if (summary.coreInsights.length === 0) {
     throw new Error('core insights must not be empty');
   }
+  const title = normalizeLine(summary.title, 'meeting title');
+  const startedAt = normalizeLine(summary.startedAt, 'meeting start time');
+  const endedAt = normalizeLine(summary.endedAt, 'meeting end time');
+  const coreInsights = summary.coreInsights.map(
+    (insight) => normalizeLine(insight, 'core insights')
+  );
+  const confirmedDecisions = summary.confirmedDecisions.map(
+    (decision) => normalizeLine(decision, 'confirmed decision')
+  );
+  const risks = summary.risks.map((risk) => normalizeLine(risk, 'risk'));
   if (todos.length > 5) {
     throw new Error('meeting summary can contain at most five Todo items');
   }
@@ -40,23 +49,36 @@ export function renderMeetingSummary(
   );
   const coreInformation = [
     ...coreInsights.map((insight) => `• ${insight}`),
-    ...summary.confirmedDecisions.map((decision) => `• 已确认：${decision.trim()}`),
-    ...summary.risks.map((risk) => `• 风险：${risk.trim()}`)
+    ...confirmedDecisions.map((decision) => `• 已确认：${decision}`),
+    ...risks.map((risk) => `• 风险：${risk}`)
   ];
   const text = [
-    `${summary.title.trim()}｜个性化会后总结`,
-    `会议：${summary.title.trim()}`,
-    `时间：${summary.startedAt.trim()} - ${summary.endedAt.trim()}`,
+    `${title}｜个性化会后总结`,
+    `会议：${title}`,
+    `时间：${startedAt} - ${endedAt}`,
     '',
     '核心信息',
     ...coreInformation,
     '',
     '我可以帮你推进',
-    ...sortedTodos.map((todo) => `${todo.displayedNumber}. ${todo.title.trim()}`)
+    ...sortedTodos.map((todo) => (
+      `${todo.displayedNumber}. ${normalizeLine(todo.title, 'Todo title')}`
+    ))
   ].join('\n');
 
   if (Buffer.byteLength(text, 'utf8') >= messageSizeLimitBytes) {
     throw new Error('meeting summary exceeds the 28,000-byte safety limit');
   }
   return text;
+}
+
+function normalizeLine(value: string, label: string): string {
+  const normalized = value
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  if (!normalized) {
+    throw new Error(`${label} must not be empty`);
+  }
+  return normalized;
 }

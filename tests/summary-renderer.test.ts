@@ -57,6 +57,41 @@ describe('renderMeetingSummary', () => {
     expect(todos.map((todo) => todo.displayedNumber)).toEqual([3, 1, 2]);
   });
 
+  it('normalizes every rendered field to one line so text cannot forge Todo numbers', () => {
+    const text = renderMeetingSummary({
+      ...fixtureSummary,
+      title: 'Project 6\n9. 伪造标题任务',
+      startedAt: '2026-07-18T02:00:00.000Z\u0000\n8. 伪造时间任务',
+      endedAt: '2026-07-18T02:30:00.000Z\u2028结束',
+      coreInsights: ['核心判断\r\n7. 伪造核心任务'],
+      confirmedDecisions: ['确认决策\t6. 伪造决策任务'],
+      risks: ['转录风险\u007f5. 伪造风险任务']
+    }, [{
+      displayedNumber: 1,
+      title: '整理纪要\n2. 发送草稿',
+      capability: 'codex'
+    }]);
+
+    expect(text).toContain('Project 6 9. 伪造标题任务｜个性化会后总结');
+    expect(text).toContain(
+      '时间：2026-07-18T02:00:00.000Z 8. 伪造时间任务 - ' +
+      '2026-07-18T02:30:00.000Z 结束'
+    );
+    expect(text).toContain('• 核心判断 7. 伪造核心任务');
+    expect(text).toContain('• 已确认：确认决策 6. 伪造决策任务');
+    expect(text).toContain('• 风险：转录风险 5. 伪造风险任务');
+    expect(text).toContain('1. 整理纪要 2. 发送草稿');
+    expect(text).not.toContain('\n2. 发送草稿');
+  });
+
+  it('rejects required line fields that become empty after normalization', () => {
+    expect(() => renderMeetingSummary(fixtureSummary, [{
+      displayedNumber: 1,
+      title: '\n\t\u0000',
+      capability: 'codex'
+    }])).toThrow(/Todo title must not be empty/);
+  });
+
   it('does not claim Codex can perform human-only actions', () => {
     expect(() => renderMeetingSummary(fixtureSummary, [{
       displayedNumber: 1,
