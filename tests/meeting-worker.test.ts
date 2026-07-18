@@ -125,8 +125,11 @@ describe('processMinuteJob', () => {
     });
   });
 
-  it('retries within budget with capped exponential backoff', async () => {
-    const harness = createHarness({ readerErrorCode: 'MINUTE_NOT_READY', attempt: 6 });
+  it('retries within its error-specific budget with capped exponential backoff', async () => {
+    const harness = createHarness({
+      readerErrorCode: 'MINUTE_NOT_READY',
+      attemptsByCode: { MINUTE_NOT_READY: 6 }
+    });
 
     expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('retry');
 
@@ -140,14 +143,20 @@ describe('processMinuteJob', () => {
   });
 
   it('fails MINUTE_NOT_READY after its finite retry budget', async () => {
-    const harness = createHarness({ readerErrorCode: 'MINUTE_NOT_READY', attempt: 7 });
+    const harness = createHarness({
+      readerErrorCode: 'MINUTE_NOT_READY',
+      attemptsByCode: { MINUTE_NOT_READY: 7 }
+    });
 
     expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
 
     expect(readJob(harness.client)).toMatchObject({
       status: 'failed',
       payload: {
-        attempt: 8,
+        attemptsByCode: {
+          MINUTE_NOT_READY: 8,
+          RATE_LIMITED: 0
+        },
         failureReason: 'MINUTE_NOT_READY_RETRY_EXHAUSTED'
       }
     });
@@ -158,20 +167,26 @@ describe('processMinuteJob', () => {
   });
 
   it('fails RATE_LIMITED after its finite retry budget', async () => {
-    const harness = createHarness({ readerErrorCode: 'RATE_LIMITED', attempt: 4 });
+    const harness = createHarness({
+      readerErrorCode: 'RATE_LIMITED',
+      attemptsByCode: { RATE_LIMITED: 4 }
+    });
 
     expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
 
     expect(readJob(harness.client)).toMatchObject({
       status: 'failed',
       payload: {
-        attempt: 5,
+        attemptsByCode: {
+          MINUTE_NOT_READY: 0,
+          RATE_LIMITED: 5
+        },
         failureReason: 'RATE_LIMITED_RETRY_EXHAUSTED'
       }
     });
   });
 
-  it('continues retry attempts after SQLite close and reopen', async () => {
+  it('keeps alternating retry budgets independent across SQLite close and reopen', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'aijia-worker-restart-'));
     const filename = join(directory, 'bridge.sqlite');
     try {
@@ -182,18 +197,34 @@ describe('processMinuteJob', () => {
       meetingRepository.ingestMinute({ minuteId: minuteFixture.minuteId, eventId: 'evt_restart' });
       jobRepository.enqueueProcessMinute(minuteFixture.minuteId);
 
-      for (let expectedAttempt = 1; expectedAttempt <= 5; expectedAttempt += 1) {
-        const availableAt = expectedAttempt === 1
+      const errorSequence = [
+        'RATE_LIMITED',
+        'MINUTE_NOT_READY',
+        'RATE_LIMITED',
+        'MINUTE_NOT_READY',
+        'RATE_LIMITED',
+        'MINUTE_NOT_READY',
+        'RATE_LIMITED',
+        'MINUTE_NOT_READY',
+        'MINUTE_NOT_READY',
+        'MINUTE_NOT_READY',
+        'MINUTE_NOT_READY'
+      ] as const;
+      let minuteNotReadyAttempts = 0;
+      let rateLimitedAttempts = 0;
+
+      for (const errorCode of errorSequence) {
+        const availableAt = minuteNotReadyAttempts + rateLimitedAttempts === 0
           ? now
           : new Date((readRawJob(database.client).updated_at));
         const job = jobRepository.leaseNextProcessMinute(availableAt);
         if (!job) {
-          throw new Error(`expected retry attempt ${expectedAttempt}`);
+          throw new Error(`expected retry for ${errorCode}`);
         }
         const result = await processMinuteJob(job, {
           reader: {
             async getMinute() {
-              throw Object.assign(new Error('rate limited'), { code: 'RATE_LIMITED' });
+              throw Object.assign(new Error('retryable reader error'), { code: errorCode });
             }
           },
           summarizer: { async summarize() { return summaryDraft; } },
@@ -203,7 +234,21 @@ describe('processMinuteJob', () => {
           targetChatId: ivyChatId,
           now: () => availableAt
         });
-        expect(result).toBe(expectedAttempt < 5 ? 'retry' : 'completed');
+        expect(result).toBe('retry');
+        if (errorCode === 'MINUTE_NOT_READY') {
+          minuteNotReadyAttempts += 1;
+        } else {
+          rateLimitedAttempts += 1;
+        }
+        expect(readJob(database.client)).toMatchObject({
+          status: 'retry',
+          payload: {
+            attemptsByCode: {
+              MINUTE_NOT_READY: minuteNotReadyAttempts,
+              RATE_LIMITED: rateLimitedAttempts
+            }
+          }
+        });
 
         database.close();
         database = createSqliteDatabase(filename);
@@ -212,9 +257,34 @@ describe('processMinuteJob', () => {
         jobRepository = new JobRepository(database.client);
       }
 
+      const finalAvailableAt = new Date(readRawJob(database.client).updated_at);
+      const finalJob = jobRepository.leaseNextProcessMinute(finalAvailableAt);
+      if (!finalJob) {
+        throw new Error('expected final RATE_LIMITED attempt');
+      }
+      expect(await processMinuteJob(finalJob, {
+        reader: {
+          async getMinute() {
+            throw Object.assign(new Error('rate limited'), { code: 'RATE_LIMITED' });
+          }
+        },
+        summarizer: { async summarize() { return summaryDraft; } },
+        meetingRepository,
+        jobRepository,
+        outboxRepository: new OutboxRepository(database.client),
+        targetChatId: ivyChatId,
+        now: () => finalAvailableAt
+      })).toBe('completed');
+
       expect(readJob(database.client)).toMatchObject({
         status: 'failed',
-        payload: { attempt: 5, failureReason: 'RATE_LIMITED_RETRY_EXHAUSTED' }
+        payload: {
+          attemptsByCode: {
+            MINUTE_NOT_READY: 7,
+            RATE_LIMITED: 5
+          },
+          failureReason: 'RATE_LIMITED_RETRY_EXHAUSTED'
+        }
       });
       expect(readResult(database.client)).toMatchObject({ summaryCount: 0, outboxCount: 0 });
       database.close();
@@ -311,7 +381,10 @@ describe('processMinuteJob', () => {
   });
 
   it('prevents an expired retry-budget worker from recording a terminal failure', async () => {
-    const harness = createHarness({ readerErrorCode: 'RATE_LIMITED', attempt: 4 });
+    const harness = createHarness({
+      readerErrorCode: 'RATE_LIMITED',
+      attemptsByCode: { RATE_LIMITED: 4 }
+    });
     harness.dependencies.now = leaseExpiryClock(harness.job);
 
     expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('lost_lease');
@@ -424,7 +497,7 @@ describe('processMinuteJob', () => {
 function createHarness(options: {
   readerErrorCode?: 'MINUTE_NOT_READY' | 'RATE_LIMITED';
   summary?: MeetingSummaryDraft;
-  attempt?: number;
+  attemptsByCode?: Partial<Record<'MINUTE_NOT_READY' | 'RATE_LIMITED', number>>;
 } = {}) {
   const database = createSqliteDatabase(':memory:');
   migrateDatabase(database.client);
@@ -433,11 +506,13 @@ function createHarness(options: {
   const outboxRepository = new OutboxRepository(database.client);
   meetingRepository.ingestMinute({ minuteId: minuteFixture.minuteId, eventId: 'evt_fixture_1' });
   jobRepository.enqueueProcessMinute(minuteFixture.minuteId);
+  if (options.attemptsByCode) {
+    harnessSetAttempts(database.client, options.attemptsByCode);
+  }
   const job = jobRepository.leaseNextProcessMinute(now);
   if (!job) {
     throw new Error('expected a leased process_minute job');
   }
-  job.attempt = options.attempt ?? job.attempt;
 
   const reader: FeishuMinutesReader = {
     async getMinute() {
@@ -466,6 +541,21 @@ function createHarness(options: {
       now: () => now
     }
   };
+}
+
+function harnessSetAttempts(
+  client: Database.Database,
+  attempts: Partial<Record<'MINUTE_NOT_READY' | 'RATE_LIMITED', number>>
+): void {
+  client.prepare(`
+    UPDATE batch_jobs SET payload = ? WHERE stable_key = ?
+  `).run(JSON.stringify({
+    minuteId: minuteFixture.minuteId,
+    attemptsByCode: {
+      MINUTE_NOT_READY: attempts.MINUTE_NOT_READY ?? 0,
+      RATE_LIMITED: attempts.RATE_LIMITED ?? 0
+    }
+  }), `minute:${minuteFixture.minuteId}`);
 }
 
 function readResult(client: Database.Database) {

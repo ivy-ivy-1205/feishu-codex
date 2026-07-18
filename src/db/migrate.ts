@@ -1,4 +1,7 @@
 import type Database from 'better-sqlite3';
+import {
+  normalizeProcessMinuteJobPayload
+} from '../repositories/job-repository.js';
 
 const migrationSql = `
   CREATE TABLE IF NOT EXISTS feishu_events (
@@ -72,8 +75,35 @@ const migrationSql = `
 export function migrateDatabase(client: Database.Database): void {
   migrateLegacyBatchJobs(client);
   client.exec(migrationSql);
+  migrateProcessMinuteRetryPayloads(client);
   migrateOutboxDeliveryColumn(client);
   migrateTodoCapabilityColumn(client);
+}
+
+function migrateProcessMinuteRetryPayloads(client: Database.Database): void {
+  const rows = client.prepare(`
+    SELECT stable_key, payload, status
+    FROM batch_jobs
+    WHERE type = 'process_minute'
+  `).all() as Array<{ stable_key: string; payload: string; status: string }>;
+  const update = client.prepare(`
+    UPDATE batch_jobs SET status = ?, payload = ? WHERE stable_key = ?
+  `);
+
+  client.transaction(() => {
+    for (const row of rows) {
+      const normalized = normalizeProcessMinuteJobPayload(row.payload);
+      if (!normalized) {
+        update.run(
+          'failed',
+          JSON.stringify({ failureReason: 'JOB_PAYLOAD_INVALID' }),
+          row.stable_key
+        );
+        continue;
+      }
+      update.run(row.status, JSON.stringify(normalized), row.stable_key);
+    }
+  })();
 }
 
 function migrateTodoCapabilityColumn(client: Database.Database): void {

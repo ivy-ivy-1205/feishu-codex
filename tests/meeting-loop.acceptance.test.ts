@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { createSqliteDatabase } from '../src/db/client.js';
@@ -99,6 +101,17 @@ describe('meeting-to-Todo Phase 1A acceptance loop', () => {
     expect(summary.body).toContain('我可以帮你推进');
     expect(summary.todos[0]?.capability).toBe('content_draft');
 
+    const durable = await harness.restartAfterDelivery();
+    expect(durable).toEqual({
+      jobStatus: 'completed',
+      summaryCount: 1,
+      todoCount: 3,
+      outboxCount: 1,
+      outboxStatus: 'delivered',
+      deliveredAt: workerNow.toISOString(),
+      summaryMessageId: deliveredMessageId
+    });
+
     harness.confirmIvyOpenId('ou_ivy_fixture');
     const decision = await harness.reply({
       openId: 'ou_ivy_fixture',
@@ -109,20 +122,23 @@ describe('meeting-to-Todo Phase 1A acceptance loop', () => {
     if (decision.kind !== 'authorize_low_risk') {
       throw new Error(`expected authorization, received ${decision.kind}`);
     }
+    expect(decision.todoId).toBe('todo:min_fixture_1:1');
     expect(decision.todo.displayedNumber).toBe(1);
     expect(decision.todo.capability).toBe('content_draft');
   });
 });
 
 async function createMeetingLoopHarness() {
-  const database = createSqliteDatabase(':memory:');
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'aijia-meeting-loop-'));
+  const databaseFilename = join(temporaryDirectory, 'bridge.sqlite');
+  let database = createSqliteDatabase(databaseFilename);
   migrateDatabase(database.client);
-  const meetingRepository = new MeetingRepository(database.client);
-  const jobRepository = new JobRepository(database.client);
-  const outboxRepository = new OutboxRepository(database.client);
+  let meetingRepository = new MeetingRepository(database.client);
+  let jobRepository = new JobRepository(database.client);
+  let outboxRepository = new OutboxRepository(database.client);
   const approverOpenIds: string[] = [];
   const deliveredSummaries: DeliveredSummary[] = [];
-  const app = buildApp({
+  const buildHarnessApp = () => buildApp({
     readiness: () => ({ ready: false, reason: 'WORKER_UNAVAILABLE' }),
     verificationToken,
     ingestMinute: (event) => ingestMinuteGenerated(event, {
@@ -136,6 +152,7 @@ async function createMeetingLoopHarness() {
     }),
     logger: false
   });
+  let app = buildHarnessApp();
 
   let closed = false;
   const harness = {
@@ -204,6 +221,46 @@ async function createMeetingLoopHarness() {
         return deliveredSummaries[0];
       }
     },
+    async restartAfterDelivery() {
+      await app.close();
+      database.close();
+      database = createSqliteDatabase(databaseFilename);
+      migrateDatabase(database.client);
+      meetingRepository = new MeetingRepository(database.client);
+      jobRepository = new JobRepository(database.client);
+      outboxRepository = new OutboxRepository(database.client);
+      app = buildHarnessApp();
+
+      const job = database.client.prepare(`
+        SELECT status FROM batch_jobs WHERE stable_key = 'minute:min_fixture_1'
+      `).get() as { status: string };
+      const summary = database.client.prepare(`
+        SELECT summary_message_id FROM meeting_summaries WHERE minute_id = 'min_fixture_1'
+      `).get() as { summary_message_id: string };
+      const summaryCount = database.client.prepare(`
+        SELECT COUNT(*) AS count FROM meeting_summaries
+      `).get() as { count: number };
+      const todoCount = database.client.prepare(`
+        SELECT COUNT(*) AS count FROM meeting_todos
+      `).get() as { count: number };
+      const outbox = database.client.prepare(`
+        SELECT status, delivered_at FROM outbox
+        WHERE idempotency_key = 'minute-summary:min_fixture_1'
+      `).get() as { status: string; delivered_at: string | null };
+      const outboxCount = database.client.prepare(`
+        SELECT COUNT(*) AS count FROM outbox
+      `).get() as { count: number };
+
+      return {
+        jobStatus: job.status,
+        summaryCount: summaryCount.count,
+        todoCount: todoCount.count,
+        outboxCount: outboxCount.count,
+        outboxStatus: outbox.status,
+        deliveredAt: outbox.delivered_at,
+        summaryMessageId: summary.summary_message_id
+      };
+    },
     confirmIvyOpenId(openId: string) {
       approverOpenIds.splice(0, approverOpenIds.length, openId);
     },
@@ -228,6 +285,7 @@ async function createMeetingLoopHarness() {
       closed = true;
       await app.close();
       database.close();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
     }
   };
   openHarnesses.push(harness);

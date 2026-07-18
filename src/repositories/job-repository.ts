@@ -4,9 +4,27 @@ export interface DurableJob {
   kind: 'process_minute';
   key: string;
   minuteId: string;
-  attempt: number;
+  attemptsByCode: RetryAttemptsByCode;
   leaseExpiresAt?: string;
 }
+
+export type RetryErrorCode = 'MINUTE_NOT_READY' | 'RATE_LIMITED';
+
+export interface RetryAttemptsByCode {
+  MINUTE_NOT_READY: number;
+  RATE_LIMITED: number;
+}
+
+export interface ProcessMinuteJobPayload {
+  minuteId: string;
+  attemptsByCode: RetryAttemptsByCode;
+  failureReason?: string;
+}
+
+const zeroRetryAttempts = (): RetryAttemptsByCode => ({
+  MINUTE_NOT_READY: 0,
+  RATE_LIMITED: 0
+});
 
 export const defaultJobLeaseDurationMs = 180_000;
 
@@ -37,7 +55,7 @@ export class JobRepository {
       kind: 'process_minute',
       key: `minute:${minuteId}`,
       minuteId,
-      attempt: 0
+      attemptsByCode: zeroRetryAttempts()
     };
     const now = new Date().toISOString();
     const result = this.client.prepare(`
@@ -49,7 +67,7 @@ export class JobRepository {
       job.key,
       job.kind,
       job.key,
-      JSON.stringify({ minuteId: job.minuteId }),
+      serializeJobPayload(job),
       now,
       now
     );
@@ -64,12 +82,15 @@ export class JobRepository {
       ORDER BY created_at ASC
     `).all() as JobRow[];
 
-    return rows.map((row) => ({
-      kind: row.type,
-      key: row.stable_key,
-      minuteId: parseJobPayload(row.payload).minuteId,
-      attempt: parseJobPayload(row.payload).attempt ?? 0
-    }));
+    return rows.flatMap((row) => {
+      const payload = normalizeProcessMinuteJobPayload(row.payload);
+      return payload ? [{
+        kind: row.type,
+        key: row.stable_key,
+        minuteId: payload.minuteId,
+        attemptsByCode: payload.attemptsByCode
+      }] : [];
+    });
   }
 
   leaseNextProcessMinute(availableAt: Date): DurableJob | null {
@@ -88,6 +109,16 @@ export class JobRepository {
         return null;
       }
 
+      const payload = normalizeProcessMinuteJobPayload(row.payload);
+      if (!payload) {
+        this.client.prepare(`
+          UPDATE batch_jobs
+          SET status = 'failed', payload = ?
+          WHERE stable_key = ? AND status IN ('queued', 'retry', 'processing')
+        `).run(JSON.stringify({ failureReason: 'JOB_PAYLOAD_INVALID' }), row.stable_key);
+        return null;
+      }
+
       const leased = this.client.prepare(`
         UPDATE batch_jobs
         SET status = 'processing', updated_at = ?
@@ -99,12 +130,11 @@ export class JobRepository {
         return null;
       }
 
-      const payload = parseJobPayload(row.payload);
       return {
         kind: row.type,
         key: row.stable_key,
         minuteId: payload.minuteId,
-        attempt: payload.attempt ?? 0,
+        attemptsByCode: payload.attemptsByCode,
         leaseExpiresAt: leaseUntil.toISOString()
       };
     })();
@@ -141,8 +171,14 @@ export class JobRepository {
     return Boolean(row);
   }
 
-  markRetry(job: DurableJob, availableAt: Date, attemptedAt: Date): void {
+  markRetry(
+    job: DurableJob,
+    retryCode: RetryErrorCode,
+    availableAt: Date,
+    attemptedAt: Date
+  ): void {
     const leaseExpiresAt = requireLease(job);
+    const attemptsByCode = incrementRetryAttempt(job.attemptsByCode, retryCode);
     const result = this.client.prepare(`
       UPDATE batch_jobs
       SET status = 'retry', payload = ?, updated_at = ?
@@ -151,7 +187,7 @@ export class JobRepository {
         AND updated_at = ?
         AND updated_at > ?
     `).run(
-      JSON.stringify({ minuteId: job.minuteId, attempt: job.attempt + 1 }),
+      serializeJobPayload(job, attemptsByCode),
       availableAt.toISOString(),
       job.key,
       leaseExpiresAt,
@@ -160,8 +196,16 @@ export class JobRepository {
     assertLeaseMutation(result.changes, job.key);
   }
 
-  markFailed(job: DurableJob, failureReason: string, failedAt: Date): void {
+  markFailed(
+    job: DurableJob,
+    failureReason: string,
+    failedAt: Date,
+    retryCode?: RetryErrorCode
+  ): void {
     const leaseExpiresAt = requireLease(job);
+    const attemptsByCode = retryCode
+      ? incrementRetryAttempt(job.attemptsByCode, retryCode)
+      : job.attemptsByCode;
     const result = this.client.prepare(`
       UPDATE batch_jobs
       SET status = 'failed', payload = ?, updated_at = ?
@@ -170,11 +214,7 @@ export class JobRepository {
         AND updated_at = ?
         AND updated_at > ?
     `).run(
-      JSON.stringify({
-        minuteId: job.minuteId,
-        attempt: job.attempt + 1,
-        failureReason
-      }),
+      serializeJobPayload(job, attemptsByCode, failureReason),
       failedAt.toISOString(),
       job.key,
       leaseExpiresAt,
@@ -190,20 +230,87 @@ interface JobRow {
   payload: string;
 }
 
-interface JobPayload {
-  minuteId: string;
-  attempt?: number;
-}
-
-function parseJobPayload(payload: string): JobPayload {
-  return JSON.parse(payload) as JobPayload;
-}
-
 function requireLease(job: DurableJob): string {
   if (!job.leaseExpiresAt) {
     throw new Error('job must be leased before its status can change');
   }
   return job.leaseExpiresAt;
+}
+
+export function normalizeProcessMinuteJobPayload(
+  payload: string
+): ProcessMinuteJobPayload | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed) || typeof parsed.minuteId !== 'string' || !parsed.minuteId.trim()) {
+    return null;
+  }
+
+  let attemptsByCode: RetryAttemptsByCode;
+  if ('attemptsByCode' in parsed) {
+    if (!isRetryAttemptsByCode(parsed.attemptsByCode)) {
+      return null;
+    }
+    attemptsByCode = parsed.attemptsByCode;
+  } else if ('attempt' in parsed) {
+    if (!isRetryAttempt(parsed.attempt)) {
+      return null;
+    }
+    attemptsByCode = {
+      MINUTE_NOT_READY: parsed.attempt,
+      RATE_LIMITED: parsed.attempt
+    };
+  } else {
+    attemptsByCode = zeroRetryAttempts();
+  }
+
+  return {
+    minuteId: parsed.minuteId.trim(),
+    attemptsByCode,
+    ...(typeof parsed.failureReason === 'string'
+      ? { failureReason: parsed.failureReason }
+      : {})
+  };
+}
+
+function serializeJobPayload(
+  job: Pick<DurableJob, 'minuteId' | 'attemptsByCode'>,
+  attemptsByCode: RetryAttemptsByCode = job.attemptsByCode,
+  failureReason?: string
+): string {
+  return JSON.stringify({
+    minuteId: job.minuteId,
+    attemptsByCode,
+    ...(failureReason ? { failureReason } : {})
+  });
+}
+
+function incrementRetryAttempt(
+  attempts: RetryAttemptsByCode,
+  retryCode: RetryErrorCode
+): RetryAttemptsByCode {
+  return {
+    ...attempts,
+    [retryCode]: Math.min(attempts[retryCode] + 1, Number.MAX_SAFE_INTEGER)
+  };
+}
+
+function isRetryAttemptsByCode(value: unknown): value is RetryAttemptsByCode {
+  return isRecord(value) &&
+    isRetryAttempt(value.MINUTE_NOT_READY) &&
+    isRetryAttempt(value.RATE_LIMITED);
+}
+
+function isRetryAttempt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function assertLeaseMutation(changes: number, jobKey: string): void {

@@ -8,7 +8,8 @@ import {
 import {
   JobRepository,
   LeaseLostError,
-  type DurableJob
+  type DurableJob,
+  type RetryErrorCode
 } from '../repositories/job-repository.js';
 import { MeetingRepository } from '../repositories/meeting-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
@@ -21,8 +22,7 @@ const maximumRetryDelayMs = 60_000;
 const retryBudgets = {
   MINUTE_NOT_READY: 8,
   RATE_LIMITED: 5
-} as const;
-type RetriableCode = keyof typeof retryBudgets;
+} as const satisfies Record<RetryErrorCode, number>;
 
 export interface MeetingWorkerDependencies {
   reader: FeishuMinutesReader;
@@ -116,12 +116,14 @@ export async function processMinuteJob(
     const retriableCode = retriableErrorCode(error);
     if (retriableCode) {
       const operationNow = now();
-      if (job.attempt + 1 >= retryBudgets[retriableCode]) {
+      const attemptsForCode = job.attemptsByCode[retriableCode];
+      if (attemptsForCode + 1 >= retryBudgets[retriableCode]) {
         try {
           dependencies.jobRepository.markFailed(
             job,
             `${retriableCode}_RETRY_EXHAUSTED`,
-            operationNow
+            operationNow,
+            retriableCode
           );
           return 'completed';
         } catch (failure) {
@@ -131,9 +133,14 @@ export async function processMinuteJob(
           throw failure;
         }
       }
-      const retryAt = new Date(operationNow.getTime() + retryDelayMs(job.attempt));
+      const retryAt = new Date(operationNow.getTime() + retryDelayMs(attemptsForCode));
       try {
-        dependencies.jobRepository.markRetry(job, retryAt, operationNow);
+        dependencies.jobRepository.markRetry(
+          job,
+          retriableCode,
+          retryAt,
+          operationNow
+        );
         return 'retry';
       } catch (failure) {
         if (failure instanceof LeaseLostError) {
@@ -181,7 +188,7 @@ function retryDelayMs(attempt: number): number {
   return Math.min(1_000 * 2 ** attempt, maximumRetryDelayMs);
 }
 
-function retriableErrorCode(error: unknown): RetriableCode | null {
+function retriableErrorCode(error: unknown): RetryErrorCode | null {
   if (!error || typeof error !== 'object' || !('code' in error)) {
     return null;
   }

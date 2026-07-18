@@ -28,9 +28,15 @@ describe('migrateDatabase', () => {
     `).get()).toEqual({
       id: 'job_legacy_1',
       type: 'process_minute',
-      payload: '{"minuteId":"min_legacy_1"}',
       status: 'queued',
       stable_key: 'legacy:job_legacy_1',
+      payload: JSON.stringify({
+        minuteId: 'min_legacy_1',
+        attemptsByCode: {
+          MINUTE_NOT_READY: 0,
+          RATE_LIMITED: 0
+        }
+      }),
       created_at: '2026-07-18T00:00:00.000Z',
       updated_at: '2026-07-18T00:00:00.000Z'
     });
@@ -47,6 +53,99 @@ describe('migrateDatabase', () => {
       '2026-07-18T00:00:00.000Z',
       '2026-07-18T00:00:00.000Z'
     )).toThrow(/UNIQUE constraint failed/);
+  });
+
+  it('migrates a legacy shared attempt conservatively into both retry budgets', () => {
+    const database = createSqliteDatabase(':memory:');
+    database.client.exec(`
+      CREATE TABLE batch_jobs (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        stable_key TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO batch_jobs (
+        id, type, stable_key, payload, status, created_at, updated_at
+      ) VALUES (
+        'minute:min_legacy_attempt', 'process_minute', 'minute:min_legacy_attempt',
+        '{"minuteId":"min_legacy_attempt","attempt":3}', 'retry',
+        '2026-07-18T00:00:00.000Z', '2026-07-18T00:00:00.000Z'
+      );
+    `);
+
+    migrateDatabase(database.client);
+
+    const row = database.client.prepare(`
+      SELECT status, payload FROM batch_jobs WHERE stable_key = 'minute:min_legacy_attempt'
+    `).get() as { status: string; payload: string };
+    expect(row.status).toBe('retry');
+    expect(JSON.parse(row.payload)).toEqual({
+      minuteId: 'min_legacy_attempt',
+      attemptsByCode: { MINUTE_NOT_READY: 3, RATE_LIMITED: 3 }
+    });
+  });
+
+  it('fails malformed process-minute payloads closed during migration', () => {
+    const database = createSqliteDatabase(':memory:');
+    database.client.exec(`
+      CREATE TABLE batch_jobs (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        stable_key TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO batch_jobs (
+        id, type, stable_key, payload, status, created_at, updated_at
+      ) VALUES (
+        'minute:min_bad_payload', 'process_minute', 'minute:min_bad_payload',
+        'not-json', 'queued', '2026-07-18T00:00:00.000Z',
+        '2026-07-18T00:00:00.000Z'
+      );
+    `);
+
+    migrateDatabase(database.client);
+
+    const row = database.client.prepare(`
+      SELECT status, payload FROM batch_jobs WHERE stable_key = 'minute:min_bad_payload'
+    `).get() as { status: string; payload: string };
+    expect(row.status).toBe('failed');
+    expect(JSON.parse(row.payload)).toEqual({ failureReason: 'JOB_PAYLOAD_INVALID' });
+  });
+
+  it('fails malformed per-code counters closed instead of resetting them', () => {
+    const database = createSqliteDatabase(':memory:');
+    database.client.exec(`
+      CREATE TABLE batch_jobs (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        stable_key TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO batch_jobs (
+        id, type, stable_key, payload, status, created_at, updated_at
+      ) VALUES (
+        'minute:min_bad_attempts', 'process_minute', 'minute:min_bad_attempts',
+        '{"minuteId":"min_bad_attempts","attemptsByCode":{"MINUTE_NOT_READY":-1,"RATE_LIMITED":0}}',
+        'retry', '2026-07-18T00:00:00.000Z', '2026-07-18T00:00:00.000Z'
+      );
+    `);
+
+    migrateDatabase(database.client);
+
+    const row = database.client.prepare(`
+      SELECT status, payload FROM batch_jobs WHERE stable_key = 'minute:min_bad_attempts'
+    `).get() as { status: string; payload: string };
+    expect(row.status).toBe('failed');
+    expect(JSON.parse(row.payload)).toEqual({ failureReason: 'JOB_PAYLOAD_INVALID' });
   });
 
   it('adds the outbox delivery timestamp without losing pending messages', () => {
