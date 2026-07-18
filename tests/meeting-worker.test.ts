@@ -86,6 +86,40 @@ describe('processMinuteJob', () => {
     expect(result.outboxCount).toBe(1);
   });
 
+  it('recovers after persistence commits but job completion crashes', async () => {
+    const harness = createHarness();
+    const jobRepository = harness.dependencies.jobRepository;
+    const markCompleted = jobRepository.markCompleted.bind(jobRepository);
+    jobRepository.markCompleted = () => {
+      throw new Error('simulated crash before job completion');
+    };
+
+    await expect(processMinuteJob(harness.job, harness.dependencies))
+      .rejects.toThrow('simulated crash before job completion');
+    expect(readResult(harness.client)).toMatchObject({
+      jobStatus: 'processing',
+      summaryCount: 1,
+      todoCount: 3,
+      outboxCount: 1
+    });
+
+    jobRepository.markCompleted = markCompleted;
+    const reclaimAt = new Date(harness.job.leaseExpiresAt ?? 'invalid');
+    const reclaimedJob = jobRepository.leaseNextProcessMinute(reclaimAt);
+    if (!reclaimedJob) {
+      throw new Error('expected the crashed job to be reclaimed after lease expiry');
+    }
+    harness.dependencies.now = () => reclaimAt;
+
+    expect(await processMinuteJob(reclaimedJob, harness.dependencies)).toBe('completed');
+    expect(readResult(harness.client)).toMatchObject({
+      jobStatus: 'completed',
+      summaryCount: 1,
+      todoCount: 3,
+      outboxCount: 1
+    });
+  });
+
   it('retries rate limits with capped exponential backoff', async () => {
     const harness = createHarness({ readerErrorCode: 'RATE_LIMITED', attempt: 10 });
 
@@ -140,6 +174,40 @@ describe('processMinuteJob', () => {
     expect(readJobStatus(database.client)).toBe('processing');
     expect(readResult(database.client).summaryCount).toBe(0);
     expect(readResult(database.client).outboxCount).toBe(0);
+  });
+
+  it('prevents an expired but unreclaimed worker from persisting or completing', async () => {
+    const harness = createHarness();
+    harness.dependencies.now = leaseExpiryClock(harness.job);
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+
+    const result = readResult(harness.client);
+    expect(result.jobStatus).toBe('processing');
+    expect(result.summaryCount).toBe(0);
+    expect(result.outboxCount).toBe(0);
+  });
+
+  it('prevents an expired worker from rescheduling a retry', async () => {
+    const harness = createHarness({ readerErrorCode: 'MINUTE_NOT_READY' });
+    harness.dependencies.now = leaseExpiryClock(harness.job);
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('retry');
+
+    expect(readJobStatus(harness.client)).toBe('processing');
+    expect(readResult(harness.client).outboxCount).toBe(0);
+  });
+
+  it('prevents an expired worker from recording a permanent failure', async () => {
+    const harness = createHarness({
+      summary: { ...summaryDraft, coreInsights: [] }
+    });
+    harness.dependencies.now = leaseExpiryClock(harness.job);
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+
+    expect(readJobStatus(harness.client)).toBe('processing');
+    expect(readResult(harness.client).outboxCount).toBe(0);
   });
 
   it('permanently fails invalid summarizer output with a redacted reason', async () => {
@@ -241,4 +309,12 @@ function readJobStatus(client: Database.Database): string {
     SELECT status FROM batch_jobs WHERE stable_key = ?
   `).get(`minute:${minuteFixture.minuteId}`) as { status: string };
   return row.status;
+}
+
+function leaseExpiryClock(job: { leaseExpiresAt?: string }): () => Date {
+  const leaseExpiresAt = job.leaseExpiresAt;
+  if (!leaseExpiresAt) {
+    throw new Error('expected a leased job with an expiry');
+  }
+  return () => new Date(leaseExpiresAt);
 }

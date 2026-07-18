@@ -55,7 +55,8 @@ const migrationSql = `
     payload TEXT NOT NULL,
     idempotency_key TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'pending',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    delivered_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS approval_actions (
@@ -70,6 +71,15 @@ const migrationSql = `
 export function migrateDatabase(client: Database.Database): void {
   migrateLegacyBatchJobs(client);
   client.exec(migrationSql);
+  migrateOutboxDeliveryColumn(client);
+}
+
+function migrateOutboxDeliveryColumn(client: Database.Database): void {
+  const columns = client.prepare('PRAGMA table_info(outbox)').all() as TableColumn[];
+  if (columns.some((column) => column.name === 'delivered_at')) {
+    return;
+  }
+  client.exec('ALTER TABLE outbox ADD COLUMN delivered_at TEXT');
 }
 
 function migrateLegacyBatchJobs(client: Database.Database): void {

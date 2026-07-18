@@ -48,4 +48,32 @@ describe('migrateDatabase', () => {
       '2026-07-18T00:00:00.000Z'
     )).toThrow(/UNIQUE constraint failed/);
   });
+
+  it('adds the outbox delivery timestamp without losing pending messages', () => {
+    const database = createSqliteDatabase(':memory:');
+    database.client.exec(`
+      CREATE TABLE outbox (
+        id TEXT PRIMARY KEY,
+        destination TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL
+      );
+
+      INSERT INTO outbox (id, destination, payload, idempotency_key, status, created_at)
+      VALUES ('outbox_legacy_1', 'oc_fixture', '{}', 'legacy-outbox:1', 'pending',
+        '2026-07-18T00:00:00.000Z');
+    `);
+
+    migrateDatabase(database.client);
+
+    expect(database.client.prepare(`
+      SELECT id, status, delivered_at FROM outbox
+    `).get()).toEqual({
+      id: 'outbox_legacy_1',
+      status: 'pending',
+      delivered_at: null
+    });
+  });
 });

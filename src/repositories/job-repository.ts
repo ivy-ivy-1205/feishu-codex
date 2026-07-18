@@ -94,31 +94,46 @@ export class JobRepository {
     this.client.prepare(`
       UPDATE batch_jobs
       SET status = 'completed', updated_at = ?
-      WHERE stable_key = ? AND status = 'processing' AND updated_at = ?
-    `).run(completedAt.toISOString(), job.key, leaseExpiresAt);
+      WHERE stable_key = ?
+        AND status = 'processing'
+        AND updated_at = ?
+        AND updated_at > ?
+    `).run(
+      completedAt.toISOString(),
+      job.key,
+      leaseExpiresAt,
+      completedAt.toISOString()
+    );
   }
 
-  ownsLease(job: DurableJob): boolean {
+  ownsLease(job: DurableJob, at: Date): boolean {
     const leaseExpiresAt = requireLease(job);
     const row = this.client.prepare(`
       SELECT 1
       FROM batch_jobs
-      WHERE stable_key = ? AND status = 'processing' AND updated_at = ?
-    `).get(job.key, leaseExpiresAt);
+      WHERE stable_key = ?
+        AND status = 'processing'
+        AND updated_at = ?
+        AND updated_at > ?
+    `).get(job.key, leaseExpiresAt, at.toISOString());
     return Boolean(row);
   }
 
-  markRetry(job: DurableJob, availableAt: Date): void {
+  markRetry(job: DurableJob, availableAt: Date, attemptedAt: Date): void {
     const leaseExpiresAt = requireLease(job);
     this.client.prepare(`
       UPDATE batch_jobs
       SET status = 'retry', payload = ?, updated_at = ?
-      WHERE stable_key = ? AND status = 'processing' AND updated_at = ?
+      WHERE stable_key = ?
+        AND status = 'processing'
+        AND updated_at = ?
+        AND updated_at > ?
     `).run(
       JSON.stringify({ minuteId: job.minuteId, attempt: job.attempt + 1 }),
       availableAt.toISOString(),
       job.key,
-      leaseExpiresAt
+      leaseExpiresAt,
+      attemptedAt.toISOString()
     );
   }
 
@@ -127,12 +142,16 @@ export class JobRepository {
     this.client.prepare(`
       UPDATE batch_jobs
       SET status = 'failed', payload = ?, updated_at = ?
-      WHERE stable_key = ? AND status = 'processing' AND updated_at = ?
+      WHERE stable_key = ?
+        AND status = 'processing'
+        AND updated_at = ?
+        AND updated_at > ?
     `).run(
       JSON.stringify({ minuteId: job.minuteId, failureReason }),
       failedAt.toISOString(),
       job.key,
-      leaseExpiresAt
+      leaseExpiresAt,
+      failedAt.toISOString()
     );
   }
 }

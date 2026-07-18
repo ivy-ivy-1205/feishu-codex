@@ -64,7 +64,8 @@ export const outbox = sqliteTable('outbox', {
   payload: text('payload').notNull(),
   idempotencyKey: text('idempotency_key').notNull(),
   status: text('status').notNull().default('pending'),
-  createdAt: text('created_at').notNull()
+  createdAt: text('created_at').notNull(),
+  deliveredAt: text('delivered_at')
 }, (table) => [
   uniqueIndex('outbox_idempotency_key_unique').on(table.idempotencyKey)
 ]);

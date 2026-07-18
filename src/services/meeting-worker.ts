@@ -31,9 +31,10 @@ export async function processMinuteJob(
     const context = MinuteContext.parse(await dependencies.reader.getMinute(job.minuteId));
     const draft = MeetingSummaryDraft.parse(await dependencies.summarizer.summarize(context));
     const summaryId = `summary:${job.minuteId}`;
+    const operationNow = now();
 
     const persisted = dependencies.meetingRepository.client.transaction(() => {
-      if (!dependencies.jobRepository.ownsLease(job)) {
+      if (!dependencies.jobRepository.ownsLease(job, operationNow)) {
         return false;
       }
 
@@ -68,20 +69,22 @@ export async function processMinuteJob(
       return 'completed';
     }
 
-    dependencies.jobRepository.markCompleted(job, now());
+    dependencies.jobRepository.markCompleted(job, operationNow);
     return 'completed';
   } catch (error) {
     if (isRetriable(error)) {
-      const retryAt = new Date(now().getTime() + retryDelayMs(job.attempt));
-      dependencies.jobRepository.markRetry(job, retryAt);
+      const operationNow = now();
+      const retryAt = new Date(operationNow.getTime() + retryDelayMs(job.attempt));
+      dependencies.jobRepository.markRetry(job, retryAt, operationNow);
       return 'retry';
     }
 
     if (error instanceof z.ZodError) {
+      const operationNow = now();
       dependencies.jobRepository.markFailed(
         job,
         'SUMMARIZER_OUTPUT_INVALID',
-        now()
+        operationNow
       );
       return 'completed';
     }
