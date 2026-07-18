@@ -6,6 +6,32 @@ export type ReadinessStatus =
 
 export type ReadinessCheck = () => ReadinessStatus | Promise<ReadinessStatus>;
 
+export interface ServiceReadinessDependencies {
+  checkDatabase(): unknown | Promise<unknown>;
+  isWorkerConsumptionAvailable(): boolean | Promise<boolean>;
+}
+
+export function createServiceReadiness(
+  dependencies: ServiceReadinessDependencies
+): ReadinessCheck {
+  return async () => {
+    try {
+      await dependencies.checkDatabase();
+    } catch {
+      return { ready: false, reason: 'DATABASE_UNAVAILABLE' };
+    }
+
+    try {
+      if (!await dependencies.isWorkerConsumptionAvailable()) {
+        return { ready: false, reason: 'WORKER_UNAVAILABLE' };
+      }
+    } catch {
+      return { ready: false, reason: 'WORKER_UNAVAILABLE' };
+    }
+    return { ready: true };
+  };
+}
+
 export function registerHealthRoutes(
   app: FastifyInstance,
   readiness: ReadinessCheck

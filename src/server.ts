@@ -4,6 +4,7 @@ import { createSqliteDatabase } from './db/client.js';
 import { migrateDatabase } from './db/migrate.js';
 import { JobRepository } from './repositories/job-repository.js';
 import { MeetingRepository } from './repositories/meeting-repository.js';
+import { createServiceReadiness } from './routes/health.js';
 import { ingestMinuteGenerated } from './services/minute-ingestion.js';
 import { routeReply } from './services/reply-router.js';
 
@@ -18,7 +19,10 @@ const meetingRepository = new MeetingRepository(database.client);
 const jobRepository = new JobRepository(database.client);
 
 const app = buildApp({
-  readiness: () => ({ ready: true }),
+  readiness: createServiceReadiness({
+    checkDatabase: () => database.client.prepare('SELECT 1').get(),
+    isWorkerConsumptionAvailable: () => false
+  }),
   verificationToken: config.feishu.verificationToken,
   ingestMinute: (event) => ingestMinuteGenerated(event, {
     meetingRepository,

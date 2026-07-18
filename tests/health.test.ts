@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildApp, type AppDependencies } from '../src/app.js';
+import { createServiceReadiness } from '../src/routes/health.js';
 
 describe('health routes', () => {
   it('keeps liveness independent from dependency readiness', async () => {
@@ -38,6 +39,41 @@ describe('health routes', () => {
     expect(response.json()).toEqual({ ready: false, reason: 'DEPENDENCY_CHECK_FAILED' });
     expect(response.body).not.toContain('database secret');
     await app.close();
+  });
+
+  it('keeps the service unready when no worker can consume durable jobs', async () => {
+    const readiness = createServiceReadiness({
+      checkDatabase: () => undefined,
+      isWorkerConsumptionAvailable: () => false
+    });
+
+    await expect(readiness()).resolves.toEqual({
+      ready: false,
+      reason: 'WORKER_UNAVAILABLE'
+    });
+  });
+
+  it('reports database failure without exposing the database error', async () => {
+    const readiness = createServiceReadiness({
+      checkDatabase: () => {
+        throw new Error('sqlite path /private/secret.sqlite is unavailable');
+      },
+      isWorkerConsumptionAvailable: () => true
+    });
+
+    await expect(readiness()).resolves.toEqual({
+      ready: false,
+      reason: 'DATABASE_UNAVAILABLE'
+    });
+  });
+
+  it('becomes ready only when both database and worker consumption are available', async () => {
+    const readiness = createServiceReadiness({
+      checkDatabase: () => undefined,
+      isWorkerConsumptionAvailable: () => true
+    });
+
+    await expect(readiness()).resolves.toEqual({ ready: true });
   });
 });
 

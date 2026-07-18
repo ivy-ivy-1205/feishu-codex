@@ -44,6 +44,17 @@ function safeLoggerOptions(logger: LoggerOption): LoggerOption {
   const overrides = typeof logger === 'object' ? logger : {};
   return {
     ...overrides,
+    hooks: {
+      ...overrides.hooks,
+      streamWrite(serialized) {
+        try {
+          const parsed = JSON.parse(serialized) as Record<string, unknown>;
+          return `${JSON.stringify(sanitizeLogObject(parsed))}\n`;
+        } catch {
+          return '{"level":50,"msg":"[Unserializable log redacted]"}\n';
+        }
+      }
+    },
     redact: {
       paths: [
         'token',
@@ -69,9 +80,12 @@ function safeLoggerOptions(logger: LoggerOption): LoggerOption {
     },
     serializers: {
       req(request) {
+        const rawUrl = typeof request.url === 'string'
+          ? request.url
+          : request.raw.url ?? '';
         return {
           method: request.method,
-          url: request.url,
+          url: request.routeOptions?.url ?? rawUrl.split('?', 1)[0],
           remoteAddress: request.ip
         };
       },
@@ -88,4 +102,50 @@ function safeLoggerOptions(logger: LoggerOption): LoggerOption {
       }
     }
   };
+}
+
+function sanitizeLogObject(object: Record<string, unknown>): Record<string, unknown> {
+  return sanitizeLogValue(object, new WeakSet<object>()) as Record<string, unknown>;
+}
+
+function sanitizeLogValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (value instanceof Date || Buffer.isBuffer(value)) {
+    return value;
+  }
+  if (value instanceof Error) {
+    return {
+      type: value.name,
+      message: '[Redacted]',
+      stack: '[Redacted]'
+    };
+  }
+  if (seen.has(value)) {
+    return '[Circular]';
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeLogValue(item, seen));
+  }
+
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+    key,
+    isSensitiveLogKey(key) ? '[Redacted]' : sanitizeLogValue(child, seen)
+  ]));
+}
+
+function isSensitiveLogKey(key: string): boolean {
+  const canonical = key.replace(/[^a-z0-9]/giu, '').toLowerCase();
+  return canonical.endsWith('token') ||
+    canonical.endsWith('secret') ||
+    canonical.endsWith('authorization') ||
+    canonical.includes('encryptkey') ||
+    canonical.includes('transcripttext') ||
+    canonical === 'body' ||
+    canonical.endsWith('rawbody') ||
+    canonical.endsWith('requestbody') ||
+    canonical.endsWith('eventbody');
 }

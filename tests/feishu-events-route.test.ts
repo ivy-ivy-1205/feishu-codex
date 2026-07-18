@@ -5,6 +5,7 @@ import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
 import { JobRepository } from '../src/repositories/job-repository.js';
 import { MeetingRepository } from '../src/repositories/meeting-repository.js';
+import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { ingestMinuteGenerated } from '../src/services/minute-ingestion.js';
 import { routeReply } from '../src/services/reply-router.js';
 
@@ -115,6 +116,91 @@ describe('POST /webhooks/feishu/events', () => {
     await harness.close();
   });
 
+  it('passes through successful, wrong-chat, and non-Ivy authorization decisions', async () => {
+    const harness = createHarness();
+    seedDeliveredTodo(harness.meetingRepository);
+
+    const authorized = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: replyEvent({
+        openId: 'ou_ivy_fixture',
+        chatId: privateChatId,
+        replyTo: 'om_http_summary',
+        text: '先干 1'
+      })
+    });
+    const wrongChat = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: replyEvent({
+        openId: 'ou_ivy_fixture',
+        chatId: 'oc_wrong_chat',
+        replyTo: 'om_http_summary',
+        text: '先干 1'
+      })
+    });
+    const nonIvy = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: replyEvent({
+        openId: 'ou_not_ivy',
+        chatId: privateChatId,
+        replyTo: 'om_http_summary',
+        text: '先干 1'
+      })
+    });
+
+    expect(authorized.json()).toMatchObject({
+      status: 'reply_decision',
+      decision: {
+        kind: 'authorize_low_risk',
+        todoId: 'todo_http_1',
+        todo: { capability: 'content_draft', risk: 'low' }
+      }
+    });
+    expect(wrongChat.json()).toEqual({
+      status: 'reply_decision',
+      decision: { kind: 'reject', reason: 'wrong_chat' }
+    });
+    expect(nonIvy.json()).toEqual({
+      status: 'reply_decision',
+      decision: { kind: 'reject', reason: 'not_ivy' }
+    });
+    await harness.close();
+  });
+
+  it('returns a fixed safe error when reply routing throws', async () => {
+    const secretPath = '/credentials/tenant/secret.json';
+    const chunks: string[] = [];
+    const harness = createHarness({
+      logger: {
+        level: 'info',
+        stream: { write: (message: string) => chunks.push(message) }
+      },
+      routeReply: () => {
+        throw new Error(`reply database failed at ${secretPath}`);
+      }
+    });
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: replyEvent({
+        openId: 'ou_ivy_fixture',
+        chatId: privateChatId,
+        replyTo: 'om_http_summary',
+        text: '先干 1'
+      })
+    });
+    await harness.close();
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: 'reply_routing_failed' });
+    expect(response.body).not.toContain(secretPath);
+    expect(chunks.join('')).not.toContain(secretPath);
+  });
+
   it('rejects malformed event envelopes without side effects', async () => {
     const harness = createHarness();
 
@@ -134,7 +220,7 @@ describe('POST /webhooks/feishu/events', () => {
     await harness.close();
   });
 
-  it('redacts credentials, transcript text, and raw bodies from structured logs', async () => {
+  it('recursively redacts credentials, transcript text, and raw bodies from logs', async () => {
     const chunks: string[] = [];
     const stream = {
       write(message: string) {
@@ -143,17 +229,21 @@ describe('POST /webhooks/feishu/events', () => {
     };
     const harness = createHarness({ logger: { level: 'info', stream } });
     harness.app.log.info({
-      token: 'logged-token-secret',
-      appSecret: 'logged-app-secret',
-      encryptKey: 'logged-encrypt-key',
-      transcriptText: 'logged-transcript-text',
-      body: { event: 'logged-raw-event-body' },
-      req: { headers: { authorization: 'Bearer logged-authorization' } }
+      first: {
+        second: {
+          accessToken: 'logged-token-secret',
+          appSecret: 'logged-app-secret',
+          encryptKey: 'logged-encrypt-key',
+          transcriptText: 'logged-transcript-text',
+          body: { event: 'logged-raw-event-body' },
+          headers: { authorization: 'Bearer logged-authorization' }
+        }
+      }
     }, 'redaction probe');
 
     await harness.app.inject({
       method: 'POST',
-      url: '/webhooks/feishu/events',
+      url: '/webhooks/feishu/events?access_token=request-query-secret',
       headers: { authorization: 'Bearer request-authorization-secret' },
       payload: {
         type: 'url_verification',
@@ -172,10 +262,13 @@ describe('POST /webhooks/feishu/events', () => {
     expect(logs).not.toContain('logged-authorization');
     expect(logs).not.toContain('request-authorization-secret');
     expect(logs).not.toContain('request-body-secret');
+    expect(logs).not.toContain('request-query-secret');
   });
 });
 
-function createHarness(options: Pick<AppDependencies, 'logger'> = {}) {
+function createHarness(
+  options: Partial<Pick<AppDependencies, 'logger' | 'routeReply'>> = {}
+) {
   const database = createSqliteDatabase(':memory:');
   migrateDatabase(database.client);
   const meetingRepository = new MeetingRepository(database.client);
@@ -188,17 +281,18 @@ function createHarness(options: Pick<AppDependencies, 'logger'> = {}) {
       meetingRepository,
       jobRepository
     }),
-    routeReply: (input) => routeReply(input, {
+    routeReply: options.routeReply ?? ((input) => routeReply(input, {
       meetingRepository,
       ivyPrivateChatId: privateChatId,
       approverOpenIds: ['ou_ivy_fixture']
-    }),
+    })),
     logger: options.logger ?? false
   });
 
   return {
     app,
     jobRepository,
+    meetingRepository,
     get workerCalls() {
       return workerCalls;
     },
@@ -210,6 +304,46 @@ function createHarness(options: Pick<AppDependencies, 'logger'> = {}) {
       database.close();
     }
   };
+}
+
+function seedDeliveredTodo(meetingRepository: MeetingRepository): void {
+  meetingRepository.ingestMinute({ minuteId: 'min_http', eventId: 'evt_http_minute' });
+  meetingRepository.saveSummary({
+    id: 'summary_http',
+    minuteId: 'min_http',
+    summaryMessageId: 'pending:minute-summary:min_http',
+    content: 'HTTP 授权测试',
+    todos: [{
+      id: 'todo_http_1',
+      displayedNumber: 1,
+      title: '起草会议行动清单',
+      description: '只生成内容草稿',
+      risk: 'low',
+      capability: 'content_draft',
+      status: 'proposed'
+    }]
+  });
+  const outboxRepository = new OutboxRepository(meetingRepository.client);
+  outboxRepository.enqueueMeetingSummary({
+    kind: 'ivy_meeting_summary',
+    minuteId: 'min_http',
+    summaryId: 'summary_http',
+    targetChatId: privateChatId,
+    coreInsights: ['HTTP 路由只能返回授权 decision'],
+    confirmedDecisions: ['不执行 Todo'],
+    risks: ['身份或回复上下文不匹配必须拒绝'],
+    todos: [{
+      title: '起草会议行动清单',
+      description: '只生成内容草稿',
+      risk: 'low',
+      capability: 'content_draft'
+    }]
+  });
+  outboxRepository.acknowledgeMeetingSummaryDelivery({
+    minuteId: 'min_http',
+    messageId: 'om_http_summary',
+    deliveredAt: new Date('2030-07-18T05:00:00.000Z')
+  });
 }
 
 function withEventToken(

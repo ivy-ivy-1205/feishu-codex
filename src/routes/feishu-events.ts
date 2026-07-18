@@ -70,10 +70,15 @@ export function registerFeishuEventRoutes(
       if (replyInput === null) {
         return reply.code(400).send({ error: 'invalid_reply_event' });
       }
-      return {
-        status: 'reply_decision',
-        decision: dependencies.routeReply(replyInput)
-      };
+      try {
+        return {
+          status: 'reply_decision',
+          decision: dependencies.routeReply(replyInput)
+        };
+      } catch (error) {
+        request.log.error({ err: error }, 'Feishu reply routing failed');
+        return reply.code(500).send({ error: 'reply_routing_failed' });
+      }
     }
 
     try {
