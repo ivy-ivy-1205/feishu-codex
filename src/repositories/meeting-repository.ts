@@ -139,6 +139,19 @@ export class MeetingRepository {
 
     return row ? toMeetingTodoRecord(row) : null;
   }
+
+  listTodosByReply(summaryMessageId: string): MeetingTodoRecord[] {
+    const rows = this.client.prepare(`
+      SELECT todos.id, todos.summary_id, todos.displayed_number, todos.title,
+        todos.description, todos.risk, todos.status, todos.created_at
+      FROM meeting_todos AS todos
+      INNER JOIN meeting_summaries AS summaries ON summaries.id = todos.summary_id
+      WHERE summaries.summary_message_id = ?
+      ORDER BY todos.displayed_number ASC
+    `).all(summaryMessageId) as TodoRow[];
+
+    return rows.map(toMeetingTodoRecord);
+  }
 }
 
 interface TodoRow {
