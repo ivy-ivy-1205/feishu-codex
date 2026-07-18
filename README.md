@@ -17,6 +17,7 @@
 
 - 默认总结目标是 Ivy 与 Codex Bot 私聊 `oc_d851c3e986007dc0f97ab582bcb2e7c8`。
 - 标题和时间来自妙记 transcript fixture；Todo capability 来自结构化 summarizer 输出，不根据标题猜测。
+- 会议没有可由 Codex 推进的事项时仍会发送诚实总结，并明确显示“暂无可由 Codex 直接推进的事项”。
 - 只有 `risk=low` 且 `capability=content_draft` 可以得到低风险授权 decision。
 - 身份、私聊、reply context、投递证据或 capability 任一缺失都会 fail closed。
 
@@ -35,7 +36,7 @@ pnpm typecheck
 
 完整的环境、fixture、数据库重置和本地服务说明见 [docs/local-development.md](docs/local-development.md)。
 
-本地 `pnpm dev` 会先加载仓库根目录的 `.env`，并只为配置的 SQLite 文件创建其精确父目录；测试使用的 `:memory:` 模式不触碰文件系统目录。
+本地 `pnpm dev` 会先加载仓库根目录的 `.env`，默认只监听 `127.0.0.1`，并只为配置的 SQLite 文件创建其精确父目录；测试使用的 `:memory:` 模式不触碰文件系统目录。非测试启动会拒绝 `.env.example` 中提交到仓库的 fixture verification token，复制样例后必须换成本机随机值。
 
 ## Phase 1A 明确不做
 

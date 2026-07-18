@@ -8,8 +8,29 @@ export interface DurableJob {
   leaseExpiresAt?: string;
 }
 
+export const defaultJobLeaseDurationMs = 180_000;
+
+export class LeaseLostError extends Error {
+  readonly code = 'LEASE_LOST';
+
+  constructor(jobKey: string) {
+    super(`lease lost for durable job ${jobKey}`);
+    this.name = 'LeaseLostError';
+  }
+}
+
 export class JobRepository {
-  constructor(readonly client: Database.Database) {}
+  readonly leaseDurationMs: number;
+
+  constructor(
+    readonly client: Database.Database,
+    options: { leaseDurationMs?: number } = {}
+  ) {
+    this.leaseDurationMs = options.leaseDurationMs ?? defaultJobLeaseDurationMs;
+    if (!Number.isSafeInteger(this.leaseDurationMs) || this.leaseDurationMs <= 0) {
+      throw new Error('leaseDurationMs must be a positive safe integer');
+    }
+  }
 
   enqueueProcessMinute(minuteId: string): { created: boolean; job: DurableJob } {
     const job: DurableJob = {
@@ -52,7 +73,7 @@ export class JobRepository {
   }
 
   leaseNextProcessMinute(availableAt: Date): DurableJob | null {
-    const leaseUntil = new Date(availableAt.getTime() + 60_000);
+    const leaseUntil = new Date(availableAt.getTime() + this.leaseDurationMs);
     return this.client.transaction(() => {
       const row = this.client.prepare(`
         SELECT type, stable_key, payload
@@ -91,7 +112,7 @@ export class JobRepository {
 
   markCompleted(job: DurableJob, completedAt: Date): void {
     const leaseExpiresAt = requireLease(job);
-    this.client.prepare(`
+    const result = this.client.prepare(`
       UPDATE batch_jobs
       SET status = 'completed', updated_at = ?
       WHERE stable_key = ?
@@ -104,6 +125,7 @@ export class JobRepository {
       leaseExpiresAt,
       completedAt.toISOString()
     );
+    assertLeaseMutation(result.changes, job.key);
   }
 
   ownsLease(job: DurableJob, at: Date): boolean {
@@ -121,7 +143,7 @@ export class JobRepository {
 
   markRetry(job: DurableJob, availableAt: Date, attemptedAt: Date): void {
     const leaseExpiresAt = requireLease(job);
-    this.client.prepare(`
+    const result = this.client.prepare(`
       UPDATE batch_jobs
       SET status = 'retry', payload = ?, updated_at = ?
       WHERE stable_key = ?
@@ -135,11 +157,12 @@ export class JobRepository {
       leaseExpiresAt,
       attemptedAt.toISOString()
     );
+    assertLeaseMutation(result.changes, job.key);
   }
 
   markFailed(job: DurableJob, failureReason: string, failedAt: Date): void {
     const leaseExpiresAt = requireLease(job);
-    this.client.prepare(`
+    const result = this.client.prepare(`
       UPDATE batch_jobs
       SET status = 'failed', payload = ?, updated_at = ?
       WHERE stable_key = ?
@@ -147,12 +170,17 @@ export class JobRepository {
         AND updated_at = ?
         AND updated_at > ?
     `).run(
-      JSON.stringify({ minuteId: job.minuteId, failureReason }),
+      JSON.stringify({
+        minuteId: job.minuteId,
+        attempt: job.attempt + 1,
+        failureReason
+      }),
       failedAt.toISOString(),
       job.key,
       leaseExpiresAt,
       failedAt.toISOString()
     );
+    assertLeaseMutation(result.changes, job.key);
   }
 }
 
@@ -176,4 +204,10 @@ function requireLease(job: DurableJob): string {
     throw new Error('job must be leased before its status can change');
   }
   return job.leaseExpiresAt;
+}
+
+function assertLeaseMutation(changes: number, jobKey: string): void {
+  if (changes !== 1) {
+    throw new LeaseLostError(jobKey);
+  }
 }

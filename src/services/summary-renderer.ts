@@ -64,6 +64,11 @@ export function renderMeetingSummary(
   const sortedTodos = [...todos].sort(
     (left, right) => left.displayedNumber - right.displayedNumber
   );
+  const todoLines = sortedTodos.length > 0
+    ? sortedTodos.map((todo) => (
+      `${todo.displayedNumber}. ${normalizeLine(todo.title, 'Todo title')}`
+    ))
+    : ['暂无可由 Codex 直接推进的事项。'];
   const coreInformation = [
     ...coreInsights.map((insight) => `• ${insight}`),
     ...confirmedDecisions.map((decision) => `• 已确认：${decision}`),
@@ -78,9 +83,7 @@ export function renderMeetingSummary(
     ...coreInformation,
     '',
     '我可以帮你推进',
-    ...sortedTodos.map((todo) => (
-      `${todo.displayedNumber}. ${normalizeLine(todo.title, 'Todo title')}`
-    ))
+    ...todoLines
   ].join('\n');
 
   if (Buffer.byteLength(text, 'utf8') >= messageSizeLimitBytes) {

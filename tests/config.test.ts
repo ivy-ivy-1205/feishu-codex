@@ -34,4 +34,28 @@ describe('loadConfig', () => {
     expect(visible).not.toContain('verify-value');
     expect(visible).not.toContain('encrypt-value');
   });
+
+  it('binds to loopback by default and only exposes all interfaces when configured', () => {
+    expect(loadConfig(baseEnv).host).toBe('127.0.0.1');
+    expect(loadConfig({ ...baseEnv, HOST: '0.0.0.0' }).host).toBe('0.0.0.0');
+  });
+
+  it('rejects the committed fixture verification token outside tests', () => {
+    expect(() => loadConfig({
+      ...baseEnv,
+      NODE_ENV: 'development',
+      FEISHU_VERIFICATION_TOKEN: 'fixture-verification-token'
+    })).toThrow(/fixture verification token/i);
+  });
+
+  it('requires the worker lease to outlive the configured downstream timeout', () => {
+    expect(loadConfig(baseEnv).worker.leaseSeconds).toBeGreaterThan(
+      loadConfig(baseEnv).codex.timeoutSeconds
+    );
+    expect(() => loadConfig({
+      ...baseEnv,
+      WORKER_LEASE_SECONDS: '120',
+      CODEX_TIMEOUT_SECONDS: '120'
+    })).toThrow(/lease.*downstream timeout/i);
+  });
 });

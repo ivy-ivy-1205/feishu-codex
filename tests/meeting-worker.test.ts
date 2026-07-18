@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { createSqliteDatabase } from '../src/db/client.js';
@@ -77,11 +79,11 @@ describe('processMinuteJob', () => {
     expect(result.outbox).toHaveLength(0);
   });
 
-  it('does not create duplicate summaries on retry', async () => {
+  it('does not create duplicate summaries when a completed lease is replayed', async () => {
     const harness = createHarness();
 
     expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
-    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('lost_lease');
 
     const result = readResult(harness.client);
     expect(result.summaryCount).toBe(1);
@@ -123,8 +125,8 @@ describe('processMinuteJob', () => {
     });
   });
 
-  it('retries rate limits with capped exponential backoff', async () => {
-    const harness = createHarness({ readerErrorCode: 'RATE_LIMITED', attempt: 10 });
+  it('retries within budget with capped exponential backoff', async () => {
+    const harness = createHarness({ readerErrorCode: 'MINUTE_NOT_READY', attempt: 6 });
 
     expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('retry');
 
@@ -137,6 +139,90 @@ describe('processMinuteJob', () => {
     });
   });
 
+  it('fails MINUTE_NOT_READY after its finite retry budget', async () => {
+    const harness = createHarness({ readerErrorCode: 'MINUTE_NOT_READY', attempt: 7 });
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+
+    expect(readJob(harness.client)).toMatchObject({
+      status: 'failed',
+      payload: {
+        attempt: 8,
+        failureReason: 'MINUTE_NOT_READY_RETRY_EXHAUSTED'
+      }
+    });
+    expect(readResult(harness.client)).toMatchObject({
+      summaryCount: 0,
+      outboxCount: 0
+    });
+  });
+
+  it('fails RATE_LIMITED after its finite retry budget', async () => {
+    const harness = createHarness({ readerErrorCode: 'RATE_LIMITED', attempt: 4 });
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+
+    expect(readJob(harness.client)).toMatchObject({
+      status: 'failed',
+      payload: {
+        attempt: 5,
+        failureReason: 'RATE_LIMITED_RETRY_EXHAUSTED'
+      }
+    });
+  });
+
+  it('continues retry attempts after SQLite close and reopen', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'aijia-worker-restart-'));
+    const filename = join(directory, 'bridge.sqlite');
+    try {
+      let database = createSqliteDatabase(filename);
+      migrateDatabase(database.client);
+      let meetingRepository = new MeetingRepository(database.client);
+      let jobRepository = new JobRepository(database.client);
+      meetingRepository.ingestMinute({ minuteId: minuteFixture.minuteId, eventId: 'evt_restart' });
+      jobRepository.enqueueProcessMinute(minuteFixture.minuteId);
+
+      for (let expectedAttempt = 1; expectedAttempt <= 5; expectedAttempt += 1) {
+        const availableAt = expectedAttempt === 1
+          ? now
+          : new Date((readRawJob(database.client).updated_at));
+        const job = jobRepository.leaseNextProcessMinute(availableAt);
+        if (!job) {
+          throw new Error(`expected retry attempt ${expectedAttempt}`);
+        }
+        const result = await processMinuteJob(job, {
+          reader: {
+            async getMinute() {
+              throw Object.assign(new Error('rate limited'), { code: 'RATE_LIMITED' });
+            }
+          },
+          summarizer: { async summarize() { return summaryDraft; } },
+          meetingRepository,
+          jobRepository,
+          outboxRepository: new OutboxRepository(database.client),
+          targetChatId: ivyChatId,
+          now: () => availableAt
+        });
+        expect(result).toBe(expectedAttempt < 5 ? 'retry' : 'completed');
+
+        database.close();
+        database = createSqliteDatabase(filename);
+        migrateDatabase(database.client);
+        meetingRepository = new MeetingRepository(database.client);
+        jobRepository = new JobRepository(database.client);
+      }
+
+      expect(readJob(database.client)).toMatchObject({
+        status: 'failed',
+        payload: { attempt: 5, failureReason: 'RATE_LIMITED_RETRY_EXHAUSTED' }
+      });
+      expect(readResult(database.client)).toMatchObject({ summaryCount: 0, outboxCount: 0 });
+      database.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('reclaims a job after its worker lease expires', () => {
     const database = createSqliteDatabase(':memory:');
     migrateDatabase(database.client);
@@ -146,9 +232,20 @@ describe('processMinuteJob', () => {
     jobRepository.enqueueProcessMinute(minuteFixture.minuteId);
 
     expect(jobRepository.leaseNextProcessMinute(now)?.key).toBe(`minute:${minuteFixture.minuteId}`);
-    expect(jobRepository.leaseNextProcessMinute(new Date(now.getTime() + 59_999))).toBeNull();
-    expect(jobRepository.leaseNextProcessMinute(new Date(now.getTime() + 60_000))?.key)
+    expect(jobRepository.leaseNextProcessMinute(new Date(now.getTime() + 179_999))).toBeNull();
+    expect(jobRepository.leaseNextProcessMinute(new Date(now.getTime() + 180_000))?.key)
       .toBe(`minute:${minuteFixture.minuteId}`);
+  });
+
+  it('raises an explicit LeaseLost error when a status CAS misses', () => {
+    const harness = createHarness();
+    const leaseExpiry = new Date(harness.job.leaseExpiresAt ?? 'invalid');
+
+    expect(() => harness.dependencies.jobRepository.markCompleted(
+      harness.job,
+      leaseExpiry
+    )).toThrow(expect.objectContaining({ code: 'LEASE_LOST' }));
+    expect(readJobStatus(harness.client)).toBe('processing');
   });
 
   it('prevents an expired worker from persisting or completing a reclaimed job', async () => {
@@ -160,7 +257,7 @@ describe('processMinuteJob', () => {
     jobRepository.enqueueProcessMinute(minuteFixture.minuteId);
 
     const expiredLease = jobRepository.leaseNextProcessMinute(now);
-    const currentLease = jobRepository.leaseNextProcessMinute(new Date(now.getTime() + 60_000));
+    const currentLease = jobRepository.leaseNextProcessMinute(new Date(now.getTime() + 180_000));
     if (!expiredLease || !currentLease) {
       throw new Error('expected both original and reclaimed leases');
     }
@@ -171,7 +268,7 @@ describe('processMinuteJob', () => {
       jobRepository,
       outboxRepository: new OutboxRepository(database.client),
       targetChatId: ivyChatId,
-      now: () => new Date(now.getTime() + 60_001)
+      now: () => new Date(now.getTime() + 180_001)
     });
 
     expect(readJobStatus(database.client)).toBe('processing');
@@ -183,7 +280,7 @@ describe('processMinuteJob', () => {
     const harness = createHarness();
     harness.dependencies.now = leaseExpiryClock(harness.job);
 
-    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('lost_lease');
 
     const result = readResult(harness.client);
     expect(result.jobStatus).toBe('processing');
@@ -195,7 +292,7 @@ describe('processMinuteJob', () => {
     const harness = createHarness({ readerErrorCode: 'MINUTE_NOT_READY' });
     harness.dependencies.now = leaseExpiryClock(harness.job);
 
-    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('retry');
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('lost_lease');
 
     expect(readJobStatus(harness.client)).toBe('processing');
     expect(readResult(harness.client).outboxCount).toBe(0);
@@ -207,10 +304,23 @@ describe('processMinuteJob', () => {
     });
     harness.dependencies.now = leaseExpiryClock(harness.job);
 
-    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('lost_lease');
 
     expect(readJobStatus(harness.client)).toBe('processing');
     expect(readResult(harness.client).outboxCount).toBe(0);
+  });
+
+  it('prevents an expired retry-budget worker from recording a terminal failure', async () => {
+    const harness = createHarness({ readerErrorCode: 'RATE_LIMITED', attempt: 4 });
+    harness.dependencies.now = leaseExpiryClock(harness.job);
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('lost_lease');
+
+    expect(readJobStatus(harness.client)).toBe('processing');
+    expect(readResult(harness.client)).toMatchObject({
+      summaryCount: 0,
+      outboxCount: 0
+    });
   });
 
   it('permanently fails invalid summarizer output with a redacted reason', async () => {
@@ -262,6 +372,47 @@ describe('processMinuteJob', () => {
       failureReason: 'SUMMARY_RENDER_INVALID'
     });
     expect(row.payload).not.toContain('未知能力任务');
+    expect(readResult(harness.client)).toMatchObject({
+      summaryCount: 0,
+      todoCount: 0,
+      outboxCount: 0
+    });
+  });
+
+  it('persists an honest summary when decisions, risks, and Todos are empty', async () => {
+    const harness = createHarness({
+      summary: {
+        ...summaryDraft,
+        confirmedDecisions: [],
+        risks: [],
+        todos: []
+      }
+    });
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+
+    const result = readResult(harness.client);
+    expect(result.jobStatus).toBe('completed');
+    expect(result.todoCount).toBe(0);
+    expect(result.outbox[0]?.body).toContain('暂无可由 Codex 直接推进的事项');
+  });
+
+  it('fails oversized structured output before any summary transaction', async () => {
+    const harness = createHarness({
+      summary: {
+        ...summaryDraft,
+        todos: [{
+          ...summaryDraft.todos[0]!,
+          title: '界'.repeat(300)
+        }]
+      }
+    });
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+    expect(readJob(harness.client)).toMatchObject({
+      status: 'failed',
+      payload: { failureReason: 'SUMMARIZER_OUTPUT_INVALID' }
+    });
     expect(readResult(harness.client)).toMatchObject({
       summaryCount: 0,
       todoCount: 0,
@@ -345,6 +496,28 @@ function readJobStatus(client: Database.Database): string {
     SELECT status FROM batch_jobs WHERE stable_key = ?
   `).get(`minute:${minuteFixture.minuteId}`) as { status: string };
   return row.status;
+}
+
+function readRawJob(client: Database.Database): {
+  status: string;
+  payload: string;
+  updated_at: string;
+} {
+  return client.prepare(`
+    SELECT status, payload, updated_at FROM batch_jobs WHERE stable_key = ?
+  `).get(`minute:${minuteFixture.minuteId}`) as {
+    status: string;
+    payload: string;
+    updated_at: string;
+  };
+}
+
+function readJob(client: Database.Database): {
+  status: string;
+  payload: Record<string, unknown>;
+} {
+  const row = readRawJob(client);
+  return { status: row.status, payload: JSON.parse(row.payload) as Record<string, unknown> };
 }
 
 function leaseExpiryClock(job: { leaseExpiresAt?: string }): () => Date {

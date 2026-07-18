@@ -69,10 +69,10 @@ describe('POST /webhooks/feishu/events', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ status: 'accepted' });
-    expect(harness.workerCalls).toBe(0);
     expect(harness.jobRepository.list()).toMatchObject([
       { kind: 'process_minute', key: 'minute:min_fixture_1' }
     ]);
+    expect(harness.persistedEffects()).toEqual({ summaries: 0, outbox: 0 });
     await harness.close();
   });
 
@@ -112,7 +112,7 @@ describe('POST /webhooks/feishu/events', () => {
       status: 'reply_decision',
       decision: { kind: 'clarify', reason: 'todo_not_found' }
     });
-    expect(harness.workerCalls).toBe(0);
+    expect(harness.persistedEffects()).toEqual({ summaries: 0, outbox: 0 });
     await harness.close();
   });
 
@@ -273,7 +273,6 @@ function createHarness(
   migrateDatabase(database.client);
   const meetingRepository = new MeetingRepository(database.client);
   const jobRepository = new JobRepository(database.client);
-  let workerCalls = 0;
   const app = buildApp({
     readiness: () => ({ ready: true }),
     verificationToken,
@@ -293,11 +292,14 @@ function createHarness(
     app,
     jobRepository,
     meetingRepository,
-    get workerCalls() {
-      return workerCalls;
-    },
-    callWorker() {
-      workerCalls += 1;
+    persistedEffects() {
+      const summaries = database.client.prepare(
+        'SELECT COUNT(*) AS count FROM meeting_summaries'
+      ).get() as { count: number };
+      const outbox = database.client.prepare(
+        'SELECT COUNT(*) AS count FROM outbox'
+      ).get() as { count: number };
+      return { summaries: summaries.count, outbox: outbox.count };
     },
     async close() {
       await app.close();

@@ -8,6 +8,7 @@ const commaSeparatedIds = (prefix: string, message: string) =>
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  HOST: z.string().trim().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().trim().min(1),
   FEISHU_APP_ID: z.string().trim().min(1),
@@ -23,13 +24,35 @@ const envSchema = z.object({
   WEBHOOK_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(300),
   CODEX_COMMAND: z.string().trim().min(1).default('codex'),
   CODEX_WORKDIR: z.string().trim().min(1),
-  CODEX_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(120)
+  CODEX_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(120),
+  WORKER_LEASE_SECONDS: z.coerce.number().int().positive().default(180)
+}).superRefine((config, context) => {
+  if (
+    config.NODE_ENV !== 'test' &&
+    /fixture|placeholder|change[-_ ]?me|replace[-_ ]?me/iu.test(
+      config.FEISHU_VERIFICATION_TOKEN
+    )
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['FEISHU_VERIFICATION_TOKEN'],
+      message: 'fixture verification token is allowed only in NODE_ENV=test'
+    });
+  }
+  if (config.WORKER_LEASE_SECONDS <= config.CODEX_TIMEOUT_SECONDS) {
+    context.addIssue({
+      code: 'custom',
+      path: ['WORKER_LEASE_SECONDS'],
+      message: 'worker lease must be longer than the downstream timeout'
+    });
+  }
 });
 
 type DatabaseKind = 'postgresql' | 'sqlite';
 
 export interface AppConfig {
   environment: 'development' | 'test' | 'production';
+  host: string;
   port: number;
   database: {
     url: string;
@@ -50,6 +73,9 @@ export interface AppConfig {
     command: string;
     workdir: string;
     timeoutSeconds: number;
+  };
+  worker: {
+    leaseSeconds: number;
   };
 }
 
@@ -75,6 +101,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
 
   return {
     environment: parsed.NODE_ENV,
+    host: parsed.HOST,
     port: parsed.PORT,
     database: {
       url: parsed.DATABASE_URL,
@@ -95,6 +122,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       command: parsed.CODEX_COMMAND,
       workdir: parsed.CODEX_WORKDIR,
       timeoutSeconds: parsed.CODEX_TIMEOUT_SECONDS
+    },
+    worker: {
+      leaseSeconds: parsed.WORKER_LEASE_SECONDS
     }
   };
 }

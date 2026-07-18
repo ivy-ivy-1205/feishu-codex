@@ -5,7 +5,7 @@
 - 项目：Project 6 / FeishuAdaptor，是 AiJia Context OS 的飞书 × Codex Bridge MVP。
 - 启动日期：2026-07-18。
 - 当前工作区初始为空，`~/.codex/templates/` 在本机不存在，因此首次启动时创建了最小等价的 `AGENTS.md` 与 `MEMORY.md`。
-- Ivy 已批准进入 Phase 1、通过书面 spec，并批准腾讯云服务器只读 Preflight。Phase 1A 实施计划已生成，尚未开始编码或部署。
+- Ivy 已批准进入 Phase 1、通过书面 spec，并批准腾讯云服务器只读 Preflight。Phase 1A 本地 fixture 实现已完成并进入最终分支复核；尚未连接真实飞书或部署。
 
 ## 已确认边界
 
@@ -64,6 +64,9 @@
 - Phase 1A Task 4 的 meeting worker 复用 `batch_jobs.updated_at` 表示下一次可执行时间或 60 秒 lease 到期时间；所有 ownership、persist 和状态 CAS 都要求相同决策时间满足 `leaseExpiresAt > now`，防止已到期但尚未被 reclaim 的 worker 落库。summary/Todos 与稳定键 `minute-summary:<minuteId>` 的 outbox 在同一 transaction 写入，delivery ack 再以单一 transaction 把真实消息 ID 绑定到 summary 并标记 outbox delivered，使回复能恢复 Todo；`meeting_summaries.minute_id` 唯一约束保证同一妙记只生成一次。
 - Phase 1A Task 6 的授权采用 capability fail-closed：Todo capability 是数据库持久化闭集，旧记录回填 `unknown`；只有明确安全的 `content_draft` 且 risk 为 low 才能直接授权，缺失、未知、risk high 或代码写入/外发消息/部署/删除/生产访问一律进入二次确认。回复 lookup 还必须关联同一 minute 的 `minute-summary` outbox，且只有 delivery ack 后 `status=delivered` 并存在 `delivered_at` 才能解析 Todo，不能把 `om_` 字符串格式当成投递证明。
 - Phase 1A 的 `/ready` 必须同时验证数据库可用和 durable-job consumer 可用；当前 server 尚未启动 worker consumer，因此应明确返回 `WORKER_UNAVAILABLE`，不能仅因 migration 成功就宣称 ready。
+- Phase 1A worker 的 lease 默认 180 秒，且启动配置强制 lease 长于下游 Codex timeout；所有 job 终态/重试 CAS miss 必须显式返回 `lost_lease`，不能把失去所有权伪装为完成。`MINUTE_NOT_READY` 与 `RATE_LIMITED` 分别使用有限重试预算，attempt 持久化后跨 SQLite 重启延续，预算耗尽才在有效 lease 下写入脱敏终态。
+- 结构化总结允许“没有已确认决策、没有已知风险、没有可执行 Todo”，这种情况下仍发送诚实总结并明确显示暂无 Codex 可推进事项。summarizer 输出在事务前执行字段、数组及整体 UTF-8 byte 上限校验，非法输出只保存 typed failure code。
+- Phase 1A HTTP 服务默认只监听 `127.0.0.1`；只有显式配置 `HOST=0.0.0.0` 才监听所有接口。非测试环境拒绝仓库内 fixture verification token，防止占位凭据随公网监听误启动。
 
 ## Phase 0 Preflight 结果
 

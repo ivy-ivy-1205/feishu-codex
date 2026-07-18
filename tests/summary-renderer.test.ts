@@ -108,6 +108,18 @@ describe('renderMeetingSummary', () => {
     }])).toThrow(/cannot be offered as executable/);
   });
 
+  it('honestly says when Codex has no executable follow-up', () => {
+    const text = renderMeetingSummary({
+      ...fixtureSummary,
+      confirmedDecisions: [],
+      risks: []
+    }, []);
+
+    expect(text).toContain('我可以帮你推进');
+    expect(text).toContain('暂无可由 Codex 直接推进的事项');
+    expect(text).not.toMatch(/\n1\. /);
+  });
+
   it('rejects empty core insights', () => {
     expect(() => renderMeetingSummary({
       ...fixtureSummary,

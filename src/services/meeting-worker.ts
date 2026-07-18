@@ -1,10 +1,15 @@
 import { z } from 'zod';
 import { MinuteContext, type FeishuMinutesReader } from '../ports/feishu.js';
 import {
-  MeetingSummaryDraft,
+  parseMeetingSummaryDraft,
+  SummarizerOutputValidationError,
   type MeetingSummarizer
 } from '../ports/summarizer.js';
-import { JobRepository, type DurableJob } from '../repositories/job-repository.js';
+import {
+  JobRepository,
+  LeaseLostError,
+  type DurableJob
+} from '../repositories/job-repository.js';
 import { MeetingRepository } from '../repositories/meeting-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
 import {
@@ -13,6 +18,11 @@ import {
 } from './summary-renderer.js';
 
 const maximumRetryDelayMs = 60_000;
+const retryBudgets = {
+  MINUTE_NOT_READY: 8,
+  RATE_LIMITED: 5
+} as const;
+type RetriableCode = keyof typeof retryBudgets;
 
 export interface MeetingWorkerDependencies {
   reader: FeishuMinutesReader;
@@ -27,13 +37,15 @@ export interface MeetingWorkerDependencies {
 export async function processMinuteJob(
   job: DurableJob,
   dependencies: MeetingWorkerDependencies
-): Promise<'completed' | 'retry'> {
+): Promise<'completed' | 'retry' | 'lost_lease'> {
   assertSharedClient(dependencies);
   const now = dependencies.now ?? (() => new Date());
 
   try {
     const context = MinuteContext.parse(await dependencies.reader.getMinute(job.minuteId));
-    const draft = MeetingSummaryDraft.parse(await dependencies.summarizer.summarize(context));
+    const draft = parseMeetingSummaryDraft(
+      await dependencies.summarizer.summarize(context)
+    );
     const summaryId = `summary:${job.minuteId}`;
     const meeting = {
       title: context.title,
@@ -91,33 +103,74 @@ export async function processMinuteJob(
     })();
 
     if (!persisted) {
-      return 'completed';
+      return 'lost_lease';
     }
 
     dependencies.jobRepository.markCompleted(job, operationNow);
     return 'completed';
   } catch (error) {
-    if (isRetriable(error)) {
-      const operationNow = now();
-      const retryAt = new Date(operationNow.getTime() + retryDelayMs(job.attempt));
-      dependencies.jobRepository.markRetry(job, retryAt, operationNow);
-      return 'retry';
+    if (error instanceof LeaseLostError) {
+      return 'lost_lease';
     }
 
-    if (error instanceof z.ZodError) {
+    const retriableCode = retriableErrorCode(error);
+    if (retriableCode) {
       const operationNow = now();
-      dependencies.jobRepository.markFailed(
+      if (job.attempt + 1 >= retryBudgets[retriableCode]) {
+        try {
+          dependencies.jobRepository.markFailed(
+            job,
+            `${retriableCode}_RETRY_EXHAUSTED`,
+            operationNow
+          );
+          return 'completed';
+        } catch (failure) {
+          if (failure instanceof LeaseLostError) {
+            return 'lost_lease';
+          }
+          throw failure;
+        }
+      }
+      const retryAt = new Date(operationNow.getTime() + retryDelayMs(job.attempt));
+      try {
+        dependencies.jobRepository.markRetry(job, retryAt, operationNow);
+        return 'retry';
+      } catch (failure) {
+        if (failure instanceof LeaseLostError) {
+          return 'lost_lease';
+        }
+        throw failure;
+      }
+    }
+
+    if (error instanceof SummarizerOutputValidationError) {
+      const operationNow = now();
+      return markPermanentFailure(
+        dependencies.jobRepository,
         job,
-        'SUMMARIZER_OUTPUT_INVALID',
+        error.code,
         operationNow
       );
-      return 'completed';
     }
 
     if (error instanceof MeetingSummaryRenderError) {
       const operationNow = now();
-      dependencies.jobRepository.markFailed(job, error.code, operationNow);
-      return 'completed';
+      return markPermanentFailure(
+        dependencies.jobRepository,
+        job,
+        error.code,
+        operationNow
+      );
+    }
+
+    if (error instanceof z.ZodError) {
+      const operationNow = now();
+      return markPermanentFailure(
+        dependencies.jobRepository,
+        job,
+        'MINUTE_CONTEXT_INVALID',
+        operationNow
+      );
     }
 
     throw error;
@@ -128,11 +181,30 @@ function retryDelayMs(attempt: number): number {
   return Math.min(1_000 * 2 ** attempt, maximumRetryDelayMs);
 }
 
-function isRetriable(error: unknown): boolean {
+function retriableErrorCode(error: unknown): RetriableCode | null {
   if (!error || typeof error !== 'object' || !('code' in error)) {
-    return false;
+    return null;
   }
-  return error.code === 'MINUTE_NOT_READY' || error.code === 'RATE_LIMITED';
+  return error.code === 'MINUTE_NOT_READY' || error.code === 'RATE_LIMITED'
+    ? error.code
+    : null;
+}
+
+function markPermanentFailure(
+  jobRepository: JobRepository,
+  job: DurableJob,
+  reason: string,
+  failedAt: Date
+): 'completed' | 'lost_lease' {
+  try {
+    jobRepository.markFailed(job, reason, failedAt);
+    return 'completed';
+  } catch (error) {
+    if (error instanceof LeaseLostError) {
+      return 'lost_lease';
+    }
+    throw error;
+  }
 }
 
 function assertSharedClient(dependencies: MeetingWorkerDependencies): void {

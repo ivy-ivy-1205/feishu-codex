@@ -16,7 +16,9 @@ if (config.database.kind !== 'sqlite') {
 const database = createSqliteDatabase(config.database.url);
 migrateDatabase(database.client);
 const meetingRepository = new MeetingRepository(database.client);
-const jobRepository = new JobRepository(database.client);
+const jobRepository = new JobRepository(database.client, {
+  leaseDurationMs: config.worker.leaseSeconds * 1_000
+});
 
 const app = buildApp({
   readiness: createServiceReadiness({
@@ -49,7 +51,7 @@ process.once('SIGINT', () => void shutdown());
 process.once('SIGTERM', () => void shutdown());
 
 try {
-  await app.listen({ port: config.port, host: '0.0.0.0' });
+  await app.listen({ port: config.port, host: config.host });
 } catch (error) {
   app.log.error({ err: error }, 'Server failed to start');
   await shutdown();
