@@ -101,6 +101,22 @@ export class MeetingRepository {
     return save();
   }
 
+  findSummaryByMinute(minuteId: string): MeetingSummaryRecord | null {
+    const row = this.client.prepare(`
+      SELECT id, minute_id, summary_message_id, content, created_at
+      FROM meeting_summaries
+      WHERE minute_id = ?
+    `).get(minuteId) as SummaryRow | undefined;
+
+    return row ? {
+      id: row.id,
+      minuteId: row.minute_id,
+      summaryMessageId: row.summary_message_id,
+      content: row.content,
+      createdAt: row.created_at
+    } : null;
+  }
+
   listTodos(summaryId: string): MeetingTodoRecord[] {
     const rows = this.client.prepare(`
       SELECT id, summary_id, displayed_number, title, description, risk, status, created_at
@@ -133,6 +149,14 @@ interface TodoRow {
   description: string;
   risk: MeetingTodoDraft['risk'];
   status: MeetingTodoDraft['status'];
+  created_at: string;
+}
+
+interface SummaryRow {
+  id: string;
+  minute_id: string;
+  summary_message_id: string;
+  content: string;
   created_at: string;
 }
 

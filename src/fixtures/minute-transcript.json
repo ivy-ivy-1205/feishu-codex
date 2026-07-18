@@ -1,0 +1,26 @@
+{
+  "minuteId": "min_fixture_1",
+  "title": "Project 6 Phase 1A 周会",
+  "startedAt": "2026-07-18T02:00:00.000Z",
+  "endedAt": "2026-07-18T02:30:00.000Z",
+  "transcript": [
+    {
+      "speakerName": "Ivy",
+      "startMs": 0,
+      "endMs": 180000,
+      "text": "确认决定：Phase 1A 只做本地 fixture 闭环，不连接真实飞书或 Codex。Todo 候选 1：整理本次会议的三条核心信息。"
+    },
+    {
+      "speakerName": "工程负责人",
+      "startMs": 180001,
+      "endMs": 360000,
+      "text": "风险：妙记转录可能暂未就绪，worker 必须稍后重试且不能生成空纪要。Todo 候选 2：起草转录未就绪时的用户提示。"
+    },
+    {
+      "speakerName": "Codex",
+      "startMs": 360001,
+      "endMs": 540000,
+      "text": "Todo 候选 3：生成 Phase 1A 验收清单。以上三项都是 Codex 可协助完成的低风险内容工作，但不会自动执行。"
+    }
+  ]
+}

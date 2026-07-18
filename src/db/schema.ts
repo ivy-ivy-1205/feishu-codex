@@ -20,6 +20,7 @@ export const meetingSummaries = sqliteTable('meeting_summaries', {
   content: text('content').notNull(),
   createdAt: text('created_at').notNull()
 }, (table) => [
+  uniqueIndex('meeting_summaries_minute_id_unique').on(table.minuteId),
   uniqueIndex('meeting_summaries_summary_message_id_unique').on(table.summaryMessageId)
 ]);
 

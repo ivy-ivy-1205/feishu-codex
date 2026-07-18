@@ -21,6 +21,9 @@ const migrationSql = `
     created_at TEXT NOT NULL
   );
 
+  CREATE UNIQUE INDEX IF NOT EXISTS meeting_summaries_minute_id_unique
+    ON meeting_summaries(minute_id);
+
   CREATE TABLE IF NOT EXISTS meeting_todos (
     id TEXT PRIMARY KEY,
     summary_id TEXT NOT NULL REFERENCES meeting_summaries(id),
