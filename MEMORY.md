@@ -5,7 +5,7 @@
 - 项目：Project 6 / FeishuAdaptor，是 AiJia Context OS 的飞书 × Codex Bridge MVP。
 - 启动日期：2026-07-18。
 - 当前工作区初始为空，`~/.codex/templates/` 在本机不存在，因此首次启动时创建了最小等价的 `AGENTS.md` 与 `MEMORY.md`。
-- Ivy 已批准进入 Phase 1、通过书面 spec，并批准腾讯云服务器只读 Preflight。Phase 1A 本地 fixture 实现已完成并进入最终分支复核；尚未连接真实飞书或部署。
+- Ivy 已批准进入 Phase 1、通过书面 spec，并批准腾讯云服务器只读 Preflight。Phase 1A 本地 fixture 实现与最终分支复核已完成，并于 2026-07-18 合并到本地 `main`；尚未连接真实飞书或部署。
 
 ## 已确认边界
 
