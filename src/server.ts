@@ -1,9 +1,13 @@
 import { buildApp } from './app.js';
+import { createFeishuIntegration } from './composition/feishu.js';
+import { createMeetingSummarizer } from './composition/meeting-summarizer.js';
+import { createWorkerRuntime } from './composition/worker-runtime.js';
 import { loadConfig } from './config.js';
 import { createSqliteDatabase } from './db/client.js';
 import { migrateDatabase } from './db/migrate.js';
 import { JobRepository } from './repositories/job-repository.js';
 import { MeetingRepository } from './repositories/meeting-repository.js';
+import { OutboxRepository } from './repositories/outbox-repository.js';
 import { createServiceReadiness } from './routes/health.js';
 import { ingestMinuteGenerated } from './services/minute-ingestion.js';
 import { routeReply } from './services/reply-router.js';
@@ -19,11 +23,35 @@ const meetingRepository = new MeetingRepository(database.client);
 const jobRepository = new JobRepository(database.client, {
   leaseDurationMs: config.worker.leaseSeconds * 1_000
 });
+const outboxRepository = new OutboxRepository(database.client);
+const meetingSummarizer = createMeetingSummarizer({ config });
+const feishuIntegration = createFeishuIntegration({ config });
+const workerRuntime = createWorkerRuntime(
+  config.worker.enabled
+    ? {
+      enabled: true,
+      meetingRepository,
+      jobRepository,
+      outboxRepository,
+      reader: feishuIntegration.reader,
+      summarizer: meetingSummarizer,
+      delivery: feishuIntegration.delivery,
+      targetChatId: config.feishu.ivyPrivateChatId,
+      intervalMs: config.worker.pollIntervalMs
+    }
+    : {
+      enabled: false
+    }
+);
+workerRuntime.start();
 
 const app = buildApp({
   readiness: createServiceReadiness({
     checkDatabase: () => database.client.prepare('SELECT 1').get(),
-    isWorkerConsumptionAvailable: () => false
+    isFeishuReaderAvailable: () => config.worker.enabled,
+    isFeishuDeliveryAvailable: () => config.worker.enabled,
+    isWorkerConsumptionAvailable: () => workerRuntime.isConsumptionAvailable(),
+    isCodexAuthAvailable: () => false
   }),
   verificationToken: config.feishu.verificationToken,
   ingestMinute: (event) => ingestMinuteGenerated(event, {
@@ -43,6 +71,7 @@ async function shutdown(): Promise<void> {
     return;
   }
   shuttingDown = true;
+  await workerRuntime.stop();
   await app.close();
   database.close();
 }

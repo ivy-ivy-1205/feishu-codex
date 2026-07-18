@@ -58,4 +58,27 @@ describe('loadConfig', () => {
       CODEX_TIMEOUT_SECONDS: '120'
     })).toThrow(/lease.*downstream timeout/i);
   });
+
+  it('keeps the Codex summarizer disabled unless explicitly configured', () => {
+    expect(loadConfig(baseEnv).codex.summarizerMode).toBe('fake');
+    expect(loadConfig({
+      ...baseEnv,
+      CODEX_SUMMARIZER_MODE: 'codex'
+    }).codex.summarizerMode).toBe('codex');
+  });
+
+  it('keeps worker consumption disabled unless explicitly configured', () => {
+    expect(loadConfig(baseEnv).worker).toMatchObject({
+      enabled: false,
+      pollIntervalMs: 1_000
+    });
+    expect(loadConfig({
+      ...baseEnv,
+      WORKER_ENABLED: 'true',
+      WORKER_POLL_INTERVAL_MS: '250'
+    }).worker).toMatchObject({
+      enabled: true,
+      pollIntervalMs: 250
+    });
+  });
 });

@@ -2,13 +2,22 @@ import type { FastifyInstance } from 'fastify';
 
 export type ReadinessStatus =
   | { ready: true }
-  | { ready: false; reason: string };
+  | { ready: false; reason: string; blockers?: ReadinessBlocker[] };
+
+export type ReadinessBlocker =
+  | 'FEISHU_READER_UNAVAILABLE'
+  | 'FEISHU_DELIVERY_UNAVAILABLE'
+  | 'WORKER_CONSUMER_UNAVAILABLE'
+  | 'CODEX_AUTH_UNAVAILABLE';
 
 export type ReadinessCheck = () => ReadinessStatus | Promise<ReadinessStatus>;
 
 export interface ServiceReadinessDependencies {
   checkDatabase(): unknown | Promise<unknown>;
   isWorkerConsumptionAvailable(): boolean | Promise<boolean>;
+  isFeishuReaderAvailable?: () => boolean | Promise<boolean>;
+  isFeishuDeliveryAvailable?: () => boolean | Promise<boolean>;
+  isCodexAuthAvailable?: () => boolean | Promise<boolean>;
 }
 
 export function createServiceReadiness(
@@ -21,15 +30,40 @@ export function createServiceReadiness(
       return { ready: false, reason: 'DATABASE_UNAVAILABLE' };
     }
 
-    try {
-      if (!await dependencies.isWorkerConsumptionAvailable()) {
-        return { ready: false, reason: 'WORKER_UNAVAILABLE' };
-      }
-    } catch {
-      return { ready: false, reason: 'WORKER_UNAVAILABLE' };
+    const blockers: ReadinessBlocker[] = [];
+    if (!await probe(dependencies.isFeishuReaderAvailable)) {
+      blockers.push('FEISHU_READER_UNAVAILABLE');
+    }
+    if (!await probe(dependencies.isFeishuDeliveryAvailable)) {
+      blockers.push('FEISHU_DELIVERY_UNAVAILABLE');
+    }
+    if (!await probe(dependencies.isWorkerConsumptionAvailable)) {
+      blockers.push('WORKER_CONSUMER_UNAVAILABLE');
+    }
+    if (!await probe(dependencies.isCodexAuthAvailable)) {
+      blockers.push('CODEX_AUTH_UNAVAILABLE');
+    }
+
+    if (blockers.length > 0) {
+      return {
+        ready: false,
+        reason: 'READINESS_BLOCKED',
+        blockers
+      };
     }
     return { ready: true };
   };
+}
+
+async function probe(check: (() => boolean | Promise<boolean>) | undefined): Promise<boolean> {
+  if (!check) {
+    return true;
+  }
+  try {
+    return await check();
+  } catch {
+    return false;
+  }
 }
 
 export function registerHealthRoutes(

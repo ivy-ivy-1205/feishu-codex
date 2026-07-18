@@ -10,8 +10,10 @@
 ## 已确认边界
 
 - 部署目标是腾讯云新加坡，不是 AWS 悉尼。
+- Ivy 要求所有腾讯云服务器操作逐次事前审批：包括通过管理员/root SSH 入口登录、只读探测、安装、配置修改、部署和服务重启；未获得当次明确同意前不得执行任何服务器命令。
 - 使用服务器本地 Codex CLI 和 Ivy 现有 ChatGPT/Codex 账号交互式登录。
 - 不增加 OpenAI API Key，不自动切换 API，不产生额外 OpenAI API 按量费用。
+- 本项目只允许用 Codex CLI + Ivy 现有 Codex/ChatGPT 账号实现 AI 执行；worker 只能做异步调度、重试、状态机和授权闸门，不得直接调用 OpenAI API、不得引入隐藏 token 费用。
 - MVP 不连接客户生产数据库，不持有生产凭据，不自动执行候选任务。
 - 审批通过只把任务标记为 `APPROVED`，不得触发代码修改、命令执行或部署。
 - 白名单群范围已确认为全部可见历史消息、全部话题回复、聊天附件及群内引用的飞书文件，不限于 @机器人消息。
@@ -47,6 +49,7 @@
 - SQLite 的 Drizzle table declaration 与 `src/db/migrate.ts` 都是 schema source；两者必须使用相同名称与语义的约束，尤其是 `meeting_todos` 的编号、风险和状态 CHECK 约束。
 - 保留需求指定的 Webhook；入口只做验证、白名单、幂等落库和入队，Codex 在异步 worker 执行。
 - Codex 调用固定使用 read-only、ephemeral、ignore-user-config、output-schema、隔离工作目录和 stdin；应用层再次校验 JSON 与来源。
+- 所有 AI 总结、理解会议和 Todo 执行都必须通过本地 Codex runtime/CLI；低风险任务也只能在 Ivy 明确授权后进入 Codex CLI 执行链路，高风险动作继续要求二次确认。
 - SQLite 是单机 MVP 默认；只有腾讯云已有可复用 PostgreSQL 时才切换。
 - 安全边界以“无自动执行代码路径 + Ivy-only 状态机 + OS 低权限隔离”为核心，不依赖 prompt 自律。
 - 历史同步采用 chat 分页 + thread 二次分页 + 附件/文档引用解析 + 断点游标；完成后切换 Webhook 增量。
@@ -67,6 +70,20 @@
 - Phase 1A worker 的 lease 默认 180 秒，且启动配置强制 lease 长于下游 Codex timeout；所有 job 终态/重试 CAS miss 必须显式返回 `lost_lease`，不能把失去所有权伪装为完成。`MINUTE_NOT_READY` 与 `RATE_LIMITED` 的计数以 `attemptsByCode` 分别持久化并跨 SQLite 重启延续，交替错误不会消耗对方预算；旧版共享 `attempt` 会保守映射到两类计数，非法 legacy payload 在 migration 时 fail closed。
 - 结构化总结允许“没有已确认决策、没有已知风险、没有可执行 Todo”，这种情况下仍发送诚实总结并明确显示暂无 Codex 可推进事项。summarizer 输出在事务前执行字段、数组及整体 UTF-8 byte 上限校验，非法输出只保存 typed failure code。
 - Phase 1A HTTP 服务默认只监听 `127.0.0.1`；只有显式配置 `HOST=0.0.0.0` 才监听所有接口。非测试环境拒绝仓库内 fixture verification token，防止占位凭据随公网监听误启动。
+- 2026-07-18 本地已补齐腾讯云部署骨架但尚未部署：新增 Dockerfile、`.dockerignore`、`tsconfig.build.json`、`deploy/docker-compose.production.yml`、`deploy/bridge.env.example`、`docs/tencent-cloud-deployment.md`，并在 `package.json` 增加 `build`/`start` 与 `packageManager: pnpm@11.9.0`。生产 compose 计划绑定 `127.0.0.1:3010 -> container:3000`，数据挂载到 `/opt/feishu-codex/data/logs/codex-workdir`，secret env 文件位于 `/opt/feishu-codex/secrets/bridge.env` 且不入仓库。容器使用非 root `node` 用户，服务器可写目录需后续授权调整为 uid 1000 可写。
+- 2026-07-18 为兼容 pnpm 11 build-script 安全策略，`pnpm-workspace.yaml` 显式只允许 `better-sqlite3` 与 `esbuild` 执行 build scripts；`.pnpm-store/` 已加入 `.gitignore`。本地验证使用 Codex bundled Node 完成：`pnpm build`、`pnpm typecheck`、`pnpm test` 全部通过（13 个 test files，91 tests）。
+- 2026-07-18 按 TDD 新增 durable job consumer 基础设施：`src/services/job-consumer.ts` 提供 `DurableJobConsumer`，支持 start/stop、`isConsumptionAvailable()`、单次 lease/process、以及防止重叠 tick。新增 `tests/job-consumer.test.ts` 先红后绿验证 lifecycle、处理 leased `process_minute` job、防重入。生产 `/ready` 仍不能直接放行真实飞书事件，需等 consumer 接入真实 Feishu Minutes reader、summarizer 和 message delivery dependencies；全量验证更新为 `pnpm build`、`pnpm typecheck`、`pnpm test` 通过（14 个 test files，94 tests）。
+- 2026-07-18 按 TDD 新增真实飞书适配器边界但尚未接官方 SDK：`src/adapters/feishu.ts` 定义内部最小 `FeishuApiClient`（`getMinuteBasicInfo`、`exportMinuteTranscript`、`sendTextMessage`），并提供 `FeishuMinutesReaderAdapter`、`FeishuMessageDeliveryAdapter`、`deliverPendingMeetingSummaries`。adapter 会把空 transcript 映射为 `MINUTE_NOT_READY` 供 durable worker 重试，并在 outbox delivery 后把真实飞书 `messageId` ack 回 SQLite。新增 `tests/feishu-adapters.test.ts` 先红后绿验证 minute normalization、retry mapping、私聊发送和 outbox delivery ack。官方飞书 SDK client 仍需后续在真实凭据和 Ivy 授权下实现；全量验证更新为 `pnpm build`、`pnpm typecheck`、`pnpm test` 通过（15 个 test files，98 tests）。
+- 2026-07-18 按 TDD 新增 Codex CLI 执行边界但尚未接入生产 worker：`src/adapters/codex-cli.ts` 提供 `CodexCliAdapter` 与 `NodeCodexProcessRunner`，固定构造 `codex exec --sandbox read-only --ephemeral --ignore-user-config --output-schema <json>`，通过 stdin 发送任务输入，并从子进程环境剥离 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_ORG_ID`、`OPENAI_PROJECT_ID`、`ANTHROPIC_API_KEY`，防止偷偷 fallback 到 OpenAI API 或其他模型 API。新增 `tests/codex-cli-adapter.test.ts` 先红后绿验证只读 CLI flags、API env 清理、非法 JSON typed failure、非零退出 typed failure 和底层 spawn/stdin/stdout/stderr 行为。README 与腾讯云部署说明已更新为：adapter 已存在，但尚未部署、未自动执行 Todo、未接入生产 worker。
+- 2026-07-18 在 Codex CLI adapter 中补入 Auth Gate：每次 `executeJson` 前先运行 `codex login status`，只有成功且显示 ChatGPT 登录状态才继续 `codex exec`；未登录、登录过期或 API-key-like auth status 均 fail closed 为 `CODEX_AUTH_REQUIRED`，且不会运行 `exec`。新增测试覆盖已登录路径、未登录路径和非 ChatGPT 登录路径；部署文档已同步说明该 gate 不保存、不记录 Codex/ChatGPT 凭据。
+- 2026-07-18 按 TDD 新增 `CodexMeetingSummarizer`，把 Codex CLI JSON executor 接到现有 `MeetingSummarizer` port，但尚未接入生产 worker：`src/adapters/codex-summarizer.ts` 会把 minute 元数据与逐字稿渲染成 Ivy 个性化总结 prompt，传入固定 JSON output schema，再用现有 Zod `MeetingSummaryDraft` 做权威校验，非法结构仍 fail closed 为 `SUMMARIZER_OUTPUT_INVALID`。新增 `CODEX_SUMMARIZER_MODE=fake|codex` 配置，默认 `fake`，只有显式 `codex` 才允许后续 worker wiring 使用真实 Codex summarizer；全量验证更新为 `pnpm build`、`pnpm typecheck`、`pnpm test` 通过（17 个 test files，107 tests）。
+- 2026-07-18 按 TDD 新增 production summarizer dependency composition：`src/composition/meeting-summarizer.ts` 根据 `CODEX_SUMMARIZER_MODE` 返回 fake summarizer 或 `CodexMeetingSummarizer + CodexCliAdapter + NodeCodexProcessRunner` 栈；`src/server.ts` 启动时会组装该 summarizer，但仍不启动 durable-job consumer，`/ready` 继续阻塞真实飞书 webhook activation。新增 `tests/meeting-summarizer-composition.test.ts` 覆盖默认 fake、显式 codex、CLI 配置传递；全量验证更新为 `pnpm build`、`pnpm typecheck`、`pnpm test` 通过（18 个 test files，110 tests）。
+- 2026-07-18 按 TDD 细分 `/ready` gate 缺口：`createServiceReadiness` 现在可返回 `READINESS_BLOCKED` 与 blockers 数组，当前 server 明确报告 `FEISHU_READER_UNAVAILABLE`、`FEISHU_DELIVERY_UNAVAILABLE`、`WORKER_CONSUMER_UNAVAILABLE`、`CODEX_AUTH_UNAVAILABLE`；数据库故障仍单独返回 `DATABASE_UNAVAILABLE` 且不泄露错误。新增/更新 `tests/health.test.ts` 覆盖多 blocker、探针异常 fail closed 与 ready 成功路径；本地/部署文档已同步；全量验证更新为 `pnpm build`、`pnpm typecheck`、`pnpm test` 通过（18 个 test files，111 tests）。
+- 2026-07-18 按 TDD 抽出可复用 `CodexAuthProbe`：它复用 Codex process runner，运行 sanitized `codex login status`，只接受成功的 ChatGPT 登录状态；未登录、API-key-like auth 或命令失败都返回 unavailable，不抛出 stderr/secret。`CodexCliAdapter.executeJson` 改为复用该 probe，composition 的 codex 栈也暴露 authProbe；当前 server `/ready` 仍不真实调用 probe，继续报告 `CODEX_AUTH_UNAVAILABLE`，等目标服务器安装 Codex CLI 并由 Ivy 交互式登录后再接入。新增 `tests/codex-auth-probe.test.ts`；全量验证更新为 `pnpm build`、`pnpm typecheck`、`pnpm test` 通过（19 个 test files，114 tests）。
+- 2026-07-18 按 TDD 新增飞书官方 SDK client skeleton：依赖 `@larksuiteoapi/node-sdk@1.71.1`，`src/adapters/feishu-sdk.ts` 提供 `createFeishuSdkClient` 与 `FeishuSdkApiClient`，固定自建应用 `AppType.SelfBuild` + `Domain.Feishu`、silent logger、`client.im.message.create` 文本发送、`client.minutes.v1.minute.get` 妙记基础信息、`client.minutes.v1.minuteTranscript.get` 逐字稿下载入口。新增 `tests/feishu-sdk-client.test.ts` 用 fake SDK client 验证参数形状和 message ID fail closed；未填真实凭据、未发网络请求、未接入生产 worker。注意 SDK transcript API 返回二进制流，stream-to-transcript parser 尚未实现；pnpm build-script 白名单新增 `protobufjs`，全量验证更新为 `pnpm build`、`pnpm typecheck`、`pnpm test` 通过（20 个 test files，118 tests）。
+- 2026-07-18 按 TDD 新增 minute transcript stream parser 并接入 SDK skeleton：`src/adapters/minute-transcript-parser.ts` 把 JSON stream 解析为内部 `TranscriptSegment[]`，支持数组、`segments`/`transcript` 包裹，以及 `speakerName/speaker_name/speaker`、`startMs/start_ms/start_time`、`endMs/end_ms/end_time`、`text/content` 字段别名；非法 JSON、空字段、时间倒挂等 fail closed 为 `MINUTE_TRANSCRIPT_INVALID`。`FeishuSdkApiClient.exportMinuteTranscript` 现在会解析 SDK `getReadableStream()` 返回的 transcript stream；如果真实飞书 transcript 文件格式不同，应更新 parser fixture，不改 worker contract。新增 `tests/minute-transcript-parser.test.ts`，更新 `tests/feishu-sdk-client.test.ts`；全量验证更新为 `pnpm build`、`pnpm typecheck`、`pnpm test` 通过（21 个 test files，123 tests）。
+- 2026-07-18 按 TDD 新增 Feishu SDK reader/delivery composition：`src/composition/feishu.ts` 把 `createFeishuSdkClient`、`FeishuSdkApiClient`、`FeishuMinutesReaderAdapter`、`FeishuMessageDeliveryAdapter` 组装成内部 `reader/delivery` 端口；`src/server.ts` 启动时会构造该栈，但仍不启动 worker、不调用飞书网络、不把 Feishu probes 接入 `/ready`。`/ready` 继续报告 `FEISHU_READER_UNAVAILABLE`、`FEISHU_DELIVERY_UNAVAILABLE`、`WORKER_CONSUMER_UNAVAILABLE`、`CODEX_AUTH_UNAVAILABLE`，直到 Ivy 批准真实凭据与真实联调。新增 `tests/feishu-composition.test.ts`；全量验证更新为 `pnpm build`、`pnpm typecheck`、`pnpm test` 通过（22 个 test files，125 tests）。
+- 2026-07-18 按 TDD 新增 worker runtime 的最后一道假门：配置新增 `WORKER_ENABLED=false|true`（默认 false）与 `WORKER_POLL_INTERVAL_MS`；`src/composition/worker-runtime.ts` 在 disabled 时不 lease job、不消费、不投递，enabled 时把 `Feishu reader → Meeting summarizer → processMinuteJob → outbox delivery ack` 串成一个 durable consumer cycle。`src/server.ts` 已接入该 runtime，默认只组装不启动，显式 `WORKER_ENABLED=true` 才启动 consumer；`CODEX_AUTH_UNAVAILABLE` 仍保持 fail-closed，真实飞书/Codex 联调和部署仍需 Ivy 单独批准。更新 `.env.example`、`deploy/bridge.env.example` 与 docs；全量验证更新为 `pnpm build`、`pnpm typecheck`、`pnpm test` 通过（23 个 test files，128 tests）。
 
 ## Phase 0 Preflight 结果
 
@@ -76,6 +93,15 @@
 - Ivy 已批准进入 Phase 1；消息范围已确认为白名单群全部历史与文件。
 - 消息范围已经由 Ivy 确认为白名单群全部历史与文件。
 - `~/.ssh/config` 中发现腾讯云候选别名 `aijia-tencent`、`aijia-openclaw`、`realagent-prod`；均指向同一候选主机但账号不同。Phase 2 优先尝试最低权限别名，不默认使用 root。
+- 本机 SSH 配置确认 `realagent-prod` 使用 `root@43.156.249.40`；2026-07-18 经 Ivy 逐次批准完成 SSH 握手诊断：服务器主机密钥与本地 known_hosts 匹配，指定私钥获服务器接受，root 公钥认证成功，远程只执行 `true` 并以状态 0 退出。该入口已验证可用，但任何后续服务器命令仍需另行批准。
+- 2026-07-18 经 Ivy 批准使用 `realagent-prod` 完成只读 Docker/Nginx 拓扑检查：公网 80/443/8443 由生产容器 `realagent-nginx` 暴露；其镜像为 `nginx:alpine`、restart policy 为 `unless-stopped`，Nginx 配置从 `/root/RealAgentAI_cc/nginx.conf` bind mount 到 `/etc/nginx/conf.d/default.conf`，证书目录 `/etc/letsencrypt` 和 ACME webroot `/var/www/certbot` 已挂载。另有 staging Nginx 容器 `nginx-staging` 暴露宿主 2096 到容器 8443；本次未读取 Nginx 配置内容、未读取环境变量、未修改服务器状态。
+- 2026-07-18 经 Ivy 批准只读查看 `/root/RealAgentAI_cc/nginx.conf`：配置为单文件 Nginx conf，包含 80 端口 ACME challenge 与 HTTPS 跳转、`aijia.ai/www.aijia.ai` 到 `realagent.aijia.ai` 的 443 跳转、`realagent.aijia.ai` 443 生产反代到 `realagent-ai:8000` 与 `voice-adapter:8100`、以及 8443 staging 反代到宿主 `172.17.0.1:8002/2096`。Bridge 接入应新增独立 `feishu-codex.aijia.ai` server block 和独立证书，不应复用或改写现有 RealAgent 业务路径。
+- 2026-07-18 经 Ivy 批准只读检查证书续签方式：服务器安装了 `/usr/bin/certbot`，现有证书包括 `aijia.ai`（ECDSA，有效至 2026-09-18）和 `realagent.aijia.ai`（ECDSA，有效至 2026-10-01）。自动续签由 root crontab 执行：每天 03:17 运行 `certbot renew --quiet`，deploy hook 会在续签后执行 `docker exec realagent-nginx nginx -s reload`；日志写入 `/var/log/certbot-renew.log`。`/etc/letsencrypt/renewal/` 下已有两个 renewal conf，本次未执行续签、未申请证书、未 reload 服务。
+- 2026-07-18 经 Ivy 批准修改服务器 Nginx 配置：已备份 `/root/RealAgentAI_cc/nginx.conf` 到 `/root/RealAgentAI_cc/nginx.conf.bak.20260718T122537Z`，并追加 `feishu-codex.aijia.ai` 的 80-only ACME challenge server block（`/.well-known/acme-challenge/` 使用 `/var/www/certbot`，其他请求跳转 HTTPS）。`docker exec realagent-nginx nginx -t` 已通过；本次未 reload Nginx，运行态尚未加载该新配置。
+- Ivy 指出 `/root/RealAgentAI_cc` 是 Amy/RealAgent 的部署路径，不应作为 Feishu Codex Bridge 的 workspace。Bridge 应使用独立目录（优先 `/opt/feishu-codex` 或类似独立路径）存放业务代码、env、数据和 compose；公网 80/443 的接入若短期仍需经过现有 `realagent-nginx`，也应把它视为共享边缘网关，而不是把 Bridge 部署进 RealAgent 产品目录。
+- 2026-07-18 经 Ivy 批准已恢复 `/root/RealAgentAI_cc/nginx.conf` 到备份 `/root/RealAgentAI_cc/nginx.conf.bak.20260718T122537Z`；`docker exec realagent-nginx nginx -t` 通过，`server_name feishu-codex.aijia.ai` 已从该配置文件移除。本次未 reload Nginx，因此生产运行态仍未加载过此前的临时 block。
+- 2026-07-18 经 Ivy 批准只读检查服务器目录布局：`/opt` 下已有独立项目 `/opt/market-intel-engine`（含 `docker-compose.yml`），说明 `/opt/<product>` 是可接受的独立服务布局；未发现共享 edge-nginx workspace。`/root` 下已有产品目录包括 `/root/RealAgentAI_cc`、`/root/RealAgentAI_staging` 和 `/root/realagent-daily-news`，Bridge 不应放入这些目录。
+- 2026-07-18 经 Ivy 批准已创建独立服务器 workspace `/opt/feishu-codex`，包含 `app/`、`data/`、`logs/`、`config/`、`secrets/`。目录属主为 `root:root`；除 `secrets/` 为 `700` 外，其余为 `755`。本次未写入凭据、未部署代码、未启动服务。
 - AWS 悉尼别名 `product-sydney-01` 明确不在本项目范围。
 - Ivy 已授权并已使用 SSH 别名 `aijia-tencent` 执行只读 Preflight；该别名解析为非 root 用户。
 - 2026-07-18 已通过 `aijia-tencent` 完成只读 Preflight：OpenCloudOS 9.4、2 vCPU、3.6 GiB RAM、根盘余约 20 GiB；Docker/Compose/Git 可用，Node/npm/Codex 缺失。
@@ -84,4 +110,13 @@
 ## 凭据位置
 
 - 腾讯云 SSH 配置位于 `~/.ssh/config`，对应私钥位于 `~/.ssh/`；只记录位置，不记录密钥内容。
-- 飞书与 Codex 凭据尚未提供。仅可记录凭据所在 Secret 管理位置，不得记录凭据值。
+- 飞书企业自建应用 App ID 为 `cli_aad1fef1c7b81bda`；App Secret 已由 Ivy 创建但尚未写入服务器，后续仅存放于腾讯云运行环境的 Secret/环境变量，不进入仓库或本文档。
+- 2026-07-18 已在飞书开发者后台为 Codex 应用开通：`im:message:send_as_bot`、`minutes:minutes.basic:read`、`minutes:minutes.transcript:export`，以及“读取用户发给机器人的单聊消息”；妙记基本信息与转录文本的数据范围限制为“公开妙记的所有者包含与应用可用范围一致”。
+- 已订阅 `im.message.receive_v1`（应用身份）和 `minutes.minute.generated_v1`（用户身份），两项所需权限均显示已开通；后者需要 Ivy 用户 OAuth，不能据此假设覆盖全公司所有人的妙记。
+- 飞书后台当前事件接收方式为长连接，而 Phase 1A 代码按 Webhook 实现；发布前必须二选一并补齐对应运行时，当前未创建或发布新版本。
+- Ivy 于 2026-07-18 明确倾向保留 Webhook；只读核对确认腾讯云主机 `43.156.249.40` 已开放 80/443，并由容器化 Nginx 提供公网 HTTPS，因此不需要为了缺少 HTTPS 而改成长连接。
+- `aijia.ai` 当前解析到 `13.239.49.33`（AWS），不是腾讯云；腾讯云现有 `realagent.aijia.ai` 解析到 `43.156.249.40`，Let's Encrypt 证书有效至 2026-10-01，但该域名已承载现有 RealAgent 服务，不应复用其业务路径作为飞书回调。
+- 建议为 Bridge 新增独立子域名 `feishu-codex.aijia.ai`，解析到腾讯云 `43.156.249.40`，由现有 Nginx 单独反代到 Bridge 的 localhost 端口；截至核对时 `feishu.aijia.ai`、`codex.aijia.ai`、`webhook.aijia.ai`、`feishu-codex.aijia.ai` 均无 DNS 记录。
+- Ivy 已添加 `feishu-codex.aijia.ai` A 记录到 `43.156.249.40`，且未开启 Cloudflare 橙云代理；2026-07-18 本机默认解析器、`1.1.1.1` 与 `8.8.8.8` 均已解析到 `43.156.249.40`。
+- “测试企业和人员”当前无测试企业；创建测试企业会建立隔离组织，尚未执行。
+- Encrypt Key 与 Verification Token 的后台位置为“开发配置 → 事件与回调 → 加密策略”；仅在事件/回调发送到开发者服务器时生效，长连接模式无需配置。凭据值不得写入仓库或本文档。

@@ -40,6 +40,10 @@ cp .env.example .env
 
 `WORKER_LEASE_SECONDS` 必须严格大于 `CODEX_TIMEOUT_SECONDS`。默认分别为 180 秒和 120 秒，避免下游仍在运行时 lease 已被其他 worker 回收；失去 lease 的 worker 返回 `lost_lease`，不会写入完成、重试或失败状态。
 
+`WORKER_ENABLED` 默认是 `false`。server 会组装真实 worker 依赖，但不会开始消费 durable jobs；只有显式设置为 `true` 才启动 consumer。不要在真实凭据、Codex 登录、飞书回调联调完成前打开它。
+
+`CODEX_SUMMARIZER_MODE` 默认是 `fake`。只有显式设置为 `codex` 时，后续接入 worker 的 summarizer 才允许通过本地 Codex CLI adapter 运行真实结构化总结；该路径仍会先检查 `codex login status`，且不会使用 OpenAI API Key fallback。
+
 Phase 1A 测试直接注入依赖，不从 `.env` 读取真实凭据。不要把真实 secret、Codex 登录信息或客户数据库连接写入仓库。
 
 ## 最小验收闭环
@@ -97,7 +101,10 @@ pnpm dev
 ```
 
 - `GET /health` 只表示进程存活。
-- `GET /ready` 当前应返回 `503 WORKER_UNAVAILABLE`，因为 Phase 1A server 没有启动 durable-job consumer。
+- `GET /ready` 当前应返回 `503 READINESS_BLOCKED`，并列出尚未接入的 blockers：`FEISHU_READER_UNAVAILABLE`、`FEISHU_DELIVERY_UNAVAILABLE`、`WORKER_CONSUMER_UNAVAILABLE`、`CODEX_AUTH_UNAVAILABLE`。
+- server 启动时会根据 `CODEX_SUMMARIZER_MODE` 组装 summarizer 依赖，但当前不会启动 worker consumer，因此不会因为设置为 `codex` 就自动消费妙记或执行 Codex。
+- server 启动时也会组装 Feishu SDK reader/delivery 依赖；这一步只构造本地对象，不读取妙记、不发送消息，也不会让 `/ready` 放行。
+- worker runtime 已接好 `reader → summarizer → outbox delivery` 的依赖链，但受 `WORKER_ENABLED=false` 保护；默认不会 lease job。
 - `POST /webhooks/feishu/events` 可验证本地 envelope、幂等入队和 reply decision。
 - 本地进程不会自动运行 worker；完整 fixture injection + 单次 worker cycle 由 acceptance harness 明确驱动。
 

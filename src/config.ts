@@ -25,7 +25,10 @@ const envSchema = z.object({
   CODEX_COMMAND: z.string().trim().min(1).default('codex'),
   CODEX_WORKDIR: z.string().trim().min(1),
   CODEX_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(120),
-  WORKER_LEASE_SECONDS: z.coerce.number().int().positive().default(180)
+  CODEX_SUMMARIZER_MODE: z.enum(['fake', 'codex']).default('fake'),
+  WORKER_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  WORKER_LEASE_SECONDS: z.coerce.number().int().positive().default(180),
+  WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1_000)
 }).superRefine((config, context) => {
   if (
     config.NODE_ENV !== 'test' &&
@@ -73,9 +76,12 @@ export interface AppConfig {
     command: string;
     workdir: string;
     timeoutSeconds: number;
+    summarizerMode: 'fake' | 'codex';
   };
   worker: {
+    enabled: boolean;
     leaseSeconds: number;
+    pollIntervalMs: number;
   };
 }
 
@@ -121,10 +127,13 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     codex: {
       command: parsed.CODEX_COMMAND,
       workdir: parsed.CODEX_WORKDIR,
-      timeoutSeconds: parsed.CODEX_TIMEOUT_SECONDS
+      timeoutSeconds: parsed.CODEX_TIMEOUT_SECONDS,
+      summarizerMode: parsed.CODEX_SUMMARIZER_MODE
     },
     worker: {
-      leaseSeconds: parsed.WORKER_LEASE_SECONDS
+      enabled: parsed.WORKER_ENABLED,
+      leaseSeconds: parsed.WORKER_LEASE_SECONDS,
+      pollIntervalMs: parsed.WORKER_POLL_INTERVAL_MS
     }
   };
 }

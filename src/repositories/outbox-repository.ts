@@ -109,6 +109,18 @@ export class OutboxRepository {
     `).all() as Array<{ payload: string }>;
     return rows.map((row) => JSON.parse(row.payload) as IvyMeetingSummaryMessage);
   }
+
+  listPendingMeetingSummaries(): IvyMeetingSummaryMessage[] {
+    const rows = this.client.prepare(`
+      SELECT payload
+      FROM outbox
+      WHERE status = 'pending'
+      ORDER BY created_at ASC
+    `).all() as Array<{ payload: string }>;
+    return rows
+      .map((row) => JSON.parse(row.payload) as IvyMeetingSummaryMessage)
+      .filter((message) => message.kind === 'ivy_meeting_summary');
+  }
 }
 
 interface DeliveryOutboxRow {

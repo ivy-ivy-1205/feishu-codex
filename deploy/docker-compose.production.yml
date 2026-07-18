@@ -1,0 +1,28 @@
+services:
+  bridge:
+    build:
+      context: /opt/feishu-codex/app
+      dockerfile: Dockerfile
+    image: aijia/feishu-codex-bridge:local
+    container_name: feishu-codex-bridge
+    restart: unless-stopped
+    env_file:
+      - /opt/feishu-codex/secrets/bridge.env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: /app/data/bridge.sqlite
+      CODEX_WORKDIR: /app/codex-workdir
+    ports:
+      - "127.0.0.1:3010:3000"
+    volumes:
+      - /opt/feishu-codex/data:/app/data
+      - /opt/feishu-codex/logs:/app/logs
+      - /opt/feishu-codex/codex-workdir:/app/codex-workdir
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

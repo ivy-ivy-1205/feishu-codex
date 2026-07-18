@@ -44,12 +44,21 @@ describe('health routes', () => {
   it('keeps the service unready when no worker can consume durable jobs', async () => {
     const readiness = createServiceReadiness({
       checkDatabase: () => undefined,
-      isWorkerConsumptionAvailable: () => false
+      isWorkerConsumptionAvailable: () => false,
+      isFeishuReaderAvailable: () => false,
+      isFeishuDeliveryAvailable: () => false,
+      isCodexAuthAvailable: () => false
     });
 
     await expect(readiness()).resolves.toEqual({
       ready: false,
-      reason: 'WORKER_UNAVAILABLE'
+      reason: 'READINESS_BLOCKED',
+      blockers: [
+        'FEISHU_READER_UNAVAILABLE',
+        'FEISHU_DELIVERY_UNAVAILABLE',
+        'WORKER_CONSUMER_UNAVAILABLE',
+        'CODEX_AUTH_UNAVAILABLE'
+      ]
     });
   });
 
@@ -58,7 +67,10 @@ describe('health routes', () => {
       checkDatabase: () => {
         throw new Error('sqlite path /private/secret.sqlite is unavailable');
       },
-      isWorkerConsumptionAvailable: () => true
+      isWorkerConsumptionAvailable: () => true,
+      isFeishuReaderAvailable: () => true,
+      isFeishuDeliveryAvailable: () => true,
+      isCodexAuthAvailable: () => true
     });
 
     await expect(readiness()).resolves.toEqual({
@@ -70,10 +82,31 @@ describe('health routes', () => {
   it('becomes ready only when both database and worker consumption are available', async () => {
     const readiness = createServiceReadiness({
       checkDatabase: () => undefined,
-      isWorkerConsumptionAvailable: () => true
+      isWorkerConsumptionAvailable: () => true,
+      isFeishuReaderAvailable: () => true,
+      isFeishuDeliveryAvailable: () => true,
+      isCodexAuthAvailable: () => true
     });
 
     await expect(readiness()).resolves.toEqual({ ready: true });
+  });
+
+  it('keeps readiness blockers stable when a dependency probe throws', async () => {
+    const readiness = createServiceReadiness({
+      checkDatabase: () => undefined,
+      isWorkerConsumptionAvailable: () => true,
+      isFeishuReaderAvailable: () => {
+        throw new Error('feishu secret must not escape');
+      },
+      isFeishuDeliveryAvailable: () => true,
+      isCodexAuthAvailable: () => true
+    });
+
+    await expect(readiness()).resolves.toEqual({
+      ready: false,
+      reason: 'READINESS_BLOCKED',
+      blockers: ['FEISHU_READER_UNAVAILABLE']
+    });
   });
 });
 

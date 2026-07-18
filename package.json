@@ -2,14 +2,20 @@
   "name": "aijia-context-bridge",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "dev": "node --env-file=.env --import tsx src/server.ts"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.71.1",
     "better-sqlite3": "^12.2.0",
     "drizzle-orm": "^0.44.0",
     "fastify": "^5.0.0",
