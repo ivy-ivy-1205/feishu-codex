@@ -17,6 +17,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 RUN corepack enable
+RUN npm install -g @openai/codex@0.144.6
 
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules

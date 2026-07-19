@@ -20,6 +20,7 @@ services:
       - /opt/feishu-codex/data:/app/data
       - /opt/feishu-codex/logs:/app/logs
       - /opt/feishu-codex/codex-workdir:/app/codex-workdir
+      - /opt/feishu-codex/codex-home:/home/node/.codex
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
