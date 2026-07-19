@@ -158,6 +158,28 @@ describe('POST /webhooks/feishu/events', () => {
     await harness.close();
   });
 
+  it('accepts direct Feishu post messages by extracting text leaves', async () => {
+    const harness = createHarness();
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: replyEvent({
+        openId: 'ou_ivy_fixture',
+        chatId: privateChatId,
+        replyTo: '',
+        text: '测试 webhook 第二次到达'
+      }, { messageType: 'post' })
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      status: 'reply_decision',
+      decision: { kind: 'clarify', reason: 'missing_reply_context' }
+    });
+    await harness.close();
+  });
+
   it('logs only non-sensitive shape diagnostics for rejected Feishu events', async () => {
     const chunks: string[] = [];
     const harness = createHarness({
@@ -454,6 +476,12 @@ function replyEvent(input: {
   replyTo: string | null;
   text: string;
 }, options: { messageType?: string } = {}) {
+  const content = options.messageType === 'post'
+    ? JSON.stringify({
+      title: '',
+      content: [[{ tag: 'text', text: input.text }]]
+    })
+    : JSON.stringify({ text: input.text });
   return {
     schema: '2.0',
     header: {
@@ -469,7 +497,7 @@ function replyEvent(input: {
         parent_id: input.replyTo,
         root_id: input.replyTo,
         message_type: options.messageType ?? 'text',
-        content: JSON.stringify({ text: input.text })
+        content
       }
     }
   };

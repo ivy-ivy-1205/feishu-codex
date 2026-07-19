@@ -35,12 +35,19 @@ const replyEventSchema = z.object({
     chat_id: z.string().min(1),
     parent_id: z.string().nullable().optional(),
     root_id: z.string().nullable().optional(),
-    message_type: z.literal('text'),
+    message_type: z.enum(['text', 'post']),
     content: z.string().min(1)
   })
 });
 
 const textContentSchema = z.object({ text: z.string().trim().min(1) });
+const postTextLeafSchema = z.object({
+  tag: z.literal('text'),
+  text: z.string()
+}).passthrough();
+const postContentSchema = z.object({
+  content: z.array(z.array(z.unknown()))
+}).passthrough();
 const replyEventType = 'im.message.receive_v1';
 
 export interface FeishuEventRouteDependencies {
@@ -144,8 +151,11 @@ function parseReplyInput(event: unknown): {
   }
 
   try {
-    const content = textContentSchema.safeParse(JSON.parse(parsedEvent.data.message.content));
-    if (!content.success) {
+    const text = extractMessageText(
+      parsedEvent.data.message.message_type,
+      parsedEvent.data.message.content
+    );
+    if (text === null) {
       return null;
     }
     return {
@@ -155,11 +165,32 @@ function parseReplyInput(event: unknown): {
         parsedEvent.data.message.parent_id,
         parsedEvent.data.message.root_id
       ),
-      text: content.data.text
+      text
     };
   } catch {
     return null;
   }
+}
+
+function extractMessageText(messageType: 'text' | 'post', rawContent: string): string | null {
+  const parsedContent = JSON.parse(rawContent) as unknown;
+  if (messageType === 'text') {
+    const content = textContentSchema.safeParse(parsedContent);
+    return content.success ? content.data.text : null;
+  }
+
+  const content = postContentSchema.safeParse(parsedContent);
+  if (!content.success) {
+    return null;
+  }
+  const text = content.data.content
+    .flatMap((line) => line)
+    .map((leaf) => postTextLeafSchema.safeParse(leaf))
+    .filter((leaf): leaf is { success: true; data: { tag: 'text'; text: string } } => leaf.success)
+    .map((leaf) => leaf.data.text)
+    .join('')
+    .trim();
+  return text.length > 0 ? text : null;
 }
 
 function normalizeReplyContext(
