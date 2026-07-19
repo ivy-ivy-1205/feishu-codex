@@ -38,6 +38,7 @@
 - Ivy 提供的 `oc_d851c3e986007dc0f97ab582bcb2e7c8` 已确认作为 Ivy 与 Codex Bot 的私聊 chat ID；它不是审批用户身份，不能用于操作者授权。
 - 2026-07-19 真实发送诊断显示，使用当前 `FEISHU_IVY_PRIVATE_CHAT_ID` 主动发消息时飞书返回 `230002 Bot/User can NOT be out of the chat`；因此该 `oc_d851...` 不能作为当前 Codex Bot 可用的默认私聊发送目标。后续应从 Ivy 发给 Bot 的真实 `im.message.receive_v1` 事件中安全绑定 Ivy 的 `open_id`，并/或记录事件自带的可回复 `chat_id`。
 - 2026-07-19 真实私聊事件诊断显示：Ivy 发给 Bot 的消息包含 `open_id` 和可回复 `chat_id`，但旧路由在 `FEISHU_APPROVER_OPEN_IDS` 为空的身份发现阶段仍先校验旧 private chat，导致返回 `reject` 而不回复。已决定在未绑定 approver open_id 时先允许返回 `identify_ivy`；绑定后仍恢复严格 open_id/chat_id 校验和 Todo 授权闸门。
+- 2026-07-19 Ivy 已通过真实 Bot 私聊回传完成身份发现；服务器 `/opt/feishu-codex/secrets/bridge.env` 已写入 Ivy approver open_id 与当前 Codex Bot 私聊 chat_id，容器重启后 `/health` 返回 200。具体 ID 值不写入 MEMORY；如需核对，以服务器 env 文件为准。
 - 待确认“先干 1”的授权边界：是否允许低风险任务立即执行，而对代码修改、外部消息、部署和生产访问继续要求二次确认。
 
 ## 架构决策
