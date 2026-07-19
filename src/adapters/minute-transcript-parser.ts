@@ -49,6 +49,9 @@ function parsePlainTextTranscript(raw: string): TranscriptSegmentRecord[] {
 
   const speakerNames = extractPlainTextSpeakerNames(lines);
   if (speakerNames.length === 0) {
+    speakerNames.push(...inferPlainTextSpeakerNames(lines));
+  }
+  if (speakerNames.length === 0) {
     throw new MinuteTranscriptParseError();
   }
   const speakerSet = new Set(speakerNames.map(normalizeSpeakerKey));
@@ -111,6 +114,40 @@ function extractPlainTextSpeakerNames(lines: string[]): string[] {
     .split(/[、,，]/u)
     .map((name) => name.trim())
     .filter((name) => name.length > 0);
+}
+
+function inferPlainTextSpeakerNames(lines: string[]): string[] {
+  const counts = new Map<string, { value: string; count: number; firstSeen: number }>();
+  lines.forEach((line, index) => {
+    if (!isPlainTextSpeakerCandidate(line)) {
+      return;
+    }
+    const key = normalizeSpeakerKey(line);
+    const existing = counts.get(key);
+    if (existing) {
+      existing.count += 1;
+      return;
+    }
+    counts.set(key, { value: line, count: 1, firstSeen: index });
+  });
+
+  return [...counts.values()]
+    .filter((entry) => entry.count >= 2)
+    .sort((left, right) => left.firstSeen - right.firstSeen)
+    .map((entry) => entry.value);
+}
+
+function isPlainTextSpeakerCandidate(line: string): boolean {
+  if (isPlainTextHeaderLine(line) || isSpeakerMarkerLine(line)) {
+    return false;
+  }
+  if (line.length === 0 || line.length > 40) {
+    return false;
+  }
+  if (/[。！？!?；;，、,：:|]/u.test(line)) {
+    return false;
+  }
+  return /[\p{L}\p{Script=Han}]/u.test(line);
 }
 
 function isPlainTextHeaderLine(line: string): boolean {

@@ -98,6 +98,54 @@ describe('parseMinuteTranscriptStream', () => {
       ]);
   });
 
+  it('infers speakers from repeated plain text heading lines when no speaker list exists', async () => {
+    const plainText = [
+      '2026-07-03 20:04:28 CST|56分钟 3秒',
+      '关键词:',
+      '客户、工作流、知识库',
+      '',
+      'Ivy',
+      '先确认一下页面的整体方向。',
+      '',
+      'james wang',
+      '可以，我先看 Landbook。',
+      '',
+      'Ivy',
+      '然后把 Todo 列出来。',
+      '',
+      'james wang',
+      '好的。'
+    ].join('\n');
+
+    await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
+      .resolves.toEqual([
+        {
+          speakerName: 'Ivy',
+          startMs: 0,
+          endMs: 1,
+          text: '先确认一下页面的整体方向。'
+        },
+        {
+          speakerName: 'james wang',
+          startMs: 1,
+          endMs: 2,
+          text: '可以，我先看 Landbook。'
+        },
+        {
+          speakerName: 'Ivy',
+          startMs: 2,
+          endMs: 3,
+          text: '然后把 Todo 列出来。'
+        },
+        {
+          speakerName: 'james wang',
+          startMs: 3,
+          endMs: 4,
+          text: '好的。'
+        }
+      ]);
+  });
+
   it('fails closed when JSON is invalid or segment fields are unsafe', async () => {
     await expect(parseMinuteTranscriptStream(Readable.from(['not json'])))
       .rejects.toBeInstanceOf(MinuteTranscriptParseError);
