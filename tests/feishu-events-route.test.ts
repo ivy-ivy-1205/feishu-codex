@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { createCipheriv, createHash, randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { buildApp, type AppDependencies } from '../src/app.js';
 import { createSqliteDatabase } from '../src/db/client.js';
@@ -10,6 +11,7 @@ import { ingestMinuteGenerated } from '../src/services/minute-ingestion.js';
 import { routeReply } from '../src/services/reply-router.js';
 
 const verificationToken = 'verify-test-token';
+const encryptKey = 'encrypt-test-key';
 const privateChatId = 'oc_d851c3e986007dc0f97ab582bcb2e7c8';
 const minuteFixture = JSON.parse(
   readFileSync(new URL('../src/fixtures/minute-generated.json', import.meta.url), 'utf8')
@@ -31,6 +33,24 @@ describe('POST /webhooks/feishu/events', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ challenge: 'challenge-token' });
+    await harness.close();
+  });
+
+  it('echoes an encrypted Feishu URL verification challenge', async () => {
+    const harness = createHarness();
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: encryptFeishuPayload({
+        type: 'url_verification',
+        token: verificationToken,
+        challenge: 'encrypted-challenge-token'
+      })
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ challenge: 'encrypted-challenge-token' });
     await harness.close();
   });
 
@@ -276,6 +296,7 @@ function createHarness(
   const app = buildApp({
     readiness: () => ({ ready: true }),
     verificationToken,
+    encryptKey,
     ingestMinute: (event) => ingestMinuteGenerated(event, {
       meetingRepository,
       jobRepository
@@ -306,6 +327,17 @@ function createHarness(
       database.close();
     }
   };
+}
+
+function encryptFeishuPayload(payload: Record<string, unknown>): { encrypt: string } {
+  const iv = randomBytes(16);
+  const key = createHash('sha256').update(encryptKey, 'utf8').digest();
+  const cipher = createCipheriv('aes-256-cbc', key, iv);
+  const encrypted = Buffer.concat([
+    cipher.update(JSON.stringify(payload), 'utf8'),
+    cipher.final()
+  ]);
+  return { encrypt: Buffer.concat([iv, encrypted]).toString('base64') };
 }
 
 function seedDeliveredTodo(meetingRepository: MeetingRepository): void {

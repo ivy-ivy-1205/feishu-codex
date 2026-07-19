@@ -54,6 +54,7 @@ const app = buildApp({
     isCodexAuthAvailable: () => false
   }),
   verificationToken: config.feishu.verificationToken,
+  encryptKey: config.feishu.encryptKey,
   ingestMinute: (event) => ingestMinuteGenerated(event, {
     meetingRepository,
     jobRepository

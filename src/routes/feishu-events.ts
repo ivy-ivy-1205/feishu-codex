@@ -1,3 +1,4 @@
+import { createDecipheriv, createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z, ZodError } from 'zod';
 import type { ReplyDecision } from '../domain/authorization.js';
@@ -7,6 +8,10 @@ const verificationRequestSchema = z.object({
   type: z.literal('url_verification'),
   token: z.string().min(1),
   challenge: z.string().min(1)
+});
+
+const encryptedPayloadSchema = z.object({
+  encrypt: z.string().min(1)
 });
 
 const eventEnvelopeSchema = z.object({
@@ -40,6 +45,7 @@ const replyEventType = 'im.message.receive_v1';
 
 export interface FeishuEventRouteDependencies {
   verificationToken: string;
+  encryptKey: string;
   ingestMinute(event: unknown): IngestionResult;
   routeReply(input: unknown): ReplyDecision;
 }
@@ -49,7 +55,12 @@ export function registerFeishuEventRoutes(
   dependencies: FeishuEventRouteDependencies
 ): void {
   app.post('/webhooks/feishu/events', async (request, reply) => {
-    const verification = verificationRequestSchema.safeParse(request.body);
+    const body = decryptFeishuBody(request.body, dependencies.encryptKey);
+    if (body === null) {
+      return reply.code(400).send({ error: 'invalid_encrypted_payload' });
+    }
+
+    const verification = verificationRequestSchema.safeParse(body);
     if (verification.success) {
       if (verification.data.token !== dependencies.verificationToken) {
         return reply.code(401).send({ error: 'invalid_verification_token' });
@@ -57,7 +68,7 @@ export function registerFeishuEventRoutes(
       return { challenge: verification.data.challenge };
     }
 
-    const envelope = eventEnvelopeSchema.safeParse(request.body);
+    const envelope = eventEnvelopeSchema.safeParse(body);
     if (!envelope.success) {
       return reply.code(400).send({ error: 'invalid_event_envelope' });
     }
@@ -82,7 +93,7 @@ export function registerFeishuEventRoutes(
     }
 
     try {
-      return dependencies.ingestMinute(request.body);
+      return dependencies.ingestMinute(body);
     } catch (error) {
       if (error instanceof ZodError) {
         return reply.code(400).send({ error: 'invalid_event_envelope' });
@@ -91,6 +102,31 @@ export function registerFeishuEventRoutes(
       return reply.code(500).send({ error: 'event_ingestion_failed' });
     }
   });
+}
+
+function decryptFeishuBody(body: unknown, encryptKey: string): unknown | null {
+  const encrypted = encryptedPayloadSchema.safeParse(body);
+  if (!encrypted.success) {
+    return body;
+  }
+
+  try {
+    const encryptedBytes = Buffer.from(encrypted.data.encrypt, 'base64');
+    if (encryptedBytes.length <= 16) {
+      return null;
+    }
+    const iv = encryptedBytes.subarray(0, 16);
+    const ciphertext = encryptedBytes.subarray(16);
+    const key = createHash('sha256').update(encryptKey, 'utf8').digest();
+    const decipher = createDecipheriv('aes-256-cbc', key, iv);
+    const decrypted = Buffer.concat([
+      decipher.update(ciphertext),
+      decipher.final()
+    ]).toString('utf8');
+    return JSON.parse(decrypted) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function parseReplyInput(event: unknown): {

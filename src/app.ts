@@ -17,6 +17,7 @@ type LoggerOption = FastifyServerOptions['logger'];
 export interface AppDependencies {
   readiness: ReadinessCheck;
   verificationToken: string;
+  encryptKey: string;
   ingestMinute(event: unknown): IngestionResult;
   routeReply(input: unknown): ReplyDecision;
   logger?: LoggerOption;
@@ -30,6 +31,7 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
   registerHealthRoutes(app, dependencies.readiness);
   registerFeishuEventRoutes(app, {
     verificationToken: dependencies.verificationToken,
+    encryptKey: dependencies.encryptKey,
     ingestMinute: dependencies.ingestMinute,
     routeReply: dependencies.routeReply
   });

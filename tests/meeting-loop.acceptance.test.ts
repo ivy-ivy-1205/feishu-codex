@@ -141,6 +141,7 @@ async function createMeetingLoopHarness() {
   const buildHarnessApp = () => buildApp({
     readiness: () => ({ ready: false, reason: 'WORKER_UNAVAILABLE' }),
     verificationToken,
+    encryptKey: 'encrypt-test-key',
     ingestMinute: (event) => ingestMinuteGenerated(event, {
       meetingRepository,
       jobRepository

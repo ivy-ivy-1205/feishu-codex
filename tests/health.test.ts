@@ -116,6 +116,7 @@ function createDependencies(
   return {
     readiness: () => readiness,
     verificationToken: 'verify-test-token',
+    encryptKey: 'encrypt-test-key',
     ingestMinute: () => ({ status: 'ignored' }),
     routeReply: () => ({ kind: 'reject', reason: 'invalid_input' }),
     logger: false
