@@ -145,6 +145,17 @@ describe('routeReply', () => {
     }).kind).toBe('identify_ivy');
   });
 
+  it('identifies Ivy before enforcing a stale private chat binding', () => {
+    const harness = createHarness({ approverOpenIds: [] });
+
+    expect(harness.route({
+      chatId: 'oc_real_event_chat',
+      openId: ivyOpenId,
+      replyTo: null,
+      text: '测试测试'
+    }).kind).toBe('identify_ivy');
+  });
+
   it('rejects a chat ID presented as a user identity', () => {
     const harness = createHarness({ approverOpenIds: [] });
 

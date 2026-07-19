@@ -31,14 +31,14 @@ export function routeReply(
   }
   const reply = parsed.data;
 
-  if (reply.chatId !== dependencies.ivyPrivateChatId) {
-    return { kind: 'reject', reason: 'wrong_chat' };
-  }
   if (!reply.openId.startsWith('ou_')) {
     return { kind: 'reject', reason: 'invalid_user_identity' };
   }
   if (dependencies.approverOpenIds.length === 0) {
     return { kind: 'identify_ivy' };
+  }
+  if (reply.chatId !== dependencies.ivyPrivateChatId) {
+    return { kind: 'reject', reason: 'wrong_chat' };
   }
   if (!dependencies.approverOpenIds.includes(reply.openId)) {
     return { kind: 'reject', reason: 'not_ivy' };
