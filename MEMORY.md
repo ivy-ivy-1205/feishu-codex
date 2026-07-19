@@ -46,6 +46,7 @@
 - 2026-07-19 服务器容器内 Codex CLI 登录尝试进展：普通 `codex login` 不适合当前远端容器，因为 OAuth 回调会落到容器内 `localhost`；`codex login --device-auth` 是正确方向，但当前失败于请求 `https://auth.openai.com/api/accounts/deviceauth/usercode`。`codex doctor` 显示 `invalid peer certificate: UnknownIssuer`，且容器内 `git` 缺失；下一步应给 Bridge runtime image 补 `ca-certificates` 与 `git`，重建后再尝试 device auth。
 - 2026-07-19 已提交并部署 `7d26056 fix: add codex runtime system deps`：Bridge runtime image 安装 `ca-certificates` 与 `git` 后，容器 healthy，`git version 2.39.5` 可用，`codex doctor` 不再报 `UnknownIssuer`，ChatGPT backend reachability 已通过。`codex login --device-auth` 已能生成设备登录码；因需要 Ivy 浏览器授权，首次等待未完成并已中断，当前仍未登录、未启用 `CODEX_SUMMARIZER_MODE=codex`。
 - 2026-07-19 第二次生成 Codex device auth code 后未在有效轮询期间完成浏览器授权，最终 OpenAI 返回 `429 Too Many Requests`；服务器 `codex login status` 仍为 `Not logged in`。下一次应等待一段冷却时间后再生成新 code，并在 Ivy 已打开授权页面、准备立即输入时执行。
+- 2026-07-19 第三次在 Ivy 已打开 device 页面后生成 Codex code，CLI 轮询最终返回 `device auth timed out after 15 minutes`，随后 `codex login status` 仍为 `Not logged in`。说明浏览器端授权没有被远端容器 CLI 成功收到；继续重复生成 code 可能再次触发 429，需要先确认浏览器页面是否成功提交 code、是否登录到正确 OpenAI/ChatGPT 账号、是否有组织/安全确认步骤未完成。
 - Codex CLI 放在云端的产品判断：它让飞书妙记与飞书 Bot 指令在 Ivy 的 Mac/Codex App 离线时仍能进入执行链路；但云端 Codex 只能操作服务器可见的 workspace/repo/file，不能直接读取 Mac-only 本地目录。
 - Feishu task 到 workspace 的映射需要一个 Project Registry：把飞书项目群、妙记、Todo 或用户命令解析到 `project_key`，再映射到 GitHub repo、服务器 checkout 路径、默认分支、项目记忆和风险策略。已有本地项目需要同步到服务器可访问源；新项目可先创建服务器 workspace，之后再绑定 repo。
 - Ivy 接受会议总结 MVP 模板：标题、会议、时间、核心信息 bullet，以及“我可以帮你推进”的编号 Todo 列表。
