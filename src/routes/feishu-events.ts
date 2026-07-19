@@ -154,7 +154,10 @@ async function maybeAcknowledgeDirectMessage(input: {
   ) {
     return null;
   }
-  const text = directAcknowledgementTextFor(input.decision, input.replyInput.openId);
+  const text = directAcknowledgementTextFor(input.decision, {
+    openId: input.replyInput.openId,
+    chatId: input.replyInput.chatId
+  });
   if (text === null) {
     return null;
   }
@@ -188,9 +191,12 @@ async function maybeAcknowledgeDirectMessage(input: {
   }
 }
 
-function directAcknowledgementTextFor(decision: ReplyDecision, openId: string): string | null {
+function directAcknowledgementTextFor(
+  decision: ReplyDecision,
+  identity: { openId: string; chatId: string }
+): string | null {
   if (decision.kind === 'identify_ivy') {
-    return `检测到待绑定 Ivy 身份，你的 open_id 是：${openId}。请回 Codex 确认绑定。`;
+    return `检测到待绑定 Ivy 身份，你的 open_id 是：${identity.openId}；当前私聊 chat_id 是：${identity.chatId}。请回 Codex 确认绑定。`;
   }
   if (decision.kind === 'clarify' && decision.reason === 'missing_reply_context') {
     return directMessageAcknowledgementText;

@@ -249,7 +249,7 @@ describe('POST /webhooks/feishu/events', () => {
     });
     expect(sentMessages).toEqual([{
       chatId: privateChatId,
-      text: '检测到待绑定 Ivy 身份，你的 open_id 是：ou_unbound_ivy。请回 Codex 确认绑定。'
+      text: '检测到待绑定 Ivy 身份，你的 open_id 是：ou_unbound_ivy；当前私聊 chat_id 是：oc_d851c3e986007dc0f97ab582bcb2e7c8。请回 Codex 确认绑定。'
     }]);
     await harness.close();
   });
