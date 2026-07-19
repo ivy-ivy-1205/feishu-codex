@@ -41,6 +41,7 @@
 - 2026-07-19 Ivy 已通过真实 Bot 私聊回传完成身份发现；服务器 `/opt/feishu-codex/secrets/bridge.env` 已写入 Ivy approver open_id 与当前 Codex Bot 私聊 chat_id，容器重启后 `/health` 返回 200。具体 ID 值不写入 MEMORY；如需核对，以服务器 env 文件为准。
 - 2026-07-19 真实妙记联调发现：复制分享链接让应用可读取妙记基础信息；将妙记“谁可以下载视频、导出妙记”从仅可管理用户放宽后，`minutes/v1/minutes/:minute_token/transcript` 的 403 消失，说明逐字稿导出受单条妙记导出权限影响。该设置是否成为后续会议默认值尚未验证，需用新会议确认。
 - 2026-07-19 真实飞书妙记逐字稿导出返回的是纯文本/Markdown-ish stream（开头为会议时间与标题，随后包含“发言人:”和发言段落），不是早期 fixture 假设的 JSON。已补 plain text parser：识别发言人名单与段落，缺少逐句时间戳时用段落顺序作为 `startMs/endMs` 占位，保证 Codex 总结能获得完整文本。
+- 2026-07-19 单条真实妙记手动处理闭环已跑通：服务器上为一条已授权妙记创建/重置 `process_minute` job，使用真实飞书 basic info + transcript reader、fake summarizer、真实飞书私聊 delivery 单次消费，结果为 job `completed`、summary 已生成、outbox `delivered`。本次未启用常驻 worker、未调用 Codex summarizer、未执行 Todo。
 - 待确认“先干 1”的授权边界：是否允许低风险任务立即执行，而对代码修改、外部消息、部署和生产访问继续要求二次确认。
 
 ## 架构决策
