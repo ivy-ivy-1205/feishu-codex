@@ -105,6 +105,23 @@ describe('Feishu real adapter boundary', () => {
     }]);
   });
 
+  it('sends direct text messages to a chat with the same message ID safety check', async () => {
+    const sent: Array<{ chatId: string; text: string }> = [];
+    const delivery = new FeishuMessageDeliveryAdapter(createClient({
+      sent,
+      messageId: 'om_direct_ack_1'
+    }));
+
+    await expect(delivery.sendTextMessage({
+      chatId: 'oc_private_chat',
+      text: '我已收到。'
+    })).resolves.toEqual({ messageId: 'om_direct_ack_1' });
+    expect(sent).toEqual([{
+      chatId: 'oc_private_chat',
+      text: '我已收到。'
+    }]);
+  });
+
   it('delivers pending meeting summaries and acknowledges them with real Feishu message IDs', async () => {
     const database = createSqliteDatabase(':memory:');
     migrateDatabase(database.client);

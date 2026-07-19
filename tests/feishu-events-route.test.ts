@@ -159,7 +159,13 @@ describe('POST /webhooks/feishu/events', () => {
   });
 
   it('accepts direct Feishu post messages by extracting text leaves', async () => {
-    const harness = createHarness();
+    const sentMessages: Array<{ chatId: string; text: string }> = [];
+    const harness = createHarness({
+      sendTextMessage: async (message) => {
+        sentMessages.push(message);
+        return { messageId: 'om_direct_ack' };
+      }
+    });
 
     const response = await harness.app.inject({
       method: 'POST',
@@ -175,8 +181,42 @@ describe('POST /webhooks/feishu/events', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       status: 'reply_decision',
-      decision: { kind: 'clarify', reason: 'missing_reply_context' }
+      decision: { kind: 'clarify', reason: 'missing_reply_context' },
+      acknowledgement: { messageId: 'om_direct_ack' }
     });
+    expect(sentMessages).toEqual([{
+      chatId: privateChatId,
+      text: '我已收到。当前还未绑定会议纪要，请在会议总结下回复 Todo 编号，或等待妙记事件接入。'
+    }]);
+    await harness.close();
+  });
+
+  it('does not send direct acknowledgement for wrong chats', async () => {
+    const sentMessages: Array<{ chatId: string; text: string }> = [];
+    const harness = createHarness({
+      sendTextMessage: async (message) => {
+        sentMessages.push(message);
+        return { messageId: 'om_must_not_send' };
+      }
+    });
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: replyEvent({
+        openId: 'ou_ivy_fixture',
+        chatId: 'oc_wrong_chat',
+        replyTo: '',
+        text: '测试 webhook'
+      }, { messageType: 'post' })
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      status: 'reply_decision',
+      decision: { kind: 'reject', reason: 'wrong_chat' }
+    });
+    expect(sentMessages).toEqual([]);
     await harness.close();
   });
 
@@ -363,7 +403,7 @@ describe('POST /webhooks/feishu/events', () => {
 });
 
 function createHarness(
-  options: Partial<Pick<AppDependencies, 'logger' | 'routeReply'>> = {}
+  options: Partial<Pick<AppDependencies, 'logger' | 'routeReply' | 'sendTextMessage'>> = {}
 ) {
   const database = createSqliteDatabase(':memory:');
   migrateDatabase(database.client);
@@ -382,6 +422,7 @@ function createHarness(
       ivyPrivateChatId: privateChatId,
       approverOpenIds: ['ou_ivy_fixture']
     })),
+    sendTextMessage: options.sendTextMessage,
     logger: options.logger ?? false
   });
 

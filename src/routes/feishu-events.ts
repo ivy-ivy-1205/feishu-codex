@@ -55,6 +55,7 @@ export interface FeishuEventRouteDependencies {
   encryptKey: string;
   ingestMinute(event: unknown): IngestionResult;
   routeReply(input: unknown): ReplyDecision;
+  sendTextMessage?(input: { chatId: string; text: string }): Promise<{ messageId: string }>;
 }
 
 export function registerFeishuEventRoutes(
@@ -91,9 +92,16 @@ export function registerFeishuEventRoutes(
         return reply.code(400).send({ error: 'invalid_reply_event' });
       }
       try {
+        const decision = dependencies.routeReply(replyInput);
+        const acknowledgement = await maybeAcknowledgeDirectMessage({
+          decision,
+          replyInput,
+          sendTextMessage: dependencies.sendTextMessage
+        });
         return {
           status: 'reply_decision',
-          decision: dependencies.routeReply(replyInput)
+          decision,
+          ...(acknowledgement ? { acknowledgement } : {})
         };
       } catch (error) {
         request.log.error({ err: error }, 'Feishu reply routing failed');
@@ -111,6 +119,32 @@ export function registerFeishuEventRoutes(
       request.log.error({ err: error }, 'Feishu event ingestion failed');
       return reply.code(500).send({ error: 'event_ingestion_failed' });
     }
+  });
+}
+
+const directMessageAcknowledgementText =
+  '我已收到。当前还未绑定会议纪要，请在会议总结下回复 Todo 编号，或等待妙记事件接入。';
+
+async function maybeAcknowledgeDirectMessage(input: {
+  decision: ReplyDecision;
+  replyInput: {
+    chatId: string;
+    openId: string;
+    replyTo: string | null;
+    text: string;
+  };
+  sendTextMessage?: (message: { chatId: string; text: string }) => Promise<{ messageId: string }>;
+}): Promise<{ messageId: string } | null> {
+  if (
+    input.decision.kind !== 'clarify' ||
+    input.decision.reason !== 'missing_reply_context' ||
+    !input.sendTextMessage
+  ) {
+    return null;
+  }
+  return input.sendTextMessage({
+    chatId: input.replyInput.chatId,
+    text: directMessageAcknowledgementText
   });
 }
 

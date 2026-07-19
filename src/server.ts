@@ -63,7 +63,8 @@ const app = buildApp({
     meetingRepository,
     ivyPrivateChatId: config.feishu.ivyPrivateChatId,
     approverOpenIds: config.feishu.approverOpenIds
-  })
+  }),
+  sendTextMessage: (input) => feishuIntegration.delivery.sendTextMessage(input)
 });
 
 let shuttingDown = false;

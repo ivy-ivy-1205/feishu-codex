@@ -20,6 +20,7 @@ export interface AppDependencies {
   encryptKey: string;
   ingestMinute(event: unknown): IngestionResult;
   routeReply(input: unknown): ReplyDecision;
+  sendTextMessage?(input: { chatId: string; text: string }): Promise<{ messageId: string }>;
   logger?: LoggerOption;
 }
 
@@ -33,7 +34,8 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
     verificationToken: dependencies.verificationToken,
     encryptKey: dependencies.encryptKey,
     ingestMinute: dependencies.ingestMinute,
-    routeReply: dependencies.routeReply
+    routeReply: dependencies.routeReply,
+    sendTextMessage: dependencies.sendTextMessage
   });
 
   return app;

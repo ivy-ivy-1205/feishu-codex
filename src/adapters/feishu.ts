@@ -73,17 +73,23 @@ export class FeishuMinutesReaderAdapter implements FeishuMinutesReader {
 export class FeishuMessageDeliveryAdapter {
   constructor(private readonly client: FeishuApiClient) {}
 
-  async sendMeetingSummary(message: IvyMeetingSummaryMessage): Promise<{
+  async sendTextMessage(input: { chatId: string; text: string }): Promise<{
     messageId: string;
   }> {
-    const sent = await this.client.sendTextMessage({
-      chatId: message.targetChatId,
-      text: message.body
-    });
+    const sent = await this.client.sendTextMessage(input);
     if (!sent.messageId.trim() || sent.messageId.startsWith('pending:')) {
       throw new Error('Feishu delivery requires an actual message ID');
     }
     return { messageId: sent.messageId.trim() };
+  }
+
+  async sendMeetingSummary(message: IvyMeetingSummaryMessage): Promise<{
+    messageId: string;
+  }> {
+    return this.sendTextMessage({
+      chatId: message.targetChatId,
+      text: message.body
+    });
   }
 }
 
