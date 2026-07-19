@@ -1,5 +1,8 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import type { SpawnOptions } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Writable, Readable } from 'node:stream';
 
 export interface CodexProcessInput {
@@ -136,22 +139,34 @@ export class CodexCliAdapter {
   async executeJson(request: CodexJsonExecutionRequest): Promise<unknown> {
     await this.#requireAuth();
 
-    const result = await this.#runner.run({
-      command: this.#command,
-      args: [
-        'exec',
-        '--sandbox',
-        'read-only',
-        '--ephemeral',
-        '--ignore-user-config',
-        '--output-schema',
-        JSON.stringify(request.outputSchema)
-      ],
-      cwd: this.#workdir,
-      env: sanitizeEnv(this.#baseEnv),
-      stdin: request.prompt,
-      timeoutMs: this.#timeoutMs
-    });
+    const schemaDirectory = await mkdtemp(join(tmpdir(), 'meeting-summary-schema-'));
+    const schemaPath = join(schemaDirectory, 'schema.json');
+    let result: CodexProcessOutput;
+    try {
+      await writeFile(schemaPath, JSON.stringify(request.outputSchema), {
+        encoding: 'utf8',
+        mode: 0o600
+      });
+      result = await this.#runner.run({
+        command: this.#command,
+        args: [
+          'exec',
+          '--sandbox',
+          'read-only',
+          '--ephemeral',
+          '--ignore-user-config',
+          '--skip-git-repo-check',
+          '--output-schema',
+          schemaPath
+        ],
+        cwd: this.#workdir,
+        env: sanitizeEnv(this.#baseEnv),
+        stdin: request.prompt,
+        timeoutMs: this.#timeoutMs
+      });
+    } finally {
+      await rm(schemaDirectory, { recursive: true, force: true });
+    }
 
     if (result.exitCode !== 0) {
       throw new CodexCliError(

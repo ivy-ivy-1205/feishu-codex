@@ -75,14 +75,9 @@ describe('CodexCliAdapter', () => {
       'read-only',
       '--ephemeral',
       '--ignore-user-config',
+      '--skip-git-repo-check',
       '--output-schema',
-      JSON.stringify({
-        type: 'object',
-        required: ['summary'],
-        properties: {
-          summary: { type: 'string' }
-        }
-      })
+      expect.stringMatching(/meeting-summary-schema-.+\.json$/)
     ]);
     expect(calls[1]?.env).toEqual({ PATH: '/usr/bin' });
   });
