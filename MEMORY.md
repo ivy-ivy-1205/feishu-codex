@@ -42,6 +42,7 @@
 - 2026-07-19 真实妙记联调发现：复制分享链接让应用可读取妙记基础信息；将妙记“谁可以下载视频、导出妙记”从仅可管理用户放宽后，`minutes/v1/minutes/:minute_token/transcript` 的 403 消失，说明逐字稿导出受单条妙记导出权限影响。该设置是否成为后续会议默认值尚未验证，需用新会议确认。
 - 2026-07-19 真实飞书妙记逐字稿导出返回的是纯文本/Markdown-ish stream（开头为会议时间与标题，随后包含“发言人:”和发言段落），不是早期 fixture 假设的 JSON。已补 plain text parser：识别发言人名单与段落，缺少逐句时间戳时用段落顺序作为 `startMs/endMs` 占位，保证 Codex 总结能获得完整文本。
 - 2026-07-19 单条真实妙记手动处理闭环已跑通：服务器上为一条已授权妙记创建/重置 `process_minute` job，使用真实飞书 basic info + transcript reader、fake summarizer、真实飞书私聊 delivery 单次消费，结果为 job `completed`、summary 已生成、outbox `delivered`。本次未启用常驻 worker、未调用 Codex summarizer、未执行 Todo。
+- 2026-07-19 Bridge 镜像已安装 `@openai/codex@0.144.6`，容器内 `codex --version` 返回 `codex-cli 0.144.6`；compose 已挂载 `/opt/feishu-codex/codex-home` 到容器 `/home/node/.codex` 用于持久化 ChatGPT 登录态。当前容器内 `codex login status` 为 `Not logged in`，尚未启用 `CODEX_SUMMARIZER_MODE=codex`。
 - 待确认“先干 1”的授权边界：是否允许低风险任务立即执行，而对代码修改、外部消息、部署和生产访问继续要求二次确认。
 
 ## 架构决策
