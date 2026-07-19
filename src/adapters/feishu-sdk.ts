@@ -62,7 +62,7 @@ export class FeishuSdkApiClient implements FeishuApiClient {
     const response = await this.#sdkClient.minutes.v1.minute.get({
       path: { minute_token: minuteId.trim() }
     });
-    return responseData(response);
+    return normalizeMinuteBasicInfo(responseData(response));
   }
 
   async exportMinuteTranscript(minuteId: string): Promise<unknown[]> {
@@ -98,6 +98,37 @@ function responseData(response: unknown): unknown {
     return response.data;
   }
   return response;
+}
+
+function normalizeMinuteBasicInfo(data: unknown): unknown {
+  if (!isRecord(data)) {
+    return data;
+  }
+  const minute = isRecord(data.minute) ? data.minute : data;
+  if (
+    typeof minute.title === 'string' &&
+    typeof minute.create_time === 'string' &&
+    typeof minute.duration === 'string'
+  ) {
+    const startedAtMs = parseFeishuTimestampMs(minute.create_time);
+    const durationMs = Number(minute.duration);
+    if (startedAtMs !== null && Number.isFinite(durationMs) && durationMs >= 0) {
+      return {
+        title: minute.title,
+        startedAt: new Date(startedAtMs).toISOString(),
+        endedAt: new Date(startedAtMs + durationMs).toISOString()
+      };
+    }
+  }
+  return data;
+}
+
+function parseFeishuTimestampMs(value: string): number | null {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return value.trim().length <= 10 ? parsed * 1_000 : parsed;
 }
 
 function extractMessageId(response: unknown): string {

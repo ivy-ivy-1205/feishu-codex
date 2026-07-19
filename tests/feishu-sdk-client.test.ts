@@ -73,6 +73,26 @@ describe('FeishuSdkApiClient', () => {
     ]);
   });
 
+  it('normalizes real Feishu minute basic info fields from SDK responses', async () => {
+    const client = new FeishuSdkApiClient({
+      sdkClient: createFakeSdkClient({
+        minute: {
+          minute: {
+            title: '真实妙记',
+            create_time: '1783425868000',
+            duration: '3362000'
+          }
+        }
+      })
+    });
+
+    await expect(client.getMinuteBasicInfo('min_token_1')).resolves.toEqual({
+      title: '真实妙记',
+      startedAt: new Date(1_783_425_868_000).toISOString(),
+      endedAt: new Date(1_783_425_868_000 + 3_362_000).toISOString()
+    });
+  });
+
   it('parses SDK transcript readable streams into internal transcript segments', async () => {
     const client = new FeishuSdkApiClient({
       sdkClient: createFakeSdkClient({
