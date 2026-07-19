@@ -220,6 +220,40 @@ describe('POST /webhooks/feishu/events', () => {
     await harness.close();
   });
 
+  it('acknowledges direct messages when Ivy identity is not configured yet', async () => {
+    const sentMessages: Array<{ chatId: string; text: string }> = [];
+    const harness = createHarness({
+      routeReply: () => ({ kind: 'identify_ivy' }),
+      sendTextMessage: async (message) => {
+        sentMessages.push(message);
+        return { messageId: 'om_identify_ack' };
+      }
+    });
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: replyEvent({
+        openId: 'ou_unbound_ivy',
+        chatId: privateChatId,
+        replyTo: '',
+        text: '测试 bot 主动回复'
+      }, { messageType: 'post' })
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      status: 'reply_decision',
+      decision: { kind: 'identify_ivy' },
+      acknowledgement: { messageId: 'om_identify_ack' }
+    });
+    expect(sentMessages).toEqual([{
+      chatId: privateChatId,
+      text: '我已收到。当前还没有绑定 Ivy 的飞书身份，下一步需要完成身份绑定后才能执行 Todo。'
+    }]);
+    await harness.close();
+  });
+
   it('logs only non-sensitive shape diagnostics for rejected Feishu events', async () => {
     const chunks: string[] = [];
     const harness = createHarness({
