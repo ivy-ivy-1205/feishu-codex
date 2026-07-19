@@ -103,6 +103,9 @@
 - 2026-07-18 经 Ivy 批准只读检查服务器目录布局：`/opt` 下已有独立项目 `/opt/market-intel-engine`（含 `docker-compose.yml`），说明 `/opt/<product>` 是可接受的独立服务布局；未发现共享 edge-nginx workspace。`/root` 下已有产品目录包括 `/root/RealAgentAI_cc`、`/root/RealAgentAI_staging` 和 `/root/realagent-daily-news`，Bridge 不应放入这些目录。
 - 2026-07-18 经 Ivy 批准已创建独立服务器 workspace `/opt/feishu-codex`，包含 `app/`、`data/`、`logs/`、`config/`、`secrets/`。目录属主为 `root:root`；除 `secrets/` 为 `700` 外，其余为 `755`。本次未写入凭据、未部署代码、未启动服务。
 - 2026-07-19 经 Ivy 批准完成云端只读 Preflight 2：通过 `realagent-prod` root 入口只读检查，服务器仍为 OpenCloudOS 9.4，当前时间 `2026-07-19T11:19:53+08:00`；`/opt/feishu-codex` 仍为空壳 workspace（`app/data/logs/config` 为 `755 root:root`，`secrets` 为 `700 root:root`），未发现 Bridge 代码、env 或容器。Docker 29.2.1、Docker Compose v5.0.2、Git 2.43.7 可用；Node/npm/pnpm/Codex CLI 均未安装。运行容器仍为 RealAgent/Amy 相关服务与 staging，公网 80/443/8443 由 `realagent-nginx` 占用并挂载 `/root/RealAgentAI_cc/nginx.conf`；当前 Nginx 配置没有 `feishu-codex.aijia.ai` server block。`feishu-codex.aijia.ai` 已解析到 `43.156.249.40`，HTTP 访问当前返回默认 Nginx 404。目标本地端口 3010/3000/8080 未监听，适合作为 Bridge localhost upstream 候选。certbot 2.8.0 存在，现有证书 `aijia.ai` 到期 `2026-09-18`，`realagent.aijia.ai` 到期 `2026-10-01`。本次未读取 secret 内容、未写文件、未安装、未重启、未部署。
+- 2026-07-19 经 Ivy 批准已在服务器创建 `/opt/feishu-codex/secrets/bridge.env` 模板文件，权限为 `600 root:root`，内容只包含占位凭据与安全默认值：`HOST=127.0.0.1`、`CODEX_SUMMARIZER_MODE=fake`、`WORKER_ENABLED=false`。真实 `FEISHU_APP_SECRET`、`FEISHU_VERIFICATION_TOKEN`、`FEISHU_ENCRYPT_KEY` 尚未写入；后续由 Ivy 提供/填入，凭据值不得进入仓库或 MEMORY。本次未启动服务、未安装依赖、未修改 Nginx。
+- 2026-07-19 Ivy 提供的飞书真实 `FEISHU_APP_SECRET`、`FEISHU_VERIFICATION_TOKEN`、`FEISHU_ENCRYPT_KEY` 已一次性写入服务器 `/opt/feishu-codex/secrets/bridge.env`，文件仍为 `600 root:root`；只验证了敏感项已设置且长度为 32，未在输出、仓库或 MEMORY 中记录值。安全开关仍为 `CODEX_SUMMARIZER_MODE=fake`、`WORKER_ENABLED=false`、`HOST=127.0.0.1`。
+- 2026-07-19 经 Ivy 批准已部署 Bridge 容器但未公网暴露：当前已提交代码 `5f71d7f` 通过 `git archive` 上传到 `/opt/feishu-codex/app`，使用 `/opt/feishu-codex/app/deploy/docker-compose.production.yml` 构建镜像 `aijia/feishu-codex-bridge:local` 并启动容器 `feishu-codex-bridge`，restart policy 为 `unless-stopped`，容器用户为 `node`。宿主只监听 `127.0.0.1:3010 -> container:3000`；`/health` 本机返回 200，`/ready` 本机返回 503 `READINESS_BLOCKED`，blockers 为 `FEISHU_READER_UNAVAILABLE`、`FEISHU_DELIVERY_UNAVAILABLE`、`WORKER_CONSUMER_UNAVAILABLE`、`CODEX_AUTH_UNAVAILABLE`。`/opt/feishu-codex/data`、`logs`、`codex-workdir` 已调整为 UID 1000 可写（宿主显示为 `lighthouse:lighthouse`，对应容器内 `node` 用户）；`secrets/bridge.env` 仍保持 `root:root 600`。本次未修改 Nginx、未申请证书、未配置飞书后台 Webhook、未启用 worker 或真实 Codex。
 - AWS 悉尼别名 `product-sydney-01` 明确不在本项目范围。
 - Ivy 已授权并已使用 SSH 别名 `aijia-tencent` 执行只读 Preflight；该别名解析为非 root 用户。
 - 2026-07-18 已通过 `aijia-tencent` 完成只读 Preflight：OpenCloudOS 9.4、2 vCPU、3.6 GiB RAM、根盘余约 20 GiB；Docker/Compose/Git 可用，Node/npm/Codex 缺失。
@@ -112,6 +115,7 @@
 
 - 腾讯云 SSH 配置位于 `~/.ssh/config`，对应私钥位于 `~/.ssh/`；只记录位置，不记录密钥内容。
 - 飞书企业自建应用 App ID 为 `cli_aad1fef1c7b81bda`；App Secret 已由 Ivy 创建但尚未写入服务器，后续仅存放于腾讯云运行环境的 Secret/环境变量，不进入仓库或本文档。
+- 服务器运行环境凭据文件位置为 `/opt/feishu-codex/secrets/bridge.env`；文件已创建为 root-only 模板，但敏感值仍是占位符。
 - 2026-07-18 已在飞书开发者后台为 Codex 应用开通：`im:message:send_as_bot`、`minutes:minutes.basic:read`、`minutes:minutes.transcript:export`，以及“读取用户发给机器人的单聊消息”；妙记基本信息与转录文本的数据范围限制为“公开妙记的所有者包含与应用可用范围一致”。
 - 已订阅 `im.message.receive_v1`（应用身份）和 `minutes.minute.generated_v1`（用户身份），两项所需权限均显示已开通；后者需要 Ivy 用户 OAuth，不能据此假设覆盖全公司所有人的妙记。
 - 飞书后台当前事件接收方式为长连接，而 Phase 1A 代码按 Webhook 实现；发布前必须二选一并补齐对应运行时，当前未创建或发布新版本。
