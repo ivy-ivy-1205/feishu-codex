@@ -33,8 +33,8 @@ const replyEventSchema = z.object({
   }),
   message: z.object({
     chat_id: z.string().min(1),
-    parent_id: z.string().min(1).nullable().optional(),
-    root_id: z.string().min(1).nullable().optional(),
+    parent_id: z.string().nullable().optional(),
+    root_id: z.string().nullable().optional(),
     message_type: z.literal('text'),
     content: z.string().min(1)
   })
@@ -70,6 +70,7 @@ export function registerFeishuEventRoutes(
 
     const envelope = eventEnvelopeSchema.safeParse(body);
     if (!envelope.success) {
+      logRejectedFeishuEvent(request.log, 'invalid_event_envelope', body);
       return reply.code(400).send({ error: 'invalid_event_envelope' });
     }
     if (envelope.data.header.token !== dependencies.verificationToken) {
@@ -79,6 +80,7 @@ export function registerFeishuEventRoutes(
     if (envelope.data.header.event_type === replyEventType) {
       const replyInput = parseReplyInput(envelope.data.event);
       if (replyInput === null) {
+        logRejectedFeishuEvent(request.log, 'invalid_reply_event', body);
         return reply.code(400).send({ error: 'invalid_reply_event' });
       }
       try {
@@ -96,6 +98,7 @@ export function registerFeishuEventRoutes(
       return dependencies.ingestMinute(body);
     } catch (error) {
       if (error instanceof ZodError) {
+        logRejectedFeishuEvent(request.log, 'invalid_event_envelope', body);
         return reply.code(400).send({ error: 'invalid_event_envelope' });
       }
       request.log.error({ err: error }, 'Feishu event ingestion failed');
@@ -148,10 +151,69 @@ function parseReplyInput(event: unknown): {
     return {
       chatId: parsedEvent.data.message.chat_id,
       openId: parsedEvent.data.sender.sender_id.open_id,
-      replyTo: parsedEvent.data.message.parent_id ?? parsedEvent.data.message.root_id ?? null,
+      replyTo: normalizeReplyContext(
+        parsedEvent.data.message.parent_id,
+        parsedEvent.data.message.root_id
+      ),
       text: content.data.text
     };
   } catch {
     return null;
   }
+}
+
+function normalizeReplyContext(
+  parentId: string | null | undefined,
+  rootId: string | null | undefined
+): string | null {
+  const normalizedParentId = normalizeOptionalId(parentId);
+  if (normalizedParentId !== null) {
+    return normalizedParentId;
+  }
+  return normalizeOptionalId(rootId);
+}
+
+function normalizeOptionalId(id: string | null | undefined): string | null {
+  if (typeof id !== 'string') {
+    return null;
+  }
+  const trimmed = id.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function logRejectedFeishuEvent(
+  log: FastifyInstance['log'],
+  reason: string,
+  body: unknown
+): void {
+  log.warn({
+    reason,
+    feishuEventShape: describeFeishuEventShape(body)
+  }, 'Feishu event rejected');
+}
+
+function describeFeishuEventShape(body: unknown): Record<string, unknown> {
+  if (!isRecord(body)) {
+    return { bodyType: typeof body };
+  }
+  const header = isRecord(body.header) ? body.header : null;
+  const event = isRecord(body.event) ? body.event : null;
+  const message = event && isRecord(event.message) ? event.message : null;
+  const sender = event && isRecord(event.sender) ? event.sender : null;
+  return {
+    bodyKeys: Object.keys(body).sort(),
+    schema: typeof body.schema === 'string' ? body.schema : typeof body.schema,
+    headerKeys: header ? Object.keys(header).sort() : [],
+    eventType: header && typeof header.event_type === 'string' ? header.event_type : null,
+    eventKeys: event ? Object.keys(event).sort() : [],
+    messageKeys: message ? Object.keys(message).sort() : [],
+    messageType: message && typeof message.message_type === 'string'
+      ? message.message_type
+      : null,
+    senderKeys: sender ? Object.keys(sender).sort() : []
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

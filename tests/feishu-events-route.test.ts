@@ -136,6 +136,60 @@ describe('POST /webhooks/feishu/events', () => {
     await harness.close();
   });
 
+  it('accepts direct Feishu text messages with empty reply context fields', async () => {
+    const harness = createHarness();
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: replyEvent({
+        openId: 'ou_ivy_fixture',
+        chatId: privateChatId,
+        replyTo: '',
+        text: '测试 webhook 到达'
+      })
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      status: 'reply_decision',
+      decision: { kind: 'clarify', reason: 'missing_reply_context' }
+    });
+    await harness.close();
+  });
+
+  it('logs only non-sensitive shape diagnostics for rejected Feishu events', async () => {
+    const chunks: string[] = [];
+    const harness = createHarness({
+      logger: {
+        level: 'info',
+        stream: { write: (message: string) => chunks.push(message) }
+      }
+    });
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: replyEvent({
+        openId: 'ou_ivy_fixture',
+        chatId: privateChatId,
+        replyTo: null,
+        text: 'sensitive message body must not be logged'
+      }, { messageType: 'audio' })
+    });
+    await harness.close();
+
+    const logs = chunks.join('');
+    expect(response.statusCode).toBe(400);
+    expect(logs).toContain('Feishu event rejected');
+    expect(logs).toContain('invalid_reply_event');
+    expect(logs).toContain('im.message.receive_v1');
+    expect(logs).toContain('message_type');
+    expect(logs).toContain('content');
+    expect(logs).not.toContain('sensitive message body must not be logged');
+    expect(logs).not.toContain(verificationToken);
+  });
+
   it('passes through successful, wrong-chat, and non-Ivy authorization decisions', async () => {
     const harness = createHarness();
     seedDeliveredTodo(harness.meetingRepository);
@@ -399,7 +453,7 @@ function replyEvent(input: {
   chatId: string;
   replyTo: string | null;
   text: string;
-}) {
+}, options: { messageType?: string } = {}) {
   return {
     schema: '2.0',
     header: {
@@ -413,7 +467,8 @@ function replyEvent(input: {
       message: {
         chat_id: input.chatId,
         parent_id: input.replyTo,
-        message_type: 'text',
+        root_id: input.replyTo,
+        message_type: options.messageType ?? 'text',
         content: JSON.stringify({ text: input.text })
       }
     }
