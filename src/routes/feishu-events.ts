@@ -93,10 +93,20 @@ export function registerFeishuEventRoutes(
       }
       try {
         const decision = dependencies.routeReply(replyInput);
+        request.log.info({
+          feishuReplyDiagnostics: {
+            hasOpenId: replyInput.openId.length > 0,
+            hasChatId: replyInput.chatId.length > 0,
+            hasReplyTo: replyInput.replyTo !== null,
+            messageTextLength: replyInput.text.length,
+            decisionKind: decision.kind
+          }
+        }, 'Feishu reply event parsed');
         const acknowledgement = await maybeAcknowledgeDirectMessage({
           decision,
           replyInput,
-          sendTextMessage: dependencies.sendTextMessage
+          sendTextMessage: dependencies.sendTextMessage,
+          log: request.log
         });
         return {
           status: 'reply_decision',
@@ -124,6 +134,10 @@ export function registerFeishuEventRoutes(
 
 const directMessageAcknowledgementText =
   '我已收到。当前还未绑定会议纪要，请在会议总结下回复 Todo 编号，或等待妙记事件接入。';
+type DirectAcknowledgementResult =
+  | { status: 'delivered'; messageId: string }
+  | { status: 'failed'; errorStatus: number | null; errorCode: number | null };
+
 async function maybeAcknowledgeDirectMessage(input: {
   decision: ReplyDecision;
   replyInput: {
@@ -133,7 +147,8 @@ async function maybeAcknowledgeDirectMessage(input: {
     text: string;
   };
   sendTextMessage?: (message: { chatId: string; text: string }) => Promise<{ messageId: string }>;
-}): Promise<{ messageId: string } | null> {
+  log: FastifyInstance['log'];
+}): Promise<DirectAcknowledgementResult | null> {
   if (
     !input.sendTextMessage
   ) {
@@ -143,10 +158,34 @@ async function maybeAcknowledgeDirectMessage(input: {
   if (text === null) {
     return null;
   }
-  return input.sendTextMessage({
-    chatId: input.replyInput.chatId,
-    text
-  });
+  try {
+    const acknowledgement = await input.sendTextMessage({
+      chatId: input.replyInput.chatId,
+      text
+    });
+    input.log.info({
+      feishuAcknowledgementDiagnostics: {
+        status: 'delivered',
+        hasMessageId: acknowledgement.messageId.length > 0,
+        decisionKind: input.decision.kind
+      }
+    }, 'Feishu direct acknowledgement delivered');
+    return { status: 'delivered', messageId: acknowledgement.messageId };
+  } catch (error) {
+    const failure = describeFeishuSendFailure(error);
+    input.log.warn({
+      feishuAcknowledgementDiagnostics: {
+        status: 'failed',
+        decisionKind: input.decision.kind,
+        ...failure
+      }
+    }, 'Feishu direct acknowledgement failed');
+    return {
+      status: 'failed',
+      errorStatus: failure.errorStatus,
+      errorCode: failure.errorCode
+    };
+  }
 }
 
 function directAcknowledgementTextFor(decision: ReplyDecision, openId: string): string | null {
@@ -266,6 +305,23 @@ function logRejectedFeishuEvent(
     reason,
     feishuEventShape: describeFeishuEventShape(body)
   }, 'Feishu event rejected');
+}
+
+function describeFeishuSendFailure(error: unknown): {
+  errorStatus: number | null;
+  errorCode: number | null;
+  errorMessage: string | null;
+} {
+  if (!isRecord(error)) {
+    return { errorStatus: null, errorCode: null, errorMessage: null };
+  }
+  const response = isRecord(error.response) ? error.response : null;
+  const data = response && isRecord(response.data) ? response.data : null;
+  return {
+    errorStatus: typeof response?.status === 'number' ? response.status : null,
+    errorCode: typeof data?.code === 'number' ? data.code : null,
+    errorMessage: typeof data?.msg === 'string' ? data.msg.slice(0, 240) : null
+  };
 }
 
 function describeFeishuEventShape(body: unknown): Record<string, unknown> {

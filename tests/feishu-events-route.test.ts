@@ -182,7 +182,7 @@ describe('POST /webhooks/feishu/events', () => {
     expect(response.json()).toEqual({
       status: 'reply_decision',
       decision: { kind: 'clarify', reason: 'missing_reply_context' },
-      acknowledgement: { messageId: 'om_direct_ack' }
+      acknowledgement: { status: 'delivered', messageId: 'om_direct_ack' }
     });
     expect(sentMessages).toEqual([{
       chatId: privateChatId,
@@ -245,13 +245,68 @@ describe('POST /webhooks/feishu/events', () => {
     expect(response.json()).toEqual({
       status: 'reply_decision',
       decision: { kind: 'identify_ivy' },
-      acknowledgement: { messageId: 'om_identify_ack' }
+      acknowledgement: { status: 'delivered', messageId: 'om_identify_ack' }
     });
     expect(sentMessages).toEqual([{
       chatId: privateChatId,
       text: '检测到待绑定 Ivy 身份，你的 open_id 是：ou_unbound_ivy。请回 Codex 确认绑定。'
     }]);
     await harness.close();
+  });
+
+  it('logs non-sensitive diagnostics for direct reply routing and acknowledgement failure', async () => {
+    const chunks: string[] = [];
+    const harness = createHarness({
+      logger: {
+        level: 'info',
+        stream: { write: (message: string) => chunks.push(message) }
+      },
+      routeReply: () => ({ kind: 'identify_ivy' }),
+      sendTextMessage: async () => {
+        const error = new Error('Request failed with status code 400') as Error & {
+          response?: { status: number; data: { code: number; msg: string } };
+        };
+        error.response = {
+          status: 400,
+          data: { code: 230002, msg: 'Bot/User can NOT be out of the chat.' }
+        };
+        throw error;
+      }
+    });
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: replyEvent({
+        openId: 'ou_sensitive_ivy_open_id',
+        chatId: privateChatId,
+        replyTo: '',
+        text: 'sensitive user text'
+      }, { messageType: 'post' })
+    });
+    await harness.close();
+
+    const logs = chunks.join('');
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      status: 'reply_decision',
+      decision: { kind: 'identify_ivy' },
+      acknowledgement: {
+        status: 'failed',
+        errorCode: 230002,
+        errorStatus: 400
+      }
+    });
+    expect(logs).toContain('Feishu reply event parsed');
+    expect(logs).toContain('Feishu direct acknowledgement failed');
+    expect(logs).toContain('identify_ivy');
+    expect(logs).toContain('230002');
+    expect(logs).toContain('hasOpenId');
+    expect(logs).toContain('hasChatId');
+    expect(logs).not.toContain('ou_sensitive_ivy_open_id');
+    expect(logs).not.toContain(privateChatId);
+    expect(logs).not.toContain('sensitive user text');
+    expect(logs).not.toContain(verificationToken);
   });
 
   it('logs only non-sensitive shape diagnostics for rejected Feishu events', async () => {

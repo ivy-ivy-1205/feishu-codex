@@ -36,6 +36,7 @@
 - 腾讯云是否已有可复用 PostgreSQL；否则 MVP 使用持久化 SQLite。
 - Ivy 审批用户真实 `open_id`、机器人是否可查看入群前历史、群是否为话题模式。
 - Ivy 提供的 `oc_d851c3e986007dc0f97ab582bcb2e7c8` 已确认作为 Ivy 与 Codex Bot 的私聊 chat ID；它不是审批用户身份，不能用于操作者授权。
+- 2026-07-19 真实发送诊断显示，使用当前 `FEISHU_IVY_PRIVATE_CHAT_ID` 主动发消息时飞书返回 `230002 Bot/User can NOT be out of the chat`；因此该 `oc_d851...` 不能作为当前 Codex Bot 可用的默认私聊发送目标。后续应从 Ivy 发给 Bot 的真实 `im.message.receive_v1` 事件中安全绑定 Ivy 的 `open_id`，并/或记录事件自带的可回复 `chat_id`。
 - 待确认“先干 1”的授权边界：是否允许低风险任务立即执行，而对代码修改、外部消息、部署和生产访问继续要求二次确认。
 
 ## 架构决策
