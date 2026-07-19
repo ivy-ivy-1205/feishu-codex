@@ -118,7 +118,7 @@ function isPlainTextHeaderLine(line: string): boolean {
 }
 
 function isSpeakerMarkerLine(line: string): boolean {
-  return /^发言人[:：]?$/u.test(line);
+  return /^发言人(?:\(\d+\)|（\d+）)?[:：]?$/u.test(line);
 }
 
 function matchSpeakerName(

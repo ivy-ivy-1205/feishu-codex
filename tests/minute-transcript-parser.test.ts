@@ -61,7 +61,7 @@ describe('parseMinuteTranscriptStream', () => {
     const plainText = [
       '2026-07-03 20:04:28 CST|Ivy的视频会议',
       '',
-      '发言人:',
+      '发言人（2）:',
       'Ivy、james wang',
       '',
       'Ivy',
