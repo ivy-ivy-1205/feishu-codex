@@ -1,4 +1,5 @@
 import { buildApp } from './app.js';
+import { CodexAuthProbe, NodeCodexProcessRunner } from './adapters/codex-cli.js';
 import { createFeishuIntegration } from './composition/feishu.js';
 import { createMeetingSummarizer } from './composition/meeting-summarizer.js';
 import { createWorkerRuntime } from './composition/worker-runtime.js';
@@ -26,6 +27,13 @@ const jobRepository = new JobRepository(database.client, {
 const outboxRepository = new OutboxRepository(database.client);
 const meetingSummarizer = createMeetingSummarizer({ config });
 const feishuIntegration = createFeishuIntegration({ config });
+const codexAuthProbe = new CodexAuthProbe({
+  command: config.codex.command,
+  workdir: config.codex.workdir,
+  timeoutMs: config.codex.timeoutSeconds * 1_000,
+  baseEnv: process.env,
+  runner: new NodeCodexProcessRunner()
+});
 const workerRuntime = createWorkerRuntime(
   config.worker.enabled
     ? {
@@ -51,7 +59,8 @@ const app = buildApp({
     isFeishuReaderAvailable: () => config.worker.enabled,
     isFeishuDeliveryAvailable: () => config.worker.enabled,
     isWorkerConsumptionAvailable: () => workerRuntime.isConsumptionAvailable(),
-    isCodexAuthAvailable: () => false
+    isCodexAuthAvailable: async () =>
+      config.codex.summarizerMode === 'codex' && await codexAuthProbe.isAvailable()
   }),
   verificationToken: config.feishu.verificationToken,
   encryptKey: config.feishu.encryptKey,
