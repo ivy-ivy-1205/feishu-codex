@@ -205,7 +205,9 @@ export class CodexAuthProbe {
       timeoutMs: this.#timeoutMs
     });
 
-    return result.exitCode === 0 && isChatGptLoginStatus(result.stdout);
+    return result.exitCode === 0 && isChatGptLoginStatus(
+      `${result.stdout}\n${result.stderr}`
+    );
   }
 }
 

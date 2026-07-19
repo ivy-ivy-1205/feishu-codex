@@ -54,6 +54,25 @@ describe('CodexAuthProbe', () => {
     await expect(probe.isAvailable()).resolves.toBe(false);
   });
 
+  it('accepts ChatGPT login status printed to stderr by the real CLI', async () => {
+    const probe = new CodexAuthProbe({
+      command: 'codex',
+      workdir: '/tmp/aijia-codex-readonly',
+      timeoutMs: 30_000,
+      runner: {
+        async run() {
+          return {
+            exitCode: 0,
+            stdout: '',
+            stderr: 'Logged in using ChatGPT\n'
+          };
+        }
+      }
+    });
+
+    await expect(probe.isAvailable()).resolves.toBe(true);
+  });
+
   it('fails closed when the login status command fails', async () => {
     const probe = new CodexAuthProbe({
       command: 'codex',
