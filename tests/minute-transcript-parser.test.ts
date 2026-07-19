@@ -57,6 +57,47 @@ describe('parseMinuteTranscriptStream', () => {
       .resolves.toEqual([]);
   });
 
+  it('parses Feishu plain text transcript exports into ordered text segments', async () => {
+    const plainText = [
+      '2026-07-03 20:04:28 CST|Ivy的视频会议',
+      '',
+      '发言人:',
+      'Ivy、james wang',
+      '',
+      'Ivy',
+      '我们先确认 landing page 的参考素材和整体方向。',
+      '',
+      'james wang',
+      'Landbook 可以作为页面结构参考，Motion Sizes 可以作为 hero 区参考。',
+      '下一步整理成前端实现清单。',
+      '',
+      'Ivy',
+      '好的，先把可以推进的事项列出来。'
+    ].join('\n');
+
+    await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
+      .resolves.toEqual([
+        {
+          speakerName: 'Ivy',
+          startMs: 0,
+          endMs: 1,
+          text: '我们先确认 landing page 的参考素材和整体方向。'
+        },
+        {
+          speakerName: 'james wang',
+          startMs: 1,
+          endMs: 2,
+          text: 'Landbook 可以作为页面结构参考，Motion Sizes 可以作为 hero 区参考。\n下一步整理成前端实现清单。'
+        },
+        {
+          speakerName: 'Ivy',
+          startMs: 2,
+          endMs: 3,
+          text: '好的，先把可以推进的事项列出来。'
+        }
+      ]);
+  });
+
   it('fails closed when JSON is invalid or segment fields are unsafe', async () => {
     await expect(parseMinuteTranscriptStream(Readable.from(['not json'])))
       .rejects.toBeInstanceOf(MinuteTranscriptParseError);

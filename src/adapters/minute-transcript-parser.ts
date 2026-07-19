@@ -18,7 +18,7 @@ export async function parseMinuteTranscriptStream(
   try {
     payload = JSON.parse(raw);
   } catch {
-    throw new MinuteTranscriptParseError();
+    return parsePlainTextTranscript(raw);
   }
 
   const segments = extractSegments(payload);
@@ -35,6 +35,106 @@ async function readUtf8(stream: Readable): Promise<string> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8'));
   }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+function parsePlainTextTranscript(raw: string): TranscriptSegmentRecord[] {
+  const lines = raw
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    return [];
+  }
+
+  const speakerNames = extractPlainTextSpeakerNames(lines);
+  if (speakerNames.length === 0) {
+    throw new MinuteTranscriptParseError();
+  }
+  const speakerSet = new Set(speakerNames.map(normalizeSpeakerKey));
+  const segments: Array<{ speakerName: string; textLines: string[] }> = [];
+  let current: { speakerName: string; textLines: string[] } | null = null;
+  let skipSpeakerListLine = false;
+
+  for (const line of lines) {
+    if (isPlainTextHeaderLine(line)) {
+      continue;
+    }
+    if (isSpeakerMarkerLine(line)) {
+      skipSpeakerListLine = true;
+      continue;
+    }
+    if (skipSpeakerListLine) {
+      skipSpeakerListLine = false;
+      continue;
+    }
+
+    const speakerName = matchSpeakerName(line, speakerSet, speakerNames);
+    if (speakerName !== null) {
+      if (current !== null && current.textLines.length > 0) {
+        segments.push(current);
+      }
+      current = { speakerName, textLines: [] };
+      continue;
+    }
+    if (current !== null) {
+      current.textLines.push(line);
+    }
+  }
+
+  if (current !== null && current.textLines.length > 0) {
+    segments.push(current);
+  }
+
+  try {
+    return segments.map((segment, index) => TranscriptSegment.parse({
+      speakerName: segment.speakerName,
+      startMs: index,
+      endMs: index + 1,
+      text: segment.textLines.join('\n')
+    }));
+  } catch {
+    throw new MinuteTranscriptParseError();
+  }
+}
+
+function extractPlainTextSpeakerNames(lines: string[]): string[] {
+  const markerIndex = lines.findIndex(isSpeakerMarkerLine);
+  if (markerIndex < 0) {
+    return [];
+  }
+  const speakerLine = lines[markerIndex + 1];
+  if (!speakerLine) {
+    return [];
+  }
+  return speakerLine
+    .split(/[、,，]/u)
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+}
+
+function isPlainTextHeaderLine(line: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+[A-Z]{2,5}\|/u.test(line);
+}
+
+function isSpeakerMarkerLine(line: string): boolean {
+  return /^发言人[:：]?$/u.test(line);
+}
+
+function matchSpeakerName(
+  line: string,
+  speakerSet: Set<string>,
+  speakerNames: string[]
+): string | null {
+  const normalized = normalizeSpeakerKey(line);
+  if (!speakerSet.has(normalized)) {
+    return null;
+  }
+  return speakerNames.find((name) => normalizeSpeakerKey(name) === normalized) ?? line;
+}
+
+function normalizeSpeakerKey(value: string): string {
+  return value.normalize('NFKC').trim().toLowerCase();
 }
 
 function extractSegments(payload: unknown): unknown[] {
