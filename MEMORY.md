@@ -49,6 +49,7 @@
 - 2026-07-19 第三次在 Ivy 已打开 device 页面后生成 Codex code，CLI 轮询最终返回 `device auth timed out after 15 minutes`，随后 `codex login status` 仍为 `Not logged in`。说明浏览器端授权没有被远端容器 CLI 成功收到；继续重复生成 code 可能再次触发 429，需要先确认浏览器页面是否成功提交 code、是否登录到正确 OpenAI/ChatGPT 账号、是否有组织/安全确认步骤未完成。
 - 2026-07-19 Ivy 在 ChatGPT 安全设置中开启“为 Codex 启用设备代码授权”后，重新执行 `codex login --device-auth` 成功；服务器容器内 `codex login status` 返回 `Logged in using ChatGPT`。登录态持久化在 compose 挂载的 `/opt/feishu-codex/codex-home`，不记录、不保存凭据值。当前仍未启用 `CODEX_SUMMARIZER_MODE=codex`，未启用 worker。
 - 2026-07-19 手动单条真实妙记 Codex summarizer 联调完成：先发现两个真实 CLI 兼容问题并修复部署，分别是 `codex login status` 在当前 CLI 把登录态输出到 stderr 导致 Auth Gate 误判，以及 `codex exec --output-schema` 在 `0.144.6` 需要 schema 文件路径而非 JSON 字符串。修复提交为 `fdff173` 与 `b61a284`，本地验证 `23` 个 test files、`141` tests 与 build 均通过。随后对妙记 `obcnlpjyhw6ekjgci21411vq` 使用真实 Feishu reader + 真实 Codex summarizer + 真实 Feishu delivery 手动处理成功：job `completed`，summary created，Todo 数量 `5`，outbox `delivered`。本次未启用常驻 worker、未执行 Todo、未修改 Nginx/secret。
+- Ivy 反馈真实 Codex 会议总结作为 MVP 出版物已符合要求：现阶段不追求完美，先在实际应用过程中逐步完善。当前总结能保留上下文、决策、风险与“我可以帮你推进”的 Todo 列表，适合进入下一步飞书内手动触发入口。
 - Codex CLI 放在云端的产品判断：它让飞书妙记与飞书 Bot 指令在 Ivy 的 Mac/Codex App 离线时仍能进入执行链路；但云端 Codex 只能操作服务器可见的 workspace/repo/file，不能直接读取 Mac-only 本地目录。
 - Feishu task 到 workspace 的映射需要一个 Project Registry：把飞书项目群、妙记、Todo 或用户命令解析到 `project_key`，再映射到 GitHub repo、服务器 checkout 路径、默认分支、项目记忆和风险策略。已有本地项目需要同步到服务器可访问源；新项目可先创建服务器 workspace，之后再绑定 repo。
 - Ivy 接受会议总结 MVP 模板：标题、会议、时间、核心信息 bullet，以及“我可以帮你推进”的编号 Todo 列表。
