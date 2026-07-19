@@ -124,9 +124,6 @@ export function registerFeishuEventRoutes(
 
 const directMessageAcknowledgementText =
   '我已收到。当前还未绑定会议纪要，请在会议总结下回复 Todo 编号，或等待妙记事件接入。';
-const identityBindingAcknowledgementText =
-  '我已收到。当前还没有绑定 Ivy 的飞书身份，下一步需要完成身份绑定后才能执行 Todo。';
-
 async function maybeAcknowledgeDirectMessage(input: {
   decision: ReplyDecision;
   replyInput: {
@@ -142,7 +139,7 @@ async function maybeAcknowledgeDirectMessage(input: {
   ) {
     return null;
   }
-  const text = directAcknowledgementTextFor(input.decision);
+  const text = directAcknowledgementTextFor(input.decision, input.replyInput.openId);
   if (text === null) {
     return null;
   }
@@ -152,9 +149,9 @@ async function maybeAcknowledgeDirectMessage(input: {
   });
 }
 
-function directAcknowledgementTextFor(decision: ReplyDecision): string | null {
+function directAcknowledgementTextFor(decision: ReplyDecision, openId: string): string | null {
   if (decision.kind === 'identify_ivy') {
-    return identityBindingAcknowledgementText;
+    return `检测到待绑定 Ivy 身份，你的 open_id 是：${openId}。请回 Codex 确认绑定。`;
   }
   if (decision.kind === 'clarify' && decision.reason === 'missing_reply_context') {
     return directMessageAcknowledgementText;

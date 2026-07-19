@@ -249,7 +249,7 @@ describe('POST /webhooks/feishu/events', () => {
     });
     expect(sentMessages).toEqual([{
       chatId: privateChatId,
-      text: '我已收到。当前还没有绑定 Ivy 的飞书身份，下一步需要完成身份绑定后才能执行 Todo。'
+      text: '检测到待绑定 Ivy 身份，你的 open_id 是：ou_unbound_ivy。请回 Codex 确认绑定。'
     }]);
     await harness.close();
   });
