@@ -27,6 +27,9 @@ export interface FeishuApiClient {
   sendTextMessage(input: { chatId: string; text: string }): Promise<{
     messageId: string;
   }>;
+  sendInteractiveMessage?(input: { chatId: string; card: Record<string, unknown> }): Promise<{
+    messageId: string;
+  }>;
 }
 
 export class FeishuRetryableError extends Error {
@@ -79,6 +82,19 @@ export class FeishuMessageDeliveryAdapter {
     const sent = await this.client.sendTextMessage(input);
     if (!sent.messageId.trim() || sent.messageId.startsWith('pending:')) {
       throw new Error('Feishu delivery requires an actual message ID');
+    }
+    return { messageId: sent.messageId.trim() };
+  }
+
+  async sendInteractiveCard(input: { chatId: string; card: Record<string, unknown> }): Promise<{
+    messageId: string;
+  }> {
+    if (!this.client.sendInteractiveMessage) {
+      throw new Error('Feishu interactive card delivery is unavailable');
+    }
+    const sent = await this.client.sendInteractiveMessage(input);
+    if (!sent.messageId.trim() || sent.messageId.startsWith('pending:')) {
+      throw new Error('Feishu interactive delivery requires an actual message ID');
     }
     return { messageId: sent.messageId.trim() };
   }

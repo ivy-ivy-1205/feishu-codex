@@ -49,6 +49,8 @@ const postContentSchema = z.object({
   content: z.array(z.array(z.unknown()))
 }).passthrough();
 const replyEventType = 'im.message.receive_v1';
+const oauthRevokedEventType = 'auth.user_access_token.revoked_v4';
+const minuteGeneratedEventType = 'minutes.minute.generated_v1';
 
 export interface FeishuEventRouteDependencies {
   verificationToken: string;
@@ -56,6 +58,8 @@ export interface FeishuEventRouteDependencies {
   ingestMinute(event: unknown): IngestionResult;
   routeReply(input: unknown): ReplyDecision;
   sendTextMessage?(input: { chatId: string; text: string }): Promise<{ messageId: string }>;
+  recordOAuthRevocation?(openId: string): Promise<void>;
+  recordMinuteEvent?(event: unknown): void;
 }
 
 export function registerFeishuEventRoutes(
@@ -119,7 +123,26 @@ export function registerFeishuEventRoutes(
       }
     }
 
+    if (envelope.data.header.event_type === oauthRevokedEventType && dependencies.recordOAuthRevocation) {
+      const openId = extractRevokedOpenId(envelope.data.event);
+      if (!openId) {
+        logRejectedFeishuEvent(request.log, 'invalid_oauth_revocation_event', body);
+        return reply.code(400).send({ error: 'invalid_oauth_revocation_event' });
+      }
+      await dependencies.recordOAuthRevocation(openId);
+      request.log.warn({
+        feishuOAuthDiagnostics: {
+          eventType: oauthRevokedEventType,
+          hasOpenId: true
+        }
+      }, 'Feishu OAuth token revoked');
+      return { status: 'oauth_revocation_recorded' };
+    }
+
     try {
+      if (envelope.data.header.event_type === minuteGeneratedEventType) {
+        dependencies.recordMinuteEvent?.(envelope.data.event);
+      }
       return dependencies.ingestMinute(body);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -130,6 +153,21 @@ export function registerFeishuEventRoutes(
       return reply.code(500).send({ error: 'event_ingestion_failed' });
     }
   });
+}
+
+function extractRevokedOpenId(event: unknown): string | null {
+  const parsed = z.object({
+    open_id: z.string().min(1)
+  }).passthrough().safeParse(event);
+  if (parsed.success) {
+    return parsed.data.open_id;
+  }
+  const nested = z.object({
+    user: z.object({
+      open_id: z.string().min(1)
+    }).passthrough()
+  }).passthrough().safeParse(event);
+  return nested.success ? nested.data.user.open_id : null;
 }
 
 const directMessageAcknowledgementText =

@@ -7,9 +7,13 @@ import {
   registerFeishuEventRoutes
 } from './routes/feishu-events.js';
 import {
+  registerFeishuOAuthRoutes
+} from './routes/feishu-oauth.js';
+import {
   registerHealthRoutes,
   type ReadinessCheck
 } from './routes/health.js';
+import type { FeishuOAuthService } from './services/feishu-oauth.js';
 import type { IngestionResult } from './services/minute-ingestion.js';
 
 type LoggerOption = FastifyServerOptions['logger'];
@@ -21,6 +25,7 @@ export interface AppDependencies {
   ingestMinute(event: unknown): IngestionResult;
   routeReply(input: unknown): ReplyDecision;
   sendTextMessage?(input: { chatId: string; text: string }): Promise<{ messageId: string }>;
+  oauth?: FeishuOAuthService;
   logger?: LoggerOption;
 }
 
@@ -35,8 +40,17 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
     encryptKey: dependencies.encryptKey,
     ingestMinute: dependencies.ingestMinute,
     routeReply: dependencies.routeReply,
-    sendTextMessage: dependencies.sendTextMessage
+    sendTextMessage: dependencies.sendTextMessage,
+    recordOAuthRevocation: dependencies.oauth
+      ? (openId) => dependencies.oauth!.recordRevocation(openId)
+      : undefined,
+    recordMinuteEvent: dependencies.oauth
+      ? (event) => dependencies.oauth!.recordMinuteEvent(event)
+      : undefined
   });
+  if (dependencies.oauth) {
+    registerFeishuOAuthRoutes(app, { oauth: dependencies.oauth });
+  }
 
   return app;
 }

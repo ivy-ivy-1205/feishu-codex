@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { buildApp } from './app.js';
 import { CodexAuthProbe, NodeCodexProcessRunner } from './adapters/codex-cli.js';
+import { FeishuOAuthHttpClient, type FeishuOAuthSdkClientLike } from './adapters/feishu-oauth-client.js';
+import { createFeishuSdkClient } from './adapters/feishu-sdk.js';
 import { createFeishuIntegration } from './composition/feishu.js';
 import { createMeetingSummarizer } from './composition/meeting-summarizer.js';
 import { createWorkerRuntime } from './composition/worker-runtime.js';
@@ -8,9 +11,12 @@ import { createSqliteDatabase } from './db/client.js';
 import { migrateDatabase } from './db/migrate.js';
 import { JobRepository } from './repositories/job-repository.js';
 import { MeetingRepository } from './repositories/meeting-repository.js';
+import { OAuthTokenRepository } from './repositories/oauth-token-repository.js';
 import { OutboxRepository } from './repositories/outbox-repository.js';
 import { createServiceReadiness } from './routes/health.js';
+import { FeishuOAuthService, InMemoryOAuthStateStore } from './services/feishu-oauth.js';
 import { ingestMinuteGenerated } from './services/minute-ingestion.js';
+import { TokenCrypto } from './services/oauth-token-crypto.js';
 import { routeReply } from './services/reply-router.js';
 
 const config = loadConfig(process.env);
@@ -27,6 +33,42 @@ const jobRepository = new JobRepository(database.client, {
 const outboxRepository = new OutboxRepository(database.client);
 const meetingSummarizer = createMeetingSummarizer({ config });
 const feishuIntegration = createFeishuIntegration({ config });
+const oauth = config.feishu.oauth.enabled
+  ? new FeishuOAuthService({
+    appId: config.feishu.appId,
+    redirectUri: config.feishu.oauth.redirectUri!,
+    scopes: config.feishu.oauth.scopes,
+    stateStore: new InMemoryOAuthStateStore(),
+    tokenRepository: new OAuthTokenRepository(
+      database.client,
+      new TokenCrypto(readFileSync(config.feishu.oauth.tokenKeyFile!, 'utf8').trim())
+    ),
+    client: new FeishuOAuthHttpClient({
+      appId: config.feishu.appId,
+      appSecret: config.feishu.appSecret,
+      sdkClient: createFeishuSdkClient({
+        appId: config.feishu.appId,
+        appSecret: config.feishu.appSecret
+      }) as unknown as FeishuOAuthSdkClientLike
+    }),
+    ivyPrivateChatId: config.feishu.ivyPrivateChatId,
+    sendReauthorizationCard: async (input) => {
+      try {
+        return await feishuIntegration.delivery.sendInteractiveCard({
+          chatId: input.chatId,
+          card: input.card
+        });
+      } catch (error) {
+        console.warn('Feishu reauthorization card delivery failed; falling back to text', error);
+        return feishuIntegration.delivery.sendTextMessage({
+          chatId: input.chatId,
+          text: input.fallbackText
+        });
+      }
+    },
+    staleEventMs: config.feishu.oauth.staleEventHours * 60 * 60 * 1_000
+  })
+  : undefined;
 const codexAuthProbe = new CodexAuthProbe({
   command: config.codex.command,
   workdir: config.codex.workdir,
@@ -73,7 +115,8 @@ const app = buildApp({
     ivyPrivateChatId: config.feishu.ivyPrivateChatId,
     approverOpenIds: config.feishu.approverOpenIds
   }),
-  sendTextMessage: (input) => feishuIntegration.delivery.sendTextMessage(input)
+  sendTextMessage: (input) => feishuIntegration.delivery.sendTextMessage(input),
+  oauth
 });
 
 let shuttingDown = false;

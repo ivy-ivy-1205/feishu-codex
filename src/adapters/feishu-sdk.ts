@@ -15,7 +15,7 @@ export interface FeishuSdkClientLike {
         params: { receive_id_type: 'chat_id' };
         data: {
           receive_id: string;
-          msg_type: 'text';
+          msg_type: 'text' | 'interactive';
           content: string;
         };
       }): Promise<unknown>;
@@ -27,6 +27,9 @@ export interface FeishuSdkClientLike {
         get(payload: {
           path: { minute_token: string };
         }): Promise<unknown>;
+        subscription?(payload: {
+          data: { event_type: string };
+        }, options?: unknown): Promise<unknown>;
       };
       minuteTranscript: {
         get(payload: {
@@ -88,6 +91,25 @@ export class FeishuSdkApiClient implements FeishuApiClient {
     const messageId = extractMessageId(response);
     if (!messageId) {
       throw new Error('Feishu SDK sendTextMessage did not return a message ID');
+    }
+    return { messageId };
+  }
+
+  async sendInteractiveMessage(input: {
+    chatId: string;
+    card: Record<string, unknown>;
+  }): Promise<{ messageId: string }> {
+    const response = await this.#sdkClient.im.message.create({
+      params: { receive_id_type: 'chat_id' },
+      data: {
+        receive_id: input.chatId,
+        msg_type: 'interactive',
+        content: JSON.stringify(input.card)
+      }
+    });
+    const messageId = extractMessageId(response);
+    if (!messageId) {
+      throw new Error('Feishu SDK sendInteractiveMessage did not return a message ID');
     }
     return { messageId };
   }

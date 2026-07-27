@@ -122,6 +122,35 @@ describe('Feishu real adapter boundary', () => {
     }]);
   });
 
+  it('sends interactive cards to a chat with the same message ID safety check', async () => {
+    const sentCards: Array<{ chatId: string; card: Record<string, unknown> }> = [];
+    const delivery = new FeishuMessageDeliveryAdapter(createClient({
+      sentCards,
+      messageId: 'om_direct_card_1'
+    }));
+    const card = { elements: [] };
+
+    await expect(delivery.sendInteractiveCard({
+      chatId: 'oc_private_chat',
+      card
+    })).resolves.toEqual({ messageId: 'om_direct_card_1' });
+    expect(sentCards).toEqual([{
+      chatId: 'oc_private_chat',
+      card
+    }]);
+  });
+
+  it('fails closed when interactive card delivery is unavailable', async () => {
+    const delivery = new FeishuMessageDeliveryAdapter(createClient({
+      messageId: 'om_direct_card_1'
+    }));
+
+    await expect(delivery.sendInteractiveCard({
+      chatId: 'oc_private_chat',
+      card: { elements: [] }
+    })).rejects.toThrow(/interactive card delivery is unavailable/i);
+  });
+
   it('delivers pending meeting summaries and acknowledges them with real Feishu message IDs', async () => {
     const database = createSqliteDatabase(':memory:');
     migrateDatabase(database.client);
@@ -163,6 +192,7 @@ function createClient(options: {
   minute?: unknown;
   transcript?: unknown[];
   sent?: Array<{ chatId: string; text: string }>;
+  sentCards?: Array<{ chatId: string; card: Record<string, unknown> }>;
   messageId?: string;
 }): FeishuApiClient {
   return {
@@ -174,6 +204,13 @@ function createClient(options: {
     },
     async sendTextMessage(input) {
       options.sent?.push(input);
+      return { messageId: options.messageId ?? 'om_test_message' };
+    },
+    async sendInteractiveMessage(input) {
+      if (!options.sentCards) {
+        throw new Error('interactive card delivery is unavailable');
+      }
+      options.sentCards.push(input);
       return { messageId: options.messageId ?? 'om_test_message' };
     }
   };

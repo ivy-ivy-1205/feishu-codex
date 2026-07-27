@@ -46,6 +46,42 @@ describe('FeishuSdkApiClient', () => {
     }]);
   });
 
+  it('sends interactive cards through im.message.create', async () => {
+    const calls: unknown[] = [];
+    const client = new FeishuSdkApiClient({
+      sdkClient: createFakeSdkClient({
+        messageId: 'om_sdk_card',
+        calls
+      })
+    });
+    const card = {
+      header: {
+        title: {
+          tag: 'plain_text',
+          content: '需要重新授权'
+        }
+      },
+      elements: []
+    };
+
+    await expect(client.sendInteractiveMessage({
+      chatId: 'oc_private_chat',
+      card
+    })).resolves.toEqual({ messageId: 'om_sdk_card' });
+
+    expect(calls).toEqual([{
+      method: 'im.message.create',
+      payload: {
+        params: { receive_id_type: 'chat_id' },
+        data: {
+          receive_id: 'oc_private_chat',
+          msg_type: 'interactive',
+          content: JSON.stringify(card)
+        }
+      }
+    }]);
+  });
+
   it('reads minute basic info and transcript through official minutes APIs', async () => {
     const calls: unknown[] = [];
     const client = new FeishuSdkApiClient({
@@ -146,6 +182,10 @@ function createFakeSdkClient(options: {
     minutes: {
       v1: {
         minute: {
+          async subscription(payload) {
+            options.calls?.push({ method: 'minutes.v1.minute.subscription', payload });
+            return { code: 0 };
+          },
           async get(payload) {
             options.calls?.push({ method: 'minutes.v1.minute.get', payload });
             return { data: options.minute };

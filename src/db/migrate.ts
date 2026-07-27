@@ -70,6 +70,20 @@ const migrationSql = `
     action TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS feishu_user_oauth_tokens (
+    open_id TEXT PRIMARY KEY,
+    user_access_token_ciphertext TEXT NOT NULL,
+    refresh_token_ciphertext TEXT NOT NULL,
+    access_token_expires_at TEXT NOT NULL,
+    refresh_token_expires_at TEXT NOT NULL,
+    authorization_status TEXT NOT NULL
+      CONSTRAINT feishu_user_oauth_tokens_authorization_status_allowed
+      CHECK(authorization_status IN ('valid', 'invalid')),
+    subscription_status TEXT NOT NULL,
+    last_event_at TEXT,
+    updated_at TEXT NOT NULL
+  );
 `;
 
 export function migrateDatabase(client: Database.Database): void {

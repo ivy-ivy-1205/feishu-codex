@@ -81,4 +81,33 @@ describe('loadConfig', () => {
       pollIntervalMs: 250
     });
   });
+
+  it('keeps Feishu OAuth disabled unless explicitly configured with a redirect URI and token key file', () => {
+    expect(loadConfig(baseEnv).feishu.oauth).toMatchObject({
+      enabled: false,
+      redirectUri: null,
+      tokenKeyFile: null,
+      scopes: [
+        'auth:user.id:read',
+        'offline_access',
+        'minutes:minutes.basic:read',
+        'minutes:minutes.transcript:export'
+      ],
+      staleEventHours: 24
+    });
+    expect(() => loadConfig({
+      ...baseEnv,
+      FEISHU_OAUTH_ENABLED: 'true'
+    })).toThrow(/OAuth redirect URI/i);
+    expect(loadConfig({
+      ...baseEnv,
+      FEISHU_OAUTH_ENABLED: 'true',
+      FEISHU_OAUTH_REDIRECT_URI: 'https://feishu-codex.aijia.ai/oauth/feishu/callback',
+      FEISHU_OAUTH_TOKEN_KEY_FILE: '/opt/feishu-codex/secrets/feishu-oauth-token-key'
+    }).feishu.oauth).toMatchObject({
+      enabled: true,
+      redirectUri: 'https://feishu-codex.aijia.ai/oauth/feishu/callback',
+      tokenKeyFile: '/opt/feishu-codex/secrets/feishu-oauth-token-key'
+    });
+  });
 });

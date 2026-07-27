@@ -21,6 +21,12 @@ const envSchema = z.object({
   FEISHU_VOICE_TRANSCRIPTION_ENABLED: z.enum(['true', 'false'])
     .transform((value) => value === 'true')
     .default(false),
+  FEISHU_OAUTH_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  FEISHU_OAUTH_REDIRECT_URI: z.string().trim().url().optional(),
+  FEISHU_OAUTH_TOKEN_KEY_FILE: z.string().trim().min(1).optional(),
+  FEISHU_OAUTH_SCOPES: z.string().trim()
+    .default('auth:user.id:read,offline_access,minutes:minutes.basic:read,minutes:minutes.transcript:export'),
+  FEISHU_OAUTH_STALE_EVENT_HOURS: z.coerce.number().positive().default(24),
   WEBHOOK_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(300),
   CODEX_COMMAND: z.string().trim().min(1).default('codex'),
   CODEX_WORKDIR: z.string().trim().min(1),
@@ -49,6 +55,20 @@ const envSchema = z.object({
       message: 'worker lease must be longer than the downstream timeout'
     });
   }
+  if (config.FEISHU_OAUTH_ENABLED && !config.FEISHU_OAUTH_REDIRECT_URI) {
+    context.addIssue({
+      code: 'custom',
+      path: ['FEISHU_OAUTH_REDIRECT_URI'],
+      message: 'Feishu OAuth redirect URI is required when OAuth is enabled'
+    });
+  }
+  if (config.FEISHU_OAUTH_ENABLED && !config.FEISHU_OAUTH_TOKEN_KEY_FILE) {
+    context.addIssue({
+      code: 'custom',
+      path: ['FEISHU_OAUTH_TOKEN_KEY_FILE'],
+      message: 'Feishu OAuth token key file is required when OAuth is enabled'
+    });
+  }
 });
 
 type DatabaseKind = 'postgresql' | 'sqlite';
@@ -71,6 +91,13 @@ export interface AppConfig {
     approverOpenIds: string[];
     voiceTranscriptionEnabled: boolean;
     webhookDebounceSeconds: number;
+    oauth: {
+      enabled: boolean;
+      redirectUri: string | null;
+      tokenKeyFile: string | null;
+      scopes: string[];
+      staleEventHours: number;
+    };
   };
   codex: {
     command: string;
@@ -122,7 +149,14 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       ivyPrivateChatId: parsed.FEISHU_IVY_PRIVATE_CHAT_ID,
       approverOpenIds: parsed.FEISHU_APPROVER_OPEN_IDS,
       voiceTranscriptionEnabled: parsed.FEISHU_VOICE_TRANSCRIPTION_ENABLED,
-      webhookDebounceSeconds: parsed.WEBHOOK_DEBOUNCE_SECONDS
+      webhookDebounceSeconds: parsed.WEBHOOK_DEBOUNCE_SECONDS,
+      oauth: {
+        enabled: parsed.FEISHU_OAUTH_ENABLED,
+        redirectUri: parsed.FEISHU_OAUTH_REDIRECT_URI ?? null,
+        tokenKeyFile: parsed.FEISHU_OAUTH_TOKEN_KEY_FILE ?? null,
+        scopes: parsed.FEISHU_OAUTH_SCOPES.split(',').map((scope) => scope.trim()).filter(Boolean),
+        staleEventHours: parsed.FEISHU_OAUTH_STALE_EVENT_HOURS
+      }
     },
     codex: {
       command: parsed.CODEX_COMMAND,
