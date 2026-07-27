@@ -149,3 +149,9 @@
 - Ivy 已添加 `feishu-codex.aijia.ai` A 记录到 `43.156.249.40`，且未开启 Cloudflare 橙云代理；2026-07-18 本机默认解析器、`1.1.1.1` 与 `8.8.8.8` 均已解析到 `43.156.249.40`。
 - “测试企业和人员”当前无测试企业；创建测试企业会建立隔离组织，尚未执行。
 - Encrypt Key 与 Verification Token 的后台位置为“开发配置 → 事件与回调 → 加密策略”；仅在事件/回调发送到开发者服务器时生效，长连接模式无需配置。凭据值不得写入仓库或本文档。
+
+## 2026-07-27 Phase 1a/1b 施工启动
+
+- Ivy 提供并批准以《Codex 施工指令 · Phase 1a（服务器治理）+ Phase 1b（妙记总结卡片化）》作为增量需求来源；仓库内设计与实施计划分别固化在 `docs/superpowers/specs/2026-07-27-phase1a-governance-phase1b-summary-cards-design.md` 和 `docs/superpowers/plans/2026-07-27-phase1a-governance-phase1b-summary-cards.md`，提交为 `10f0b13`。
+- Phase 1b 采用 Zod Summary JSON Schema v1 作为 Agent/平台无关的稳定层，飞书 interactive 卡片为展示层；现有纯文本与 Todo 授权模型保留为 fail-closed 兼容/降级路径，避免卡片升级破坏回复编号授权链。
+- 2026-07-27 尝试按 A2 使用 `aijia-tencent` 对 `/opt/market-intel-engine` 做限定只读检查时，目标 `43.156.249.40:22` 返回 connection refused，远端命令未执行；未切换 root 别名绕过边界，A2 删除建议保持暂停，待 SSH 入口恢复后重新核验。
