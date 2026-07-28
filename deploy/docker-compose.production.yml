@@ -6,6 +6,7 @@ services:
     image: aijia/feishu-codex-bridge:local
     container_name: feishu-codex-bridge
     restart: unless-stopped
+    mem_limit: 512m
     env_file:
       - /opt/feishu-codex/secrets/bridge.env
     environment:
@@ -21,6 +22,7 @@ services:
       - /opt/feishu-codex/logs:/app/logs
       - /opt/feishu-codex/codex-workdir:/app/codex-workdir
       - /opt/feishu-codex/codex-home:/home/node/.codex
+      - /opt/feishu-codex/secrets:/app/secrets:ro
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
