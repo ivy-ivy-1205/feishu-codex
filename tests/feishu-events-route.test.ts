@@ -445,6 +445,40 @@ describe('POST /webhooks/feishu/events', () => {
     await harness.close();
   });
 
+  it('accepts the real Feishu minute.generated payload shape', async () => {
+    const harness = createHarness();
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: {
+        schema: '2.0',
+        header: {
+          token: verificationToken,
+          event_id: 'evt_real_minute_20260729',
+          event_type: 'minutes.minute.generated_v1',
+          create_time: '1785308723564'
+        },
+        event: {
+          minute_source: 'vc',
+          minute_token: 'obcn4dn1q1pf47i6loz9ga56',
+          subscriber_ids: [{ open_id: 'ou_ivy_fixture' }]
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ status: 'accepted' });
+    expect(harness.jobRepository.list()).toMatchObject([
+      {
+        kind: 'process_minute',
+        key: 'minute:obcn4dn1q1pf47i6loz9ga56'
+      }
+    ]);
+    expect(harness.persistedEffects()).toEqual({ summaries: 0, outbox: 0 });
+    await harness.close();
+  });
+
   it('recursively redacts credentials, transcript text, and raw bodies from logs', async () => {
     const chunks: string[] = [];
     const stream = {

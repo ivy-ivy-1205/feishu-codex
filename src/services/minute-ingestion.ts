@@ -28,8 +28,8 @@ export function ingestMinuteGenerated(
 
   const minuteEvent = MinuteGeneratedEvent.parse({
     eventId: envelope.header.event_id,
-    minuteId: envelope.event?.minute?.minute_token,
-    occurredAt: envelope.header.create_time
+    minuteId: extractMinuteToken(envelope.event),
+    occurredAt: normalizeFeishuEventTime(envelope.header.create_time)
   });
   const ingested = dependencies.meetingRepository.ingestMinute(minuteEvent, () => {
     dependencies.jobRepository.enqueueProcessMinute(minuteEvent.minuteId);
@@ -45,8 +45,30 @@ interface MinuteGeneratedEnvelope {
     create_time?: unknown;
   };
   event?: {
+    minute_token?: unknown;
     minute?: {
       minute_token?: unknown;
     };
   };
+}
+
+function extractMinuteToken(event: MinuteGeneratedEnvelope['event']): unknown {
+  if (typeof event?.minute_token === 'string' && event.minute_token.trim().length > 0) {
+    return event.minute_token;
+  }
+  return event?.minute?.minute_token;
+}
+
+function normalizeFeishuEventTime(createTime: unknown): unknown {
+  if (typeof createTime !== 'string') {
+    return createTime;
+  }
+  const trimmed = createTime.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const timestamp = Number(trimmed);
+    if (Number.isSafeInteger(timestamp)) {
+      return new Date(timestamp).toISOString();
+    }
+  }
+  return createTime;
 }
