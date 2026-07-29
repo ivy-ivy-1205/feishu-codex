@@ -28,6 +28,7 @@ describe('production deployment contract', () => {
 
     expect(backupScript).toContain('/opt/feishu-codex/data/bridge.sqlite');
     expect(backupScript).toContain('/opt/feishu-codex/backups');
+    expect(backupScript).toContain('chmod 600 "${final_backup}"');
     expect(backupScript).toContain("find \"${BACKUP_DIR}\"");
     expect(statSync(backupScriptUrl).mode & 0o111).not.toBe(0);
   });

@@ -22,6 +22,7 @@ install -d -m 700 "${BACKUP_DIR}"
 sqlite3 "${DATABASE}" ".backup '${temporary_backup}'"
 test -s "${temporary_backup}"
 mv -- "${temporary_backup}" "${final_backup}"
+chmod 600 "${final_backup}"
 
 mapfile -t backups < <(
   find "${BACKUP_DIR}" -maxdepth 1 -type f -name 'bridge-*.sqlite' \
