@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('production deployment contract', () => {
@@ -17,5 +17,18 @@ describe('production deployment contract', () => {
     expect(envExample).toContain(
       'FEISHU_OAUTH_TOKEN_KEY_FILE=/app/secrets/feishu-oauth-token-key'
     );
+  });
+
+  it('ships the SQLite backup script expected by the production cron', () => {
+    const backupScriptUrl = new URL(
+      '../deploy/backup-sqlite.sh',
+      import.meta.url
+    );
+    const backupScript = readFileSync(backupScriptUrl, 'utf8');
+
+    expect(backupScript).toContain('/opt/feishu-codex/data/bridge.sqlite');
+    expect(backupScript).toContain('/opt/feishu-codex/backups');
+    expect(backupScript).toContain("find \"${BACKUP_DIR}\"");
+    expect(statSync(backupScriptUrl).mode & 0o111).not.toBe(0);
   });
 });
