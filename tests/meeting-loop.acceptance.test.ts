@@ -32,12 +32,13 @@ const minuteContextFixture = JSON.parse(readFileSync(
   'utf8'
 )) as MinuteContext;
 const summaryFixture: MeetingSummaryDraft = {
-  coreInsights: [
+  oneLineConclusion: 'Phase 1A 仅验证本地 fixture 闭环，Todo 只生成不自动执行。',
+  progress: [
     'Phase 1A 仅验证本地 fixture 闭环',
     '转录未就绪必须安全重试',
     'Todo 只生成，不自动执行'
   ],
-  confirmedDecisions: ['不连接真实飞书或 Codex'],
+  decisions: ['不连接真实飞书或 Codex'],
   risks: ['妙记转录可能暂未就绪'],
   todos: [
     {
@@ -94,10 +95,13 @@ describe('meeting-to-Todo Phase 1A acceptance loop', () => {
         endedAt: minuteContextFixture.endedAt
       }
     });
-    expect(summary.body).toContain(`${minuteContextFixture.title}｜个性化会后总结`);
-    expect(summary.body).toContain(
-      `时间：${minuteContextFixture.startedAt} - ${minuteContextFixture.endedAt}`
-    );
+    expect(summary.body).toContain(`${minuteContextFixture.title}｜会后行动摘要`);
+    expect(summary.body).toContain('北京时间：2026-07-18 10:00–10:30');
+    expect(summary.body).toContain('悉尼时间：2026-07-18 12:00–12:30');
+    expect(summary.body).toContain('一句话结论');
+    expect(summary.body).toContain('进展');
+    expect(summary.body).toContain('已确认');
+    expect(summary.body).toContain('风险/卡点');
     expect(summary.body).toContain('我可以帮你推进');
     expect(summary.todos[0]?.capability).toBe('content_draft');
 

@@ -609,8 +609,9 @@ function seedDeliveredTodo(meetingRepository: MeetingRepository): void {
       endedAt: '2030-07-18T05:30:00.000Z'
     },
     body: 'HTTP 路由授权测试 fixture',
-    coreInsights: ['HTTP 路由只能返回授权 decision'],
-    confirmedDecisions: ['不执行 Todo'],
+    oneLineConclusion: 'HTTP 路由只能返回授权 decision。',
+    progress: ['HTTP 路由只能返回授权 decision'],
+    decisions: ['不执行 Todo'],
     risks: ['身份或回复上下文不匹配必须拒绝'],
     todos: [{
       title: '起草会议行动清单',

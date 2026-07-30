@@ -395,8 +395,9 @@ function seedMeeting(
       endedAt: '2030-07-18T00:30:00.000Z'
     },
     body: input.summaryId,
-    coreInsights: ['测试回复绑定'],
-    confirmedDecisions: ['只授权已投递总结'],
+    oneLineConclusion: '测试回复绑定。',
+    progress: ['测试回复绑定'],
+    decisions: ['只授权已投递总结'],
     risks: ['伪造 replyTo'],
     todos: input.todos.map(({ title, description, risk, capability }) => ({
       title,
@@ -451,8 +452,9 @@ function seedUntrustedSummary(
         endedAt: '2030-07-18T00:30:00.000Z'
       },
       body: input.summaryId,
-      coreInsights: ['尚未投递'],
-      confirmedDecisions: ['不能授权'],
+      oneLineConclusion: '尚未投递。',
+      progress: ['尚未投递'],
+      decisions: ['不能授权'],
       risks: ['伪造消息 ID'],
       todos: [{
         title: todo.title,

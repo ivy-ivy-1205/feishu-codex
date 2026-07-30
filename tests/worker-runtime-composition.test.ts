@@ -96,8 +96,9 @@ function fakeSummarizer(): MeetingSummarizer {
   return {
     async summarize() {
       return {
-        coreInsights: ['会议需要形成可执行的会后推进事项。'],
-        confirmedDecisions: [],
+        oneLineConclusion: '会议需要形成可执行的会后推进事项。',
+        progress: ['会议需要形成可执行的会后推进事项。'],
+        decisions: [],
         risks: [],
         todos: [{
           title: '整理会后事项',

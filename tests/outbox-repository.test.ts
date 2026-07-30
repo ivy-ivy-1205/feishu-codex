@@ -58,7 +58,7 @@ function createDeliveryHarness() {
     id: 'summary_delivery_1',
     minuteId: 'min_delivery_1',
     summaryMessageId: 'pending:minute-summary:min_delivery_1',
-    content: JSON.stringify({ coreInsights: ['测试 delivery ack'] }),
+    content: JSON.stringify({ progress: ['测试 delivery ack'] }),
     todos: [{
       id: 'todo_delivery_1',
       displayedNumber: 1,
@@ -80,8 +80,9 @@ function createDeliveryHarness() {
       endedAt: '2030-07-18T03:30:00.000Z'
     },
     body: 'Delivery ack fixture body',
-    coreInsights: ['测试 delivery ack'],
-    confirmedDecisions: ['保存真实消息 ID'],
+    oneLineConclusion: '测试 delivery ack。',
+    progress: ['测试 delivery ack'],
+    decisions: ['保存真实消息 ID'],
     risks: ['重复回调'],
     todos: [{
       title: '确认 reply lookup',

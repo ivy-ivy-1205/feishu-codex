@@ -31,7 +31,8 @@ describe('createMeetingSummarizer', () => {
         text: '默认不能调用真实 Codex。'
       }]
     })).resolves.toMatchObject({
-      coreInsights: ['当前 summarizer 仍使用 fake 模式，尚未启用真实 Codex。'],
+      oneLineConclusion: '当前 summarizer 仍使用 fake 模式，尚未启用真实 Codex。',
+      progress: ['当前 summarizer 仍使用 fake 模式，尚未启用真实 Codex。'],
       todos: []
     });
   });

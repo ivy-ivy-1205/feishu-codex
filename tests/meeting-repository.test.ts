@@ -160,8 +160,9 @@ function deliverSummary(
       endedAt: '2030-07-18T00:30:00.000Z'
     },
     body: input.title,
-    coreInsights: ['测试作用域'],
-    confirmedDecisions: ['只接受已投递消息'],
+    oneLineConclusion: '测试作用域。',
+    progress: ['测试作用域'],
+    decisions: ['只接受已投递消息'],
     risks: ['跨会议编号'],
     todos: [{
       title: input.title,

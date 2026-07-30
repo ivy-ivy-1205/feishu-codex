@@ -83,8 +83,9 @@ export function createMeetingSummarizer(
 class FakeMeetingSummarizer implements MeetingSummarizer {
   async summarize(_context: MinuteContext): Promise<MeetingSummaryDraft> {
     return {
-      coreInsights: ['当前 summarizer 仍使用 fake 模式，尚未启用真实 Codex。'],
-      confirmedDecisions: [],
+      oneLineConclusion: '当前 summarizer 仍使用 fake 模式，尚未启用真实 Codex。',
+      progress: ['当前 summarizer 仍使用 fake 模式，尚未启用真实 Codex。'],
+      decisions: [],
       risks: [],
       todos: []
     };

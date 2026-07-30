@@ -15,8 +15,9 @@ export interface MeetingSummaryRenderInput {
   title: string;
   startedAt: string;
   endedAt: string;
-  coreInsights: readonly string[];
-  confirmedDecisions: readonly string[];
+  oneLineConclusion: string;
+  progress: readonly string[];
+  decisions: readonly string[];
   risks: readonly string[];
 }
 
@@ -30,16 +31,15 @@ export function renderMeetingSummary(
   summary: MeetingSummaryRenderInput,
   todos: readonly MeetingTodoRenderInput[]
 ): string {
-  if (summary.coreInsights.length === 0) {
-    throw new MeetingSummaryRenderError('core insights must not be empty');
-  }
   const title = normalizeLine(summary.title, 'meeting title');
-  const startedAt = normalizeLine(summary.startedAt, 'meeting start time');
-  const endedAt = normalizeLine(summary.endedAt, 'meeting end time');
-  const coreInsights = summary.coreInsights.map(
-    (insight) => normalizeLine(insight, 'core insights')
+  const oneLineConclusion = normalizeLine(
+    summary.oneLineConclusion,
+    'one line conclusion'
   );
-  const confirmedDecisions = summary.confirmedDecisions.map(
+  const progress = summary.progress.map(
+    (item) => normalizeLine(item, 'progress')
+  );
+  const decisions = summary.decisions.map(
     (decision) => normalizeLine(decision, 'confirmed decision')
   );
   const risks = summary.risks.map((risk) => normalizeLine(risk, 'risk'));
@@ -69,18 +69,19 @@ export function renderMeetingSummary(
       `${todo.displayedNumber}. ${normalizeLine(todo.title, 'Todo title')}`
     ))
     : ['暂无可由 Codex 直接推进的事项。'];
-  const coreInformation = [
-    ...coreInsights.map((insight) => `• ${insight}`),
-    ...confirmedDecisions.map((decision) => `• 已确认：${decision}`),
-    ...risks.map((risk) => `• 风险：${risk}`)
-  ];
   const text = [
-    `${title}｜个性化会后总结`,
+    `${title}｜会后行动摘要`,
     `会议：${title}`,
-    `时间：${startedAt} - ${endedAt}`,
+    '时间',
+    `北京时间：${formatTimeRange(summary.startedAt, summary.endedAt, 'Asia/Shanghai')}`,
+    `悉尼时间：${formatTimeRange(summary.startedAt, summary.endedAt, 'Australia/Sydney')}`,
     '',
-    '核心信息',
-    ...coreInformation,
+    '一句话结论',
+    oneLineConclusion,
+    '',
+    ...renderSection('进展', progress),
+    ...renderSection('已确认', decisions),
+    ...renderSection('风险/卡点', risks),
     '',
     '我可以帮你推进',
     ...todoLines
@@ -92,6 +93,54 @@ export function renderMeetingSummary(
     );
   }
   return text;
+}
+
+function renderSection(title: string, items: readonly string[]): string[] {
+  if (items.length === 0) {
+    return [];
+  }
+  return [
+    title,
+    ...items.map((item) => `• ${item}`),
+    ''
+  ];
+}
+
+function formatTimeRange(startedAt: string, endedAt: string, timeZone: string): string {
+  const start = parseDate(startedAt, 'meeting start time');
+  const end = parseDate(endedAt, 'meeting end time');
+  const startParts = dateTimeParts(start, timeZone);
+  const endParts = dateTimeParts(end, timeZone);
+  const startDate = `${startParts.year}-${startParts.month}-${startParts.day}`;
+  const endDate = `${endParts.year}-${endParts.month}-${endParts.day}`;
+  const startTime = `${startParts.hour}:${startParts.minute}`;
+  const endTime = `${endParts.hour}:${endParts.minute}`;
+  return startDate === endDate
+    ? `${startDate} ${startTime}–${endTime}`
+    : `${startDate} ${startTime}–${endDate} ${endTime}`;
+}
+
+function parseDate(value: string, label: string): Date {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new MeetingSummaryRenderError(`${label} must be a valid datetime`);
+  }
+  return date;
+}
+
+function dateTimeParts(date: Date, timeZone: string): Record<string, string> {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+  return Object.fromEntries(
+    formatter.formatToParts(date).map((part) => [part.type, part.value])
+  );
 }
 
 function normalizeLine(value: string, label: string): string {

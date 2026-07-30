@@ -22,12 +22,13 @@ const minuteFixture = JSON.parse(
 ) as MinuteContext;
 
 const summaryDraft: MeetingSummaryDraft = {
-  coreInsights: [
+  oneLineConclusion: 'Phase 1A 仅验证本地 fixture 闭环，Todo 只生成不自动执行。',
+  progress: [
     'Phase 1A 仅验证本地 fixture 闭环',
     '转录未就绪必须安全重试',
     'Todo 只生成，不自动执行'
   ],
-  confirmedDecisions: ['不连接真实飞书或 Codex'],
+  decisions: ['不连接真实飞书或 Codex'],
   risks: ['妙记转录可能暂未就绪'],
   todos: [
     {
@@ -61,7 +62,7 @@ describe('processMinuteJob', () => {
     if (!result.summary) {
       throw new Error('expected a persisted structured summary');
     }
-    expect(result.summary.coreInsights).toHaveLength(3);
+    expect(result.summary.progress).toHaveLength(3);
     expect(result.todos.map((todo) => todo.displayedNumber)).toEqual([1, 2, 3]);
     expect(result.outbox[0]?.kind).toBe('ivy_meeting_summary');
     expect(result.outbox[0]?.targetChatId).toBe(ivyChatId);
@@ -370,7 +371,7 @@ describe('processMinuteJob', () => {
 
   it('prevents an expired worker from recording a permanent failure', async () => {
     const harness = createHarness({
-      summary: { ...summaryDraft, coreInsights: [] }
+      summary: { ...summaryDraft, oneLineConclusion: ' ' }
     });
     harness.dependencies.now = leaseExpiryClock(harness.job);
 
@@ -400,7 +401,7 @@ describe('processMinuteJob', () => {
     const harness = createHarness({
       summary: {
         ...summaryDraft,
-        coreInsights: [],
+        oneLineConclusion: '',
         risks: ['secret transcript text must not be stored in the failure reason']
       }
     });
@@ -456,7 +457,7 @@ describe('processMinuteJob', () => {
     const harness = createHarness({
       summary: {
         ...summaryDraft,
-        confirmedDecisions: [],
+        decisions: [],
         risks: [],
         todos: []
       }

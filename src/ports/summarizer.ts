@@ -15,8 +15,9 @@ function boundedText(label: string, maximumBytes: number) {
 }
 
 export const MeetingSummaryDraft = z.object({
-  coreInsights: z.array(boundedText('core insight', summaryItemLimitBytes)).min(1).max(20),
-  confirmedDecisions: z.array(
+  oneLineConclusion: boundedText('one line conclusion', summaryItemLimitBytes),
+  progress: z.array(boundedText('progress', summaryItemLimitBytes)).max(20),
+  decisions: z.array(
     boundedText('confirmed decision', summaryItemLimitBytes)
   ).max(20),
   risks: z.array(boundedText('risk', summaryItemLimitBytes)).max(20),

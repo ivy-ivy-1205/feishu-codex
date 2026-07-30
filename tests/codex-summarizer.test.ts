@@ -34,8 +34,9 @@ describe('CodexMeetingSummarizer', () => {
         async executeJson(input) {
           calls.push(input);
           return {
-            coreInsights: ['飞书妙记是 AiJia context 管理第一入口'],
-            confirmedDecisions: ['Todo 生成不代表执行授权'],
+            oneLineConclusion: '飞书妙记是 AiJia context 管理第一入口，Todo 只生成不执行。',
+            progress: ['飞书妙记是 AiJia context 管理第一入口'],
+            decisions: ['Todo 生成不代表执行授权'],
             risks: ['缺少 reply context 时不能猜测 Todo'],
             todos: [{
               title: '整理会议 Todo 授权规则',
@@ -49,8 +50,9 @@ describe('CodexMeetingSummarizer', () => {
     });
 
     await expect(summarizer.summarize(minuteContext)).resolves.toEqual({
-      coreInsights: ['飞书妙记是 AiJia context 管理第一入口'],
-      confirmedDecisions: ['Todo 生成不代表执行授权'],
+      oneLineConclusion: '飞书妙记是 AiJia context 管理第一入口，Todo 只生成不执行。',
+      progress: ['飞书妙记是 AiJia context 管理第一入口'],
+      decisions: ['Todo 生成不代表执行授权'],
       risks: ['缺少 reply context 时不能猜测 Todo'],
       todos: [{
         title: '整理会议 Todo 授权规则',
@@ -62,6 +64,8 @@ describe('CodexMeetingSummarizer', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.outputSchema).toEqual(meetingSummaryOutputSchema);
     expect(calls[0]?.prompt).toContain('minute_id: min_codex_1');
+    expect(calls[0]?.prompt).toContain('oneLineConclusion');
+    expect(calls[0]?.prompt).not.toMatch(/30\s*[–-]\s*50\s*字/);
     expect(calls[0]?.prompt).toContain('Ivy [0-12000ms]: 我们要把飞书会议自动变成 Codex 可以推进的 Todo。');
     expect(calls[0]?.prompt).toContain('不要把需要人际判断、线下行动或外部发送的事项伪装成 Codex 可独立完成');
   });
@@ -71,8 +75,9 @@ describe('CodexMeetingSummarizer', () => {
       codex: {
         async executeJson() {
           return {
-            coreInsights: [],
-            confirmedDecisions: [],
+            oneLineConclusion: '',
+            progress: [],
+            decisions: [],
             risks: [],
             todos: []
           };

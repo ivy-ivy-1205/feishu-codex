@@ -55,8 +55,9 @@ export async function processMinuteJob(
     const body = renderMeetingSummary(
       {
         ...meeting,
-        coreInsights: draft.coreInsights,
-        confirmedDecisions: draft.confirmedDecisions,
+        oneLineConclusion: draft.oneLineConclusion,
+        progress: draft.progress,
+        decisions: draft.decisions,
         risks: draft.risks
       },
       draft.todos.map((todo, index) => ({

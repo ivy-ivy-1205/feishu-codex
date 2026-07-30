@@ -2,15 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { MeetingSummaryDraft } from '../src/ports/summarizer.js';
 
 const validDraft = {
-  coreInsights: ['核心判断'],
-  confirmedDecisions: [],
+  oneLineConclusion: '核心判断',
+  progress: [],
+  decisions: [],
   risks: [],
   todos: []
 };
 
 const boundedDraft = {
-  coreInsights: ['核心判断'],
-  confirmedDecisions: ['确认决策'],
+  oneLineConclusion: '核心判断',
+  progress: ['已完成进展'],
+  decisions: ['确认决策'],
   risks: ['已知风险'],
   todos: [{
     title: '起草内容',
@@ -42,7 +44,7 @@ describe('MeetingSummaryDraft bounds', () => {
   it('caps every collection before persistence', () => {
     expect(MeetingSummaryDraft.safeParse({
       ...boundedDraft,
-      coreInsights: Array.from({ length: 21 }, (_, index) => `判断 ${index}`)
+      progress: Array.from({ length: 21 }, (_, index) => `进展 ${index}`)
     }).success).toBe(false);
     expect(MeetingSummaryDraft.safeParse({
       ...boundedDraft,
@@ -58,8 +60,9 @@ describe('MeetingSummaryDraft bounds', () => {
   it('caps the complete structured output by UTF-8 bytes', () => {
     expect(MeetingSummaryDraft.safeParse({
       ...boundedDraft,
-      coreInsights: Array.from({ length: 10 }, () => '界'.repeat(2_500)),
-      confirmedDecisions: Array.from({ length: 10 }, () => '界'.repeat(2_500)),
+      oneLineConclusion: '界'.repeat(2_500),
+      progress: Array.from({ length: 10 }, () => '界'.repeat(2_500)),
+      decisions: Array.from({ length: 10 }, () => '界'.repeat(2_500)),
       risks: Array.from({ length: 10 }, () => '界'.repeat(2_500))
     }).success).toBe(false);
   });

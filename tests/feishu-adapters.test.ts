@@ -22,8 +22,9 @@ const summaryMessage: IvyMeetingSummaryMessage = {
     endedAt: '2026-07-18T02:30:00.000Z'
   },
   body: '会议总结正文',
-  coreInsights: ['讨论 Context OS 的飞书入口'],
-  confirmedDecisions: [],
+  oneLineConclusion: '讨论 Context OS 的飞书入口。',
+  progress: ['讨论 Context OS 的飞书入口'],
+  decisions: [],
   risks: [],
   todos: []
 };
@@ -161,7 +162,7 @@ describe('Feishu real adapter boundary', () => {
       id: 'summary:min_real_1',
       minuteId: 'min_real_1',
       summaryMessageId: 'pending:minute-summary:min_real_1',
-      content: JSON.stringify({ coreInsights: ['待投递'] }),
+      content: JSON.stringify({ progress: ['待投递'] }),
       todos: [{
         id: 'todo:min_real_1:1',
         displayedNumber: 1,
