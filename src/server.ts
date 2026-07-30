@@ -32,8 +32,18 @@ const jobRepository = new JobRepository(database.client, {
 });
 const outboxRepository = new OutboxRepository(database.client);
 const meetingSummarizer = createMeetingSummarizer({ config });
-const feishuIntegration = createFeishuIntegration({ config });
-const oauth = config.feishu.oauth.enabled
+let oauth: FeishuOAuthService | undefined;
+const feishuIntegration = createFeishuIntegration({
+  config,
+  userAccessTokenResolver: {
+    async resolveUserAccessToken(input) {
+      return oauth
+        ? oauth.resolveUserAccessToken(input)
+        : { status: 'unavailable', reason: 'oauth_disabled' };
+    }
+  }
+});
+oauth = config.feishu.oauth.enabled
   ? new FeishuOAuthService({
     appId: config.feishu.appId,
     redirectUri: config.feishu.oauth.redirectUri!,

@@ -80,6 +80,26 @@ describe('processMinuteJob', () => {
     expect(result.outbox).toHaveLength(0);
   });
 
+  it('passes subscriber open IDs from the durable job into the minute reader', async () => {
+    const harness = createHarness({
+      subscriberOpenIds: ['ou_ivy_fixture']
+    });
+    const calls: unknown[] = [];
+    harness.dependencies.reader = {
+      async getMinute(minuteId, options) {
+        calls.push({ minuteId, options });
+        return minuteFixture;
+      }
+    };
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+
+    expect(calls).toEqual([{
+      minuteId: minuteFixture.minuteId,
+      options: { subscriberOpenIds: ['ou_ivy_fixture'] }
+    }]);
+  });
+
   it('does not create duplicate summaries when a completed lease is replayed', async () => {
     const harness = createHarness();
 
@@ -499,6 +519,7 @@ function createHarness(options: {
   readerErrorCode?: 'MINUTE_NOT_READY' | 'RATE_LIMITED';
   summary?: MeetingSummaryDraft;
   attemptsByCode?: Partial<Record<'MINUTE_NOT_READY' | 'RATE_LIMITED', number>>;
+  subscriberOpenIds?: string[];
 } = {}) {
   const database = createSqliteDatabase(':memory:');
   migrateDatabase(database.client);
@@ -506,7 +527,9 @@ function createHarness(options: {
   const jobRepository = new JobRepository(database.client);
   const outboxRepository = new OutboxRepository(database.client);
   meetingRepository.ingestMinute({ minuteId: minuteFixture.minuteId, eventId: 'evt_fixture_1' });
-  jobRepository.enqueueProcessMinute(minuteFixture.minuteId);
+  jobRepository.enqueueProcessMinute(minuteFixture.minuteId, {
+    subscriberOpenIds: options.subscriberOpenIds
+  });
   if (options.attemptsByCode) {
     harnessSetAttempts(database.client, options.attemptsByCode);
   }

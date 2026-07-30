@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import type { MinuteContext, FeishuMinutesReader } from '../ports/feishu.js';
+import type {
+  FeishuMinuteReadOptions,
+  FeishuUserAccessTokenResolver,
+  MinuteContext,
+  FeishuMinutesReader
+} from '../ports/feishu.js';
 import {
   OutboxRepository,
   type IvyMeetingSummaryMessage
@@ -22,14 +27,22 @@ const transcriptLineSchema = z.object({
 });
 
 export interface FeishuApiClient {
-  getMinuteBasicInfo(minuteId: string): Promise<unknown>;
-  exportMinuteTranscript(minuteId: string): Promise<unknown[]>;
+  getMinuteBasicInfo(minuteId: string, options?: FeishuApiRequestOptions): Promise<unknown>;
+  exportMinuteTranscript(minuteId: string, options?: FeishuApiRequestOptions): Promise<unknown[]>;
   sendTextMessage(input: { chatId: string; text: string }): Promise<{
     messageId: string;
   }>;
   sendInteractiveMessage?(input: { chatId: string; card: Record<string, unknown> }): Promise<{
     messageId: string;
   }>;
+}
+
+export interface FeishuApiRequestOptions {
+  userAccessToken?: string;
+}
+
+export interface FeishuMinutesReaderAdapterOptions {
+  userAccessTokenResolver?: FeishuUserAccessTokenResolver;
 }
 
 export class FeishuRetryableError extends Error {
@@ -43,18 +56,26 @@ export class FeishuRetryableError extends Error {
 }
 
 export class FeishuMinutesReaderAdapter implements FeishuMinutesReader {
-  constructor(private readonly client: FeishuApiClient) {}
+  readonly #userAccessTokenResolver: FeishuUserAccessTokenResolver | null;
 
-  async getMinute(minuteId: string): Promise<MinuteContext> {
+  constructor(
+    private readonly client: FeishuApiClient,
+    options: FeishuMinutesReaderAdapterOptions = {}
+  ) {
+    this.#userAccessTokenResolver = options.userAccessTokenResolver ?? null;
+  }
+
+  async getMinute(minuteId: string, options: FeishuMinuteReadOptions = {}): Promise<MinuteContext> {
     const normalizedMinuteId = minuteId.trim();
     if (!normalizedMinuteId) {
       throw new Error('minuteId is required');
     }
+    const apiOptions = await this.#resolveApiOptions(options);
 
     const basicInfo = minuteBasicInfoSchema.parse(
-      await this.client.getMinuteBasicInfo(normalizedMinuteId)
+      await this.client.getMinuteBasicInfo(normalizedMinuteId, apiOptions)
     );
-    const transcript = (await this.client.exportMinuteTranscript(normalizedMinuteId))
+    const transcript = (await this.client.exportMinuteTranscript(normalizedMinuteId, apiOptions))
       .map((line) => transcriptLineSchema.parse(line));
     if (transcript.length === 0) {
       throw new FeishuRetryableError(
@@ -71,6 +92,24 @@ export class FeishuMinutesReaderAdapter implements FeishuMinutesReader {
       transcript
     };
   }
+
+  async #resolveApiOptions(options: FeishuMinuteReadOptions): Promise<FeishuApiRequestOptions | undefined> {
+    if (!this.#userAccessTokenResolver) {
+      return undefined;
+    }
+    const resolution = await this.#userAccessTokenResolver.resolveUserAccessToken({
+      candidateOpenIds: normalizeOpenIds(options.subscriberOpenIds)
+    });
+    return resolution.status === 'available'
+      ? { userAccessToken: resolution.userAccessToken }
+      : undefined;
+  }
+}
+
+function normalizeOpenIds(openIds: readonly string[] | undefined): string[] {
+  return [...new Set((openIds ?? [])
+    .map((openId) => openId.trim())
+    .filter((openId) => openId.startsWith('ou_')))];
 }
 
 export class FeishuMessageDeliveryAdapter {

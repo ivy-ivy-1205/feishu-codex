@@ -32,6 +32,54 @@ describe('Feishu OAuth token refresh', () => {
     await harness.close();
   });
 
+  it('resolves a fresh user access token for the subscribed minute event user', async () => {
+    const harness = createHarness();
+    harness.repository.saveToken({
+      openId: 'ou_ivy',
+      userAccessToken: 'old-user-token',
+      refreshToken: 'old-refresh-token',
+      accessTokenExpiresAt: new Date('2026-07-27T10:04:00.000Z'),
+      refreshTokenExpiresAt: new Date('2026-08-26T10:00:00.000Z'),
+      authorizationStatus: 'valid',
+      subscriptionStatus: 'subscribed',
+      now: new Date('2026-07-27T10:00:00.000Z')
+    });
+
+    await expect(harness.service.resolveUserAccessToken({
+      candidateOpenIds: ['ou_ivy']
+    })).resolves.toEqual({
+      status: 'available',
+      openId: 'ou_ivy',
+      userAccessToken: 'new-user-token'
+    });
+    expect(harness.calls).toEqual([{ method: 'refreshToken', refreshToken: 'old-refresh-token' }]);
+    await harness.close();
+  });
+
+  it('uses the only authorized user token when a legacy minute job has no subscriber IDs', async () => {
+    const harness = createHarness();
+    harness.repository.saveToken({
+      openId: 'ou_ivy',
+      userAccessToken: 'fresh-user-token',
+      refreshToken: 'refresh-token',
+      accessTokenExpiresAt: new Date('2026-07-27T12:00:00.000Z'),
+      refreshTokenExpiresAt: new Date('2026-08-26T10:00:00.000Z'),
+      authorizationStatus: 'valid',
+      subscriptionStatus: 'subscribed',
+      now: new Date('2026-07-27T10:00:00.000Z')
+    });
+
+    await expect(harness.service.resolveUserAccessToken({
+      candidateOpenIds: []
+    })).resolves.toEqual({
+      status: 'available',
+      openId: 'ou_ivy',
+      userAccessToken: 'fresh-user-token'
+    });
+    expect(harness.calls).toEqual([]);
+    await harness.close();
+  });
+
   it('marks authorization invalid and sends a reauthorization card when refresh fails', async () => {
     const harness = createHarness({ refreshFails: true });
     harness.repository.saveToken({

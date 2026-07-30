@@ -109,6 +109,38 @@ describe('FeishuSdkApiClient', () => {
     ]);
   });
 
+  it('uses a user access token for minute reads when one is provided', async () => {
+    const calls: unknown[] = [];
+    const client = new FeishuSdkApiClient({
+      sdkClient: createFakeSdkClient({
+        minute: { title: 'Ivy 的自动妙记' },
+        transcript: [{ speakerName: 'Ivy', text: '只授权一次后自动读取' }],
+        calls
+      }),
+      withUserAccessToken: (token) => ({ userAccessToken: token })
+    });
+
+    await client.getMinuteBasicInfo('min_token_user', {
+      userAccessToken: 'u-ivy-token'
+    });
+    await client.exportMinuteTranscript('min_token_user', {
+      userAccessToken: 'u-ivy-token'
+    });
+
+    expect(calls).toEqual([
+      {
+        method: 'minutes.v1.minute.get',
+        payload: { path: { minute_token: 'min_token_user' } },
+        options: { userAccessToken: 'u-ivy-token' }
+      },
+      {
+        method: 'minutes.v1.minuteTranscript.get',
+        payload: { path: { minute_token: 'min_token_user' } },
+        options: { userAccessToken: 'u-ivy-token' }
+      }
+    ]);
+  });
+
   it('normalizes real Feishu minute basic info fields from SDK responses', async () => {
     const client = new FeishuSdkApiClient({
       sdkClient: createFakeSdkClient({
@@ -186,14 +218,22 @@ function createFakeSdkClient(options: {
             options.calls?.push({ method: 'minutes.v1.minute.subscription', payload });
             return { code: 0 };
           },
-          async get(payload) {
-            options.calls?.push({ method: 'minutes.v1.minute.get', payload });
+          async get(payload, requestOptions) {
+            options.calls?.push({
+              method: 'minutes.v1.minute.get',
+              payload,
+              ...(requestOptions ? { options: requestOptions } : {})
+            });
             return { data: options.minute };
           }
         },
         minuteTranscript: {
-          async get(payload) {
-            options.calls?.push({ method: 'minutes.v1.minuteTranscript.get', payload });
+          async get(payload, requestOptions) {
+            options.calls?.push({
+              method: 'minutes.v1.minuteTranscript.get',
+              payload,
+              ...(requestOptions ? { options: requestOptions } : {})
+            });
             if (options.transcriptStream) {
               return {
                 getReadableStream() {

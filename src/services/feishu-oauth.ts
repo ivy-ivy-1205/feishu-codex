@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { OAuthTokenRepository, OAuthSubscriptionStatus } from '../repositories/oauth-token-repository.js';
+import type { FeishuUserAccessTokenResolution } from '../ports/feishu.js';
 
 export interface FeishuOAuthClient {
   exchangeCode(input: { code: string; redirectUri: string }): Promise<FeishuOAuthTokenResponse>;
@@ -199,6 +200,33 @@ export class FeishuOAuthService {
     }
   }
 
+  async resolveUserAccessToken(input: {
+    candidateOpenIds?: string[];
+  }): Promise<FeishuUserAccessTokenResolution> {
+    const candidates = normalizeOpenIds(input.candidateOpenIds);
+    const openIds = candidates.length > 0
+      ? candidates
+      : this.#singleAuthorizedOpenId();
+    if (openIds.length === 0) {
+      return { status: 'unavailable', reason: 'missing' };
+    }
+    if (openIds.length > 1 && candidates.length === 0) {
+      return { status: 'unavailable', reason: 'ambiguous' };
+    }
+
+    for (const openId of openIds) {
+      const token = await this.#freshUserAccessToken(openId);
+      if (token) {
+        return {
+          status: 'available',
+          openId,
+          userAccessToken: token
+        };
+      }
+    }
+    return { status: 'unavailable', reason: 'reauthorization_required' };
+  }
+
   diagnostics(): { users: OAuthDiagnosticUser[] } {
     const nowMs = this.#now().getTime();
     return {
@@ -229,6 +257,30 @@ export class FeishuOAuthService {
     const now = this.#now();
     this.#tokenRepository.markInvalid(openId, now);
     await this.#sendReauthorization(openId, now);
+  }
+
+  async #freshUserAccessToken(openId: string): Promise<string | null> {
+    const freshness = await this.ensureFreshToken(openId);
+    if (freshness.status === 'missing' || freshness.status === 'reauthorization_required') {
+      return null;
+    }
+    const record = this.#tokenRepository.findByOpenId(openId);
+    if (!record || record.authorizationStatus !== 'valid') {
+      return null;
+    }
+    return record.userAccessToken;
+  }
+
+  #singleAuthorizedOpenId(): string[] {
+    const nowMs = this.#now().getTime();
+    const validOpenIds = this.#tokenRepository.list()
+      .filter((record) => {
+        const refreshTokenExpiresAtMs = new Date(record.refreshTokenExpiresAt).getTime();
+        return record.authorizationStatus === 'valid' &&
+          (!Number.isFinite(refreshTokenExpiresAtMs) || refreshTokenExpiresAtMs > nowMs);
+      })
+      .map((record) => record.openId);
+    return validOpenIds.length === 1 ? validOpenIds : [];
   }
 
   recordMinuteEvent(event: unknown): void {
@@ -276,6 +328,12 @@ export class FeishuOAuthService {
       text: fallbackText
     });
   }
+}
+
+function normalizeOpenIds(openIds: readonly string[] | undefined): string[] {
+  return [...new Set((openIds ?? [])
+    .map((openId) => openId.trim())
+    .filter((openId) => openId.startsWith('ou_')))];
 }
 
 export function createReauthorizationCard(input: {

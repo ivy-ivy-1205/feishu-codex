@@ -42,7 +42,9 @@ export async function processMinuteJob(
   const now = dependencies.now ?? (() => new Date());
 
   try {
-    const context = MinuteContext.parse(await dependencies.reader.getMinute(job.minuteId));
+    const context = MinuteContext.parse(await dependencies.reader.getMinute(job.minuteId, {
+      subscriberOpenIds: job.subscriberOpenIds ?? []
+    }));
     const draft = parseMeetingSummaryDraft(
       await dependencies.summarizer.summarize(context)
     );

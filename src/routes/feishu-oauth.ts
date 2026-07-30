@@ -15,9 +15,9 @@ export function registerFeishuOAuthRoutes(
   app: FastifyInstance,
   dependencies: FeishuOAuthRouteDependencies
 ): void {
-  app.get('/oauth/feishu/start', async () => ({
-    authorizationUrl: dependencies.oauth.createAuthorizationUrl()
-  }));
+  app.get('/oauth/feishu/start', async (_request, reply) =>
+    reply.redirect(dependencies.oauth.createAuthorizationUrl())
+  );
 
   app.get('/oauth/feishu/callback', async (request, reply) => {
     const query = callbackQuerySchema.safeParse(request.query);

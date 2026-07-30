@@ -4,6 +4,7 @@ export interface DurableJob {
   kind: 'process_minute';
   key: string;
   minuteId: string;
+  subscriberOpenIds?: string[];
   attemptsByCode: RetryAttemptsByCode;
   leaseExpiresAt?: string;
 }
@@ -17,8 +18,13 @@ export interface RetryAttemptsByCode {
 
 export interface ProcessMinuteJobPayload {
   minuteId: string;
+  subscriberOpenIds: string[];
   attemptsByCode: RetryAttemptsByCode;
   failureReason?: string;
+}
+
+export interface EnqueueProcessMinuteOptions {
+  subscriberOpenIds?: string[];
 }
 
 const zeroRetryAttempts = (): RetryAttemptsByCode => ({
@@ -50,11 +56,15 @@ export class JobRepository {
     }
   }
 
-  enqueueProcessMinute(minuteId: string): { created: boolean; job: DurableJob } {
+  enqueueProcessMinute(
+    minuteId: string,
+    options: EnqueueProcessMinuteOptions = {}
+  ): { created: boolean; job: DurableJob } {
     const job: DurableJob = {
       kind: 'process_minute',
       key: `minute:${minuteId}`,
       minuteId,
+      subscriberOpenIds: normalizeOpenIds(options.subscriberOpenIds),
       attemptsByCode: zeroRetryAttempts()
     };
     const now = new Date().toISOString();
@@ -88,6 +98,7 @@ export class JobRepository {
         kind: row.type,
         key: row.stable_key,
         minuteId: payload.minuteId,
+        subscriberOpenIds: payload.subscriberOpenIds,
         attemptsByCode: payload.attemptsByCode
       }] : [];
     });
@@ -134,6 +145,7 @@ export class JobRepository {
         kind: row.type,
         key: row.stable_key,
         minuteId: payload.minuteId,
+        subscriberOpenIds: payload.subscriberOpenIds,
         attemptsByCode: payload.attemptsByCode,
         leaseExpiresAt: leaseUntil.toISOString()
       };
@@ -270,6 +282,9 @@ export function normalizeProcessMinuteJobPayload(
 
   return {
     minuteId: parsed.minuteId.trim(),
+    subscriberOpenIds: isStringArray(parsed.subscriberOpenIds)
+      ? normalizeOpenIds(parsed.subscriberOpenIds)
+      : [],
     attemptsByCode,
     ...(typeof parsed.failureReason === 'string'
       ? { failureReason: parsed.failureReason }
@@ -278,12 +293,14 @@ export function normalizeProcessMinuteJobPayload(
 }
 
 function serializeJobPayload(
-  job: Pick<DurableJob, 'minuteId' | 'attemptsByCode'>,
+  job: Pick<DurableJob, 'minuteId' | 'attemptsByCode'> & Partial<Pick<DurableJob, 'subscriberOpenIds'>>,
   attemptsByCode: RetryAttemptsByCode = job.attemptsByCode,
   failureReason?: string
 ): string {
+  const subscriberOpenIds = normalizeOpenIds(job.subscriberOpenIds);
   return JSON.stringify({
     minuteId: job.minuteId,
+    ...(subscriberOpenIds.length > 0 ? { subscriberOpenIds } : {}),
     attemptsByCode,
     ...(failureReason ? { failureReason } : {})
   });
@@ -307,6 +324,16 @@ function isRetryAttemptsByCode(value: unknown): value is RetryAttemptsByCode {
 
 function isRetryAttempt(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function normalizeOpenIds(openIds: readonly string[] | undefined): string[] {
+  return [...new Set((openIds ?? [])
+    .map((openId) => openId.trim())
+    .filter((openId) => openId.startsWith('ou_')))];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

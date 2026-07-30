@@ -2,6 +2,7 @@ import {
   FeishuMessageDeliveryAdapter,
   FeishuMinutesReaderAdapter
 } from '../adapters/feishu.js';
+import type { FeishuUserAccessTokenResolver } from '../ports/feishu.js';
 import {
   createFeishuSdkClient,
   FeishuSdkApiClient,
@@ -24,12 +25,14 @@ export interface FeishuIntegration {
 export interface CreateFeishuIntegrationOptions {
   config: FeishuIntegrationCompositionConfig;
   createSdkClient?: (options: FeishuSdkClientOptions) => FeishuSdkClientLike;
+  userAccessTokenResolver?: FeishuUserAccessTokenResolver;
   exposeInternalsForTest?: false;
 }
 
 export interface CreateFeishuIntegrationTestOptions {
   config: FeishuIntegrationCompositionConfig;
   createSdkClient?: (options: FeishuSdkClientOptions) => FeishuSdkClientLike;
+  userAccessTokenResolver?: FeishuUserAccessTokenResolver;
   exposeInternalsForTest: true;
 }
 
@@ -53,7 +56,9 @@ export function createFeishuIntegration(
     appSecret: options.config.feishu.appSecret
   });
   const apiClient = new FeishuSdkApiClient({ sdkClient });
-  const reader = new FeishuMinutesReaderAdapter(apiClient);
+  const reader = new FeishuMinutesReaderAdapter(apiClient, {
+    userAccessTokenResolver: options.userAccessTokenResolver
+  });
   const delivery = new FeishuMessageDeliveryAdapter(apiClient);
 
   if (options.exposeInternalsForTest) {

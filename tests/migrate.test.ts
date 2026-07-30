@@ -32,6 +32,7 @@ describe('migrateDatabase', () => {
       stable_key: 'legacy:job_legacy_1',
       payload: JSON.stringify({
         minuteId: 'min_legacy_1',
+        subscriberOpenIds: [],
         attemptsByCode: {
           MINUTE_NOT_READY: 0,
           RATE_LIMITED: 0
@@ -84,6 +85,7 @@ describe('migrateDatabase', () => {
     expect(row.status).toBe('retry');
     expect(JSON.parse(row.payload)).toEqual({
       minuteId: 'min_legacy_attempt',
+      subscriberOpenIds: [],
       attemptsByCode: { MINUTE_NOT_READY: 3, RATE_LIMITED: 3 }
     });
   });

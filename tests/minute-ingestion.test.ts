@@ -39,6 +39,38 @@ describe('ingestMinuteGenerated', () => {
       }
     ).status).toBe('ignored');
   });
+
+  it('persists subscriber open IDs on the durable minute job', () => {
+    const database = createSqliteDatabase(':memory:');
+    migrateDatabase(database.client);
+    const jobRepository = new JobRepository(database.client);
+
+    const result = ingestMinuteGenerated({
+      schema: '2.0',
+      header: {
+        event_id: 'evt_subscriber_1',
+        event_type: 'minutes.minute.generated_v1',
+        create_time: '1785396472290'
+      },
+      event: {
+        minute_token: 'obcn4354ahqx4bbin5qqq8t2',
+        subscriber_ids: [
+          { open_id: 'ou_ivy_fixture' },
+          { union_id: 'on_missing_open_id' }
+        ]
+      }
+    }, {
+      meetingRepository: new MeetingRepository(database.client),
+      jobRepository
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(jobRepository.list()).toMatchObject([{
+      kind: 'process_minute',
+      key: 'minute:obcn4354ahqx4bbin5qqq8t2',
+      subscriberOpenIds: ['ou_ivy_fixture']
+    }]);
+  });
 });
 
 function ingestFixtureTwice({ times }: { times: number }) {

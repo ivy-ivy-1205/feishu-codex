@@ -14,7 +14,8 @@ describe('Feishu OAuth routes', () => {
       method: 'GET',
       url: '/oauth/feishu/start'
     });
-    const authorizationUrl = new URL(start.json<{ authorizationUrl: string }>().authorizationUrl);
+    expect(start.statusCode).toBe(302);
+    const authorizationUrl = new URL(start.headers.location as string);
     const state = authorizationUrl.searchParams.get('state');
 
     const callback = await harness.app.inject({
@@ -65,7 +66,8 @@ describe('Feishu OAuth routes', () => {
       method: 'GET',
       url: '/oauth/feishu/start'
     });
-    const state = new URL(start.json<{ authorizationUrl: string }>().authorizationUrl)
+    expect(start.statusCode).toBe(302);
+    const state = new URL(start.headers.location as string)
       .searchParams.get('state');
 
     const callback = await harness.app.inject({
@@ -100,7 +102,8 @@ describe('Feishu OAuth routes', () => {
   it('rejects callback replay with the same state', async () => {
     const harness = createHarness();
     const start = await harness.app.inject({ method: 'GET', url: '/oauth/feishu/start' });
-    const state = new URL(start.json<{ authorizationUrl: string }>().authorizationUrl)
+    expect(start.statusCode).toBe(302);
+    const state = new URL(start.headers.location as string)
       .searchParams.get('state');
 
     const first = await harness.app.inject({

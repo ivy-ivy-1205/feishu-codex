@@ -14,6 +14,31 @@ export const MinuteContext = z.object({
 
 export type MinuteContext = z.infer<typeof MinuteContext>;
 
+export interface FeishuMinuteReadOptions {
+  subscriberOpenIds?: string[];
+}
+
+export type FeishuUserAccessTokenResolution =
+  | {
+    status: 'available';
+    openId: string;
+    userAccessToken: string;
+  }
+  | {
+    status: 'unavailable';
+    reason:
+      | 'oauth_disabled'
+      | 'missing'
+      | 'ambiguous'
+      | 'reauthorization_required';
+  };
+
+export interface FeishuUserAccessTokenResolver {
+  resolveUserAccessToken(input: {
+    candidateOpenIds: string[];
+  }): Promise<FeishuUserAccessTokenResolution>;
+}
+
 export interface FeishuMinutesReader {
-  getMinute(minuteId: string): Promise<MinuteContext>;
+  getMinute(minuteId: string, options?: FeishuMinuteReadOptions): Promise<MinuteContext>;
 }

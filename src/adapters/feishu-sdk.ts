@@ -1,6 +1,6 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { Readable } from 'node:stream';
-import type { FeishuApiClient } from './feishu.js';
+import type { FeishuApiClient, FeishuApiRequestOptions } from './feishu.js';
 import { parseMinuteTranscriptStream } from './minute-transcript-parser.js';
 
 export interface FeishuSdkClientOptions {
@@ -26,7 +26,7 @@ export interface FeishuSdkClientLike {
       minute: {
         get(payload: {
           path: { minute_token: string };
-        }): Promise<unknown>;
+        }, options?: unknown): Promise<unknown>;
         subscription?(payload: {
           data: { event_type: string };
         }, options?: unknown): Promise<unknown>;
@@ -34,7 +34,7 @@ export interface FeishuSdkClientLike {
       minuteTranscript: {
         get(payload: {
           path: { minute_token: string };
-        }): Promise<unknown>;
+        }, options?: unknown): Promise<unknown>;
       };
     };
   };
@@ -42,6 +42,7 @@ export interface FeishuSdkClientLike {
 
 export interface FeishuSdkApiClientOptions {
   sdkClient: FeishuSdkClientLike;
+  withUserAccessToken?: (token: string) => unknown;
 }
 
 export function createFeishuSdkClient(options: FeishuSdkClientOptions): FeishuSdkClientLike {
@@ -56,22 +57,38 @@ export function createFeishuSdkClient(options: FeishuSdkClientOptions): FeishuSd
 
 export class FeishuSdkApiClient implements FeishuApiClient {
   readonly #sdkClient: FeishuSdkClientLike;
+  readonly #withUserAccessToken: (token: string) => unknown;
 
   constructor(options: FeishuSdkApiClientOptions) {
     this.#sdkClient = options.sdkClient;
+    this.#withUserAccessToken = options.withUserAccessToken ?? lark.withUserAccessToken;
   }
 
-  async getMinuteBasicInfo(minuteId: string): Promise<unknown> {
-    const response = await this.#sdkClient.minutes.v1.minute.get({
+  async getMinuteBasicInfo(
+    minuteId: string,
+    options?: FeishuApiRequestOptions
+  ): Promise<unknown> {
+    const payload = {
       path: { minute_token: minuteId.trim() }
-    });
+    };
+    const requestOptions = this.#requestOptions(options);
+    const response = requestOptions
+      ? await this.#sdkClient.minutes.v1.minute.get(payload, requestOptions)
+      : await this.#sdkClient.minutes.v1.minute.get(payload);
     return normalizeMinuteBasicInfo(responseData(response));
   }
 
-  async exportMinuteTranscript(minuteId: string): Promise<unknown[]> {
-    const response = await this.#sdkClient.minutes.v1.minuteTranscript.get({
+  async exportMinuteTranscript(
+    minuteId: string,
+    options?: FeishuApiRequestOptions
+  ): Promise<unknown[]> {
+    const payload = {
       path: { minute_token: minuteId.trim() }
-    });
+    };
+    const requestOptions = this.#requestOptions(options);
+    const response = requestOptions
+      ? await this.#sdkClient.minutes.v1.minuteTranscript.get(payload, requestOptions)
+      : await this.#sdkClient.minutes.v1.minuteTranscript.get(payload);
     if (isReadableStreamResponse(response)) {
       return parseMinuteTranscriptStream(response.getReadableStream());
     }
@@ -112,6 +129,11 @@ export class FeishuSdkApiClient implements FeishuApiClient {
       throw new Error('Feishu SDK sendInteractiveMessage did not return a message ID');
     }
     return { messageId };
+  }
+
+  #requestOptions(options?: FeishuApiRequestOptions): unknown {
+    const userAccessToken = options?.userAccessToken?.trim();
+    return userAccessToken ? this.#withUserAccessToken(userAccessToken) : undefined;
   }
 }
 

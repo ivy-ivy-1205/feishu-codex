@@ -32,7 +32,9 @@ export function ingestMinuteGenerated(
     occurredAt: normalizeFeishuEventTime(envelope.header.create_time)
   });
   const ingested = dependencies.meetingRepository.ingestMinute(minuteEvent, () => {
-    dependencies.jobRepository.enqueueProcessMinute(minuteEvent.minuteId);
+    dependencies.jobRepository.enqueueProcessMinute(minuteEvent.minuteId, {
+      subscriberOpenIds: extractSubscriberOpenIds(envelope.event)
+    });
   });
 
   return { status: ingested.created ? 'accepted' : 'duplicate' };
@@ -49,6 +51,7 @@ interface MinuteGeneratedEnvelope {
     minute?: {
       minute_token?: unknown;
     };
+    subscriber_ids?: unknown;
   };
 }
 
@@ -71,4 +74,19 @@ function normalizeFeishuEventTime(createTime: unknown): unknown {
     }
   }
   return createTime;
+}
+
+function extractSubscriberOpenIds(event: MinuteGeneratedEnvelope['event']): string[] {
+  if (!Array.isArray(event?.subscriber_ids)) {
+    return [];
+  }
+  return [...new Set(event.subscriber_ids.flatMap((subscriber) => {
+    if (!subscriber || typeof subscriber !== 'object' || Array.isArray(subscriber)) {
+      return [];
+    }
+    const openId = (subscriber as { open_id?: unknown }).open_id;
+    return typeof openId === 'string' && openId.trim().startsWith('ou_')
+      ? [openId.trim()]
+      : [];
+  }))];
 }

@@ -90,6 +90,54 @@ describe('Feishu real adapter boundary', () => {
     });
   });
 
+  it('uses the matching OAuth user token for minute reads', async () => {
+    const calls: unknown[] = [];
+    const reader = new FeishuMinutesReaderAdapter(createClient({
+      minute: {
+        title: 'Ivy 的自动妙记',
+        startedAt: '2026-07-30T07:00:00.000Z',
+        endedAt: '2026-07-30T07:05:00.000Z'
+      },
+      transcript: [{
+        speakerName: 'Ivy',
+        startMs: 0,
+        endMs: 1_000,
+        text: '以后不要每次手动改妙记权限。'
+      }],
+      calls
+    }), {
+      userAccessTokenResolver: {
+        async resolveUserAccessToken(input) {
+          return {
+            status: 'available',
+            openId: input.candidateOpenIds[0]!,
+            userAccessToken: 'u-ivy-minute-token'
+          };
+        }
+      }
+    });
+
+    await expect(reader.getMinute('min_real_1', {
+      subscriberOpenIds: ['ou_ivy_fixture']
+    })).resolves.toMatchObject({
+      minuteId: 'min_real_1',
+      title: 'Ivy 的自动妙记'
+    });
+
+    expect(calls).toEqual([
+      {
+        method: 'getMinuteBasicInfo',
+        minuteId: 'min_real_1',
+        options: { userAccessToken: 'u-ivy-minute-token' }
+      },
+      {
+        method: 'exportMinuteTranscript',
+        minuteId: 'min_real_1',
+        options: { userAccessToken: 'u-ivy-minute-token' }
+      }
+    ]);
+  });
+
   it('sends meeting summary text to the target chat and returns the real message ID', async () => {
     const sent: Array<{ chatId: string; text: string }> = [];
     const delivery = new FeishuMessageDeliveryAdapter(createClient({
@@ -192,15 +240,26 @@ describe('Feishu real adapter boundary', () => {
 function createClient(options: {
   minute?: unknown;
   transcript?: unknown[];
+  calls?: unknown[];
   sent?: Array<{ chatId: string; text: string }>;
   sentCards?: Array<{ chatId: string; card: Record<string, unknown> }>;
   messageId?: string;
 }): FeishuApiClient {
   return {
-    async getMinuteBasicInfo() {
+    async getMinuteBasicInfo(minuteId, requestOptions) {
+      options.calls?.push({
+        method: 'getMinuteBasicInfo',
+        minuteId,
+        ...(requestOptions ? { options: requestOptions } : {})
+      });
       return options.minute ?? null;
     },
-    async exportMinuteTranscript() {
+    async exportMinuteTranscript(minuteId, requestOptions) {
+      options.calls?.push({
+        method: 'exportMinuteTranscript',
+        minuteId,
+        ...(requestOptions ? { options: requestOptions } : {})
+      });
       return options.transcript ?? [];
     },
     async sendTextMessage(input) {
