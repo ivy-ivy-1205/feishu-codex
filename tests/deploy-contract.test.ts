@@ -28,8 +28,16 @@ describe('production deployment contract', () => {
 
     expect(backupScript).toContain('/opt/feishu-codex/data/bridge.sqlite');
     expect(backupScript).toContain('/opt/feishu-codex/backups');
+    expect(backupScript).toContain(
+      'readonly RETAIN_COUNT="${SQLITE_BACKUP_RETAIN_COUNT:-1}"'
+    );
+    expect(backupScript).toContain(
+      'SQLITE_BACKUP_RETAIN_COUNT must be a positive integer'
+    );
     expect(backupScript).toContain('chmod 600 "${final_backup}"');
-    expect(backupScript).toContain("find \"${BACKUP_DIR}\"");
+    expect(backupScript).toContain(
+      "-name 'bridge-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.sqlite'"
+    );
     expect(statSync(backupScriptUrl).mode & 0o111).not.toBe(0);
   });
 });
