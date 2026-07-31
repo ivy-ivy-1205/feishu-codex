@@ -13,6 +13,8 @@ export const initialProjectDefinitions = [
 ] as const satisfies readonly ProjectDefinition[];
 
 export const initialProjectMappingRules = [
+  { id: 'system:b-roll', pattern: 'B-roll', patternKind: 'keyword', projectKey: 'openmontage', subprojectKey: null, confidenceHint: 'high', priority: 100, source: 'system', active: true },
+  { id: 'system:follow-up-mapping', pattern: 'follow-up 自动映射', patternKind: 'keyword', projectKey: 'feishu-adaptor', subprojectKey: null, confidenceHint: 'high', priority: 100, source: 'system', active: true },
   { id: 'system:amy-live', pattern: 'Amy Live', patternKind: 'keyword', projectKey: 'realagent-ai-cc', subprojectKey: 'amy-voice', confidenceHint: 'high', priority: 100, source: 'system', active: true },
   { id: 'system:amy-voice', pattern: 'Amy 语音通话', patternKind: 'keyword', projectKey: 'realagent-ai-cc', subprojectKey: 'amy-voice', confidenceHint: 'high', priority: 100, source: 'system', active: true },
   { id: 'system:amy-wechat', pattern: 'Amy Wechat', patternKind: 'keyword', projectKey: 'realagent-ai-cc', subprojectKey: 'amy-wechat', confidenceHint: 'high', priority: 100, source: 'system', active: true },

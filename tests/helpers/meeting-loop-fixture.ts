@@ -13,18 +13,35 @@ import { processMinuteJob } from '../../src/services/meeting-worker.js';
 const fixtureMinuteId = 'min_project_aware_followups';
 const workerNow = new Date('2030-08-01T03:00:00.000Z');
 
+export function createMeetingLoopFixture(prefix = 'aijia-meeting-loop-') {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), prefix));
+  const databaseFilename = join(temporaryDirectory, 'bridge.sqlite');
+  const database = createSqliteDatabase(databaseFilename);
+  migrateDatabase(database.client);
+  return {
+    temporaryDirectory,
+    databaseFilename,
+    database,
+    meetingRepository: new MeetingRepository(database.client),
+    jobRepository: new JobRepository(database.client),
+    outboxRepository: new OutboxRepository(database.client)
+  };
+}
+
 export async function runMeetingLoopFixture(input: { transcript: string[] }): Promise<{
   renderedText: string;
   todos: MeetingTodoRecord[];
 }> {
-  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'aijia-project-followups-'));
-  const database = createSqliteDatabase(join(temporaryDirectory, 'bridge.sqlite'));
+  const fixture = createMeetingLoopFixture('aijia-project-followups-');
+  const {
+    temporaryDirectory,
+    database,
+    meetingRepository,
+    jobRepository,
+    outboxRepository
+  } = fixture;
 
   try {
-    migrateDatabase(database.client);
-    const meetingRepository = new MeetingRepository(database.client);
-    const jobRepository = new JobRepository(database.client);
-    const outboxRepository = new OutboxRepository(database.client);
     meetingRepository.ingestMinute({
       minuteId: fixtureMinuteId,
       eventId: 'evt_project_aware_followups'
@@ -97,19 +114,17 @@ const fakeCodexSummary: MeetingSummaryDraft = {
   decisions: ['Phase 1D 只生成 Prompt，不执行 Todo。'],
   risks: ['未知项目必须等待 Ivy 确认。'],
   todos: [
-    todo('整理视频号 B-roll 优化清单', 'OpenMontage 的 B-roll 素材优化清单。', 'openmontage', 'high', '在 OpenMontage 中整理视频号 B-roll 优化清单。'),
-    todo('起草 follow-up 自动映射 Prompt', 'FeishuAdaptor 的 follow-up 自动映射 Prompt。', 'feishu-adaptor', 'high', '在 FeishuAdaptor 中起草 follow-up 自动映射 Prompt。'),
-    todo('生成 Amy Live 复测与 Demo 剪辑清单', 'Amy Live 的复测与 Demo 剪辑清单。', 'realagent-ai-cc', 'high', '在 RealAgentAI_cc 的 Amy Voice 分支生成复测与 Demo 剪辑清单。'),
-    todo('整理 compass 下一步 Prompt', 'compass 的下一步项目化 Prompt。', 'aijia-compass-work', 'high', '在 aijia-compass-work 中整理下一步 Prompt。'),
-    todo('澄清新实验所属项目', '没命名的新实验，不能猜测项目。', null, 'low', '请 Ivy 先确认新实验所属项目，再生成下一步 Prompt。')
+    todo('整理视频号 B-roll 优化清单', 'OpenMontage 的 B-roll 素材优化清单。', '在 OpenMontage 中整理视频号 B-roll 优化清单。'),
+    todo('起草 follow-up 自动映射 Prompt', 'FeishuAdaptor 的 follow-up 自动映射 Prompt。', '在 FeishuAdaptor 中起草 follow-up 自动映射 Prompt。'),
+    todo('生成 Amy Live 复测与 Demo 剪辑清单', 'Amy Live 的复测与 Demo 剪辑清单。', '在 RealAgentAI_cc 的 Amy Voice 分支生成复测与 Demo 剪辑清单。'),
+    todo('整理 compass 下一步 Prompt', 'compass 的下一步项目化 Prompt。', '在 aijia-compass-work 中整理下一步 Prompt。'),
+    todo('澄清新实验所属项目', '没命名的新实验，不能猜测项目。', '请 Ivy 先确认新实验所属项目，再生成下一步 Prompt。')
   ]
 };
 
 function todo(
   title: string,
   description: string,
-  projectKey: string | null,
-  projectConfidence: 'high' | 'low',
   projectPrompt: string
 ) {
   return {
@@ -117,10 +132,10 @@ function todo(
     description,
     risk: 'low' as const,
     capability: 'content_draft' as const,
-    projectKey,
+    projectKey: null,
     subprojectKey: null,
-    projectConfidence,
-    projectEvidence: projectKey ? `fake Codex identified ${projectKey}` : '会议没有足够证据',
+    projectConfidence: 'low' as const,
+    projectEvidence: '会议没有足够证据',
     projectPrompt
   };
 }

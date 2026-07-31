@@ -1,6 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync, rmSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { createSqliteDatabase } from '../src/db/client.js';
@@ -17,6 +15,7 @@ import {
 import { processMinuteJob } from '../src/services/meeting-worker.js';
 import { ingestMinuteGenerated } from '../src/services/minute-ingestion.js';
 import { routeReply } from '../src/services/reply-router.js';
+import { createMeetingLoopFixture } from './helpers/meeting-loop-fixture.js';
 
 const verificationToken = 'fixture-verification-token';
 const ivyPrivateChatId = 'oc_d851c3e986007dc0f97ab582bcb2e7c8';
@@ -148,13 +147,9 @@ describe('meeting-to-Todo Phase 1A acceptance loop', () => {
 });
 
 async function createMeetingLoopHarness() {
-  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'aijia-meeting-loop-'));
-  const databaseFilename = join(temporaryDirectory, 'bridge.sqlite');
-  let database = createSqliteDatabase(databaseFilename);
-  migrateDatabase(database.client);
-  let meetingRepository = new MeetingRepository(database.client);
-  let jobRepository = new JobRepository(database.client);
-  let outboxRepository = new OutboxRepository(database.client);
+  const fixture = createMeetingLoopFixture();
+  const { temporaryDirectory, databaseFilename } = fixture;
+  let { database, meetingRepository, jobRepository, outboxRepository } = fixture;
   const approverOpenIds: string[] = [];
   const deliveredSummaries: DeliveredSummary[] = [];
   const buildHarnessApp = () => buildApp({

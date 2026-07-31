@@ -19,6 +19,41 @@ describe('project-aware followups integration', () => {
     expect(result.renderedText).toContain('[aijia-compass-work｜高置信度]');
     expect(result.renderedText).toContain('[待确认项目]');
     expect(result.todos.every((todo) => todo.status === 'proposed')).toBe(true);
-    expect(result.todos.every((todo) => todo.projectPrompt.length > 0)).toBe(true);
+    expect(result.todos).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: '整理视频号 B-roll 优化清单',
+        projectKey: 'openmontage',
+        projectMappingStatus: 'mapped',
+        projectEvidence: 'system:system:b-roll matched B-roll',
+        projectPrompt: '在 OpenMontage 中整理视频号 B-roll 优化清单。'
+      }),
+      expect.objectContaining({
+        title: '起草 follow-up 自动映射 Prompt',
+        projectKey: 'feishu-adaptor',
+        projectMappingStatus: 'mapped',
+        projectEvidence: 'system:system:follow-up-mapping matched follow-up 自动映射',
+        projectPrompt: '在 FeishuAdaptor 中起草 follow-up 自动映射 Prompt。'
+      }),
+      expect.objectContaining({
+        title: '生成 Amy Live 复测与 Demo 剪辑清单',
+        projectKey: 'realagent-ai-cc',
+        projectMappingStatus: 'mapped',
+        projectEvidence: 'system:system:amy-live matched Amy Live',
+        projectPrompt: '在 RealAgentAI_cc 的 Amy Voice 分支生成复测与 Demo 剪辑清单。'
+      }),
+      expect.objectContaining({
+        title: '整理 compass 下一步 Prompt',
+        projectKey: 'aijia-compass-work',
+        projectMappingStatus: 'mapped',
+        projectEvidence: 'system:system:compass matched compass',
+        projectPrompt: '在 aijia-compass-work 中整理下一步 Prompt。'
+      }),
+      expect.objectContaining({
+        title: '澄清新实验所属项目',
+        projectKey: null,
+        projectMappingStatus: 'needs_confirmation',
+        projectPrompt: '请 Ivy 先确认新实验所属项目，再生成下一步 Prompt。'
+      })
+    ]));
   });
 });
