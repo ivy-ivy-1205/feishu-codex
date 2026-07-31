@@ -211,4 +211,72 @@ describe('migrateDatabase', () => {
       WHERE id = 'todo_legacy_1'
     `).run()).toThrow(/CHECK constraint failed/);
   });
+
+  it('adds project mapping columns, registry tables, and idempotent system seeds', () => {
+    const database = createSqliteDatabase(':memory:');
+    database.client.exec(`
+      CREATE TABLE meeting_todos (
+        id TEXT PRIMARY KEY,
+        summary_id TEXT NOT NULL,
+        displayed_number INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        risk TEXT NOT NULL,
+        capability TEXT NOT NULL DEFAULT 'unknown',
+        status TEXT NOT NULL DEFAULT 'proposed',
+        created_at TEXT NOT NULL,
+        UNIQUE(summary_id, displayed_number)
+      );
+      INSERT INTO meeting_todos (
+        id, summary_id, displayed_number, title, description, risk, capability, status, created_at
+      ) VALUES (
+        'todo_legacy_project_1', 'summary_legacy_1', 1, '旧任务', '没有项目映射', 'low',
+        'unknown', 'proposed', '2026-07-31T00:00:00.000Z'
+      );
+    `);
+
+    migrateDatabase(database.client);
+    migrateDatabase(database.client);
+
+    expect(database.client.prepare(`
+      SELECT project_key, subproject_key, project_confidence, project_evidence,
+        project_mapping_status, project_prompt
+      FROM meeting_todos WHERE id = 'todo_legacy_project_1'
+    `).get()).toEqual({
+      project_key: null,
+      subproject_key: null,
+      project_confidence: 'low',
+      project_evidence: '',
+      project_mapping_status: 'unmapped',
+      project_prompt: ''
+    });
+    expect(database.client.prepare(`
+      SELECT project_key, display_name, aliases, status FROM projects
+      WHERE project_key = 'feishu-adaptor'
+    `).get()).toEqual({
+      project_key: 'feishu-adaptor',
+      display_name: 'FeishuAdaptor',
+      aliases: JSON.stringify(['feishu codex', '飞书 codex', 'bridge', 'project 6']),
+      status: 'active'
+    });
+    expect(database.client.prepare(`
+      SELECT pattern, project_key, subproject_key, confidence_hint, source, active
+      FROM project_mapping_rules WHERE id = 'system:amy-live'
+    `).get()).toEqual({
+      pattern: 'Amy Live',
+      project_key: 'realagent-ai-cc',
+      subproject_key: 'amy-voice',
+      confidence_hint: 'high',
+      source: 'system',
+      active: 1
+    });
+    expect(database.client.prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (
+        'project_context_snapshots', 'project_mapping_conflicts'
+      ) ORDER BY name
+    `).all()).toEqual([
+      { name: 'project_context_snapshots' },
+      { name: 'project_mapping_conflicts' }
+    ]);
+  });
 });

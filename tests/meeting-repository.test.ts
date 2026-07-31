@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/sqlite-core';
-import { meetingTodos } from '../src/db/schema.js';
+import {
+  meetingTodos,
+  projectContextSnapshots,
+  projectMappingConflicts,
+  projectMappingRules,
+  projects
+} from '../src/db/schema.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { createTestMeetingRepository } from './helpers/test-db.js';
 
@@ -12,6 +18,21 @@ describe('MeetingRepository', () => {
       'meeting_todos_capability_allowed',
       'meeting_todos_status_allowed'
     ]);
+  });
+
+  it('declares Project Registry tables and nullable Todo project fields', () => {
+    expect(Object.keys(meetingTodos)).toEqual(expect.arrayContaining([
+      'projectKey',
+      'subprojectKey',
+      'projectConfidence',
+      'projectEvidence',
+      'projectMappingStatus',
+      'projectPrompt'
+    ]));
+    expect(getTableConfig(projects).name).toBe('projects');
+    expect(getTableConfig(projectMappingRules).name).toBe('project_mapping_rules');
+    expect(getTableConfig(projectContextSnapshots).name).toBe('project_context_snapshots');
+    expect(getTableConfig(projectMappingConflicts).name).toBe('project_mapping_conflicts');
   });
 
   it('stores a minute only once', () => {

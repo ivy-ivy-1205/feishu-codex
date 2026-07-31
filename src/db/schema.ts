@@ -45,6 +45,14 @@ export const meetingTodos = sqliteTable('meeting_todos', {
   status: text('status', {
     enum: ['proposed', 'authorized', 'running', 'completed', 'failed', 'needs_confirmation']
   }).notNull().default('proposed'),
+  projectKey: text('project_key').references(() => projects.projectKey),
+  subprojectKey: text('subproject_key'),
+  projectConfidence: text('project_confidence', { enum: ['high', 'medium', 'low'] }),
+  projectEvidence: text('project_evidence'),
+  projectMappingStatus: text('project_mapping_status', {
+    enum: ['mapped', 'needs_confirmation', 'unmapped', 'dismissed']
+  }),
+  projectPrompt: text('project_prompt'),
   createdAt: text('created_at').notNull()
 }, (table) => [
   check('meeting_todos_displayed_number_positive', sql`${table.displayedNumber} > 0`),
@@ -59,6 +67,62 @@ export const meetingTodos = sqliteTable('meeting_todos', {
   ),
   uniqueIndex('meeting_todos_summary_displayed_number_unique')
     .on(table.summaryId, table.displayedNumber)
+]);
+
+export const projects = sqliteTable('projects', {
+  projectKey: text('project_key').primaryKey(),
+  displayName: text('display_name').notNull(),
+  aliases: text('aliases').notNull(),
+  localPathHint: text('local_path_hint'),
+  repoUrl: text('repo_url'),
+  defaultBranch: text('default_branch'),
+  status: text('status', { enum: ['active', 'archived'] }).notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull()
+}, (table) => [
+  check('projects_status_allowed', sql`${table.status} IN ('active', 'archived')`)
+]);
+
+export const projectMappingRules = sqliteTable('project_mapping_rules', {
+  id: text('id').primaryKey(),
+  pattern: text('pattern').notNull(),
+  patternKind: text('pattern_kind', { enum: ['keyword', 'exact', 'regex'] }).notNull(),
+  projectKey: text('project_key').notNull().references(() => projects.projectKey),
+  subprojectKey: text('subproject_key'),
+  confidenceHint: text('confidence_hint', { enum: ['high', 'medium', 'low'] }).notNull(),
+  priority: integer('priority').notNull(),
+  source: text('source', { enum: ['system', 'ivy_correction'] }).notNull(),
+  active: integer('active', { mode: 'boolean' }).notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull()
+}, (table) => [
+  check('project_mapping_rules_pattern_kind_allowed', sql`${table.patternKind} IN ('keyword', 'exact', 'regex')`),
+  check('project_mapping_rules_confidence_allowed', sql`${table.confidenceHint} IN ('high', 'medium', 'low')`),
+  check('project_mapping_rules_source_allowed', sql`${table.source} IN ('system', 'ivy_correction')`),
+  check('project_mapping_rules_active_allowed', sql`${table.active} IN (0, 1)`)
+]);
+
+export const projectContextSnapshots = sqliteTable('project_context_snapshots', {
+  id: text('id').primaryKey(),
+  projectKey: text('project_key').references(() => projects.projectKey),
+  sourceKind: text('source_kind').notNull(),
+  sourceRef: text('source_ref').notNull(),
+  content: text('content').notNull(),
+  digest: text('digest').notNull(),
+  capturedAt: text('captured_at').notNull()
+});
+
+export const projectMappingConflicts = sqliteTable('project_mapping_conflicts', {
+  id: text('id').primaryKey(),
+  todoId: text('todo_id').references(() => meetingTodos.id),
+  candidateProjectKey: text('candidate_project_key'),
+  existingProjectKey: text('existing_project_key'),
+  evidence: text('evidence').notNull(),
+  status: text('status', { enum: ['open', 'resolved'] }).notNull(),
+  createdAt: text('created_at').notNull(),
+  resolvedAt: text('resolved_at')
+}, (table) => [
+  check('project_mapping_conflicts_status_allowed', sql`${table.status} IN ('open', 'resolved')`)
 ]);
 
 export const batchJobs = sqliteTable('batch_jobs', {
