@@ -96,6 +96,10 @@ describe('loadConfig', () => {
       syncEnabled: true,
       approvedChatIds: ['oc_a84d5b6ca478220d0a37964b50776edb']
     });
+    expect(() => loadConfig({
+      ...baseEnv,
+      PROJECT_CONTEXT_CHAT_IDS: 'oc_not_the_approved_context_group'
+    })).toThrow(/only approved project context chat/i);
   });
 
   it('keeps Feishu OAuth disabled unless explicitly configured with a redirect URI and token key file', () => {

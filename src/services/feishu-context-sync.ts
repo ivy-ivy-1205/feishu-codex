@@ -1,5 +1,6 @@
 const maxSnapshotBytes = 8 * 1024;
 const mediaMessageTypes = new Set<FeishuContextMessage['messageType']>(['video', 'audio']);
+export const approvedFeishuProjectContextChatId = 'oc_a84d5b6ca478220d0a37964b50776edb';
 
 export interface FeishuContextMessage {
   messageId: string;
@@ -30,7 +31,7 @@ export interface FeishuContextSnapshot {
 }
 
 export interface FeishuContextGap {
-  code: 'MEDIA_SKIPPED' | 'VOICE_TEXT_MISSING' | 'FILE_TEXT_UNREADABLE';
+  code: 'MEDIA_SKIPPED' | 'IMAGE_SKIPPED' | 'MESSAGE_UNSUPPORTED' | 'MESSAGE_TEXT_UNAVAILABLE' | 'VOICE_TEXT_MISSING' | 'FILE_TEXT_UNREADABLE';
   sourceRef: string;
   reason: string;
 }
@@ -49,6 +50,9 @@ export interface FeishuContextSyncReport {
   sourceCoverage: {
     messageIds: string[];
     fileTokens: string[];
+    pages: Array<{ requestCursor: string | null; nextCursor: string | null; messageIds: string[] }>;
+    observedMessageTimeRange: { earliest: string | null; latest: string | null };
+    termination: 'next_cursor_null';
   };
   gaps: FeishuContextGap[];
 }
@@ -79,13 +83,19 @@ export async function syncFeishuProjectContext(
   input: SyncFeishuProjectContextInput
 ): Promise<FeishuContextSyncReport> {
   const chatId = input.chatId.trim();
-  if (!input.approvedChatIds.some((approvedChatId) => approvedChatId.trim() === chatId)) {
+  if (
+    chatId !== approvedFeishuProjectContextChatId
+    || !input.approvedChatIds.some((approvedChatId) => approvedChatId.trim() === approvedFeishuProjectContextChatId)
+  ) {
     throw new FeishuContextSyncError(chatId);
   }
 
   const gaps: FeishuContextGap[] = [];
   const messageIds: string[] = [];
   const fileTokens: string[] = [];
+  const pages: FeishuContextSyncReport['sourceCoverage']['pages'] = [];
+  let earliestMessageTime: string | null = null;
+  let latestMessageTime: string | null = null;
   let cursor: string | null = null;
   let pagesRead = 0;
   let messagesRead = 0;
@@ -94,20 +104,41 @@ export async function syncFeishuProjectContext(
   let voiceTextMissing = 0;
 
   do {
-    const page = await input.feishu.listMessages({ chatId, cursor, since: input.since });
+    const requestCursor = cursor;
+    const page = await input.feishu.listMessages({ chatId, cursor: requestCursor, since: input.since });
     pagesRead += 1;
+    pages.push({
+      requestCursor,
+      nextCursor: page.nextCursor,
+      messageIds: page.messages.map((message) => message.messageId)
+    });
     for (const message of page.messages) {
       messagesRead += 1;
       messageIds.push(message.messageId);
       const sourceRef = messageSourceRef(chatId, message.messageId);
+      const messageTime = normalizedIsoTime(message.createdAt);
+      if (messageTime && (!earliestMessageTime || messageTime < earliestMessageTime)) {
+        earliestMessageTime = messageTime;
+      }
+      if (messageTime && (!latestMessageTime || messageTime > latestMessageTime)) {
+        latestMessageTime = messageTime;
+      }
       if (mediaMessageTypes.has(message.messageType)) {
         mediaSkipped += 1;
         gaps.push({ code: 'MEDIA_SKIPPED', sourceRef, reason: `${message.messageType} is skipped by policy` });
         continue;
       }
+      if (message.messageType === 'image') {
+        gaps.push({ code: 'IMAGE_SKIPPED', sourceRef, reason: 'image text extraction is not approved' });
+        continue;
+      }
       if (message.messageType === 'voice' && !readableText(message.text)) {
         voiceTextMissing += 1;
         gaps.push({ code: 'VOICE_TEXT_MISSING', sourceRef, reason: 'native voice message has no approved transcript text' });
+        continue;
+      }
+      if ((message.messageType === 'text' || message.messageType === 'post') && !readableText(message.text)) {
+        gaps.push({ code: 'MESSAGE_TEXT_UNAVAILABLE', sourceRef, reason: `${message.messageType} has no readable text` });
         continue;
       }
       if ((message.messageType === 'text' || message.messageType === 'post') && readableText(message.text)) {
@@ -117,6 +148,10 @@ export async function syncFeishuProjectContext(
           content: message.text!
         });
         messagesStored += 1;
+        continue;
+      }
+      if (message.messageType === 'unknown') {
+        gaps.push({ code: 'MESSAGE_UNSUPPORTED', sourceRef, reason: 'message type is unsupported' });
       }
     }
     cursor = page.nextCursor;
@@ -160,7 +195,13 @@ export async function syncFeishuProjectContext(
     mediaSkipped,
     voiceTextMissing,
     pagesRead,
-    sourceCoverage: { messageIds, fileTokens },
+    sourceCoverage: {
+      messageIds,
+      fileTokens,
+      pages,
+      observedMessageTimeRange: { earliest: earliestMessageTime, latest: latestMessageTime },
+      termination: 'next_cursor_null'
+    },
     gaps
   };
   const syncSourceRef = `feishu:chat:${chatId}:sync:${capturedAt}`;
@@ -176,10 +217,10 @@ export async function syncFeishuProjectContext(
       sourceCoverage: report.sourceCoverage
     })
   });
-  for (const gap of gaps) {
+  for (const [index, gap] of gaps.entries()) {
     await input.saveSnapshot({
       sourceKind: 'feishu_sync_gap',
-      sourceRef: `${syncSourceRef}:gap:${gap.code}:${gaps.indexOf(gap) + 1}`,
+      sourceRef: `${syncSourceRef}:gap:${gap.code}:${index + 1}`,
       content: JSON.stringify(gap)
     });
   }
@@ -188,6 +229,11 @@ export async function syncFeishuProjectContext(
 
 function readableText(value: string | null): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function normalizedIsoTime(value: string): string | null {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function isSkippedMediaFile(file: FeishuContextFile): boolean {

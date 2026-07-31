@@ -59,4 +59,90 @@ describe('syncFeishuProjectContext', () => {
       saveSnapshot: async () => {}
     })).rejects.toMatchObject({ code: 'FEISHU_CHAT_NOT_APPROVED' });
   });
+
+  it('rejects a caller-supplied allowlist that tries to approve another group', async () => {
+    await expect(syncFeishuProjectContext({
+      chatId: 'oc_other',
+      approvedChatIds: ['oc_other'],
+      since: new Date('2026-07-01T00:00:00.000Z'),
+      feishu: fakeFeishu(),
+      saveSnapshot: async () => {}
+    })).rejects.toMatchObject({ code: 'FEISHU_CHAT_NOT_APPROVED' });
+  });
+
+  it('persists cursor and observed time coverage until Feishu terminates pagination', async () => {
+    const calls: Array<string | null> = [];
+    const snapshots: Array<{ sourceKind: string; content: string }> = [];
+    const report = await syncFeishuProjectContext({
+      chatId: 'oc_a84d5b6ca478220d0a37964b50776edb',
+      approvedChatIds: ['oc_a84d5b6ca478220d0a37964b50776edb'],
+      since: new Date('2026-07-01T00:00:00.000Z'),
+      now: () => new Date('2026-07-31T00:00:00.000Z'),
+      feishu: {
+        async listMessages({ cursor }) {
+          calls.push(cursor);
+          return cursor === null
+            ? { messages: [{ messageId: 'om_1', messageType: 'text' as const, text: 'first', createdAt: '2026-07-02T00:00:00.000Z' }], nextCursor: 'cursor-2' }
+            : { messages: [{ messageId: 'om_2', messageType: 'text' as const, text: 'last', createdAt: '2026-07-30T00:00:00.000Z' }], nextCursor: null };
+        },
+        async listReferencedFiles() { return []; }
+      },
+      saveSnapshot: async (snapshot) => { snapshots.push(snapshot); }
+    });
+
+    expect(calls).toEqual([null, 'cursor-2']);
+    expect(report.sourceCoverage).toMatchObject({
+      termination: 'next_cursor_null',
+      observedMessageTimeRange: {
+        earliest: '2026-07-02T00:00:00.000Z',
+        latest: '2026-07-30T00:00:00.000Z'
+      },
+      pages: [
+        { requestCursor: null, nextCursor: 'cursor-2' },
+        { requestCursor: 'cursor-2', nextCursor: null }
+      ]
+    });
+    expect(snapshots.find((snapshot) => snapshot.sourceKind === 'feishu_sync_coverage')?.content)
+      .toContain('cursor-2');
+  });
+
+  it('records explicit gaps for no-text messages and skips oversized text in bounded chunks', async () => {
+    const snapshots: Array<{ sourceKind: string; content: string }> = [];
+    const report = await syncFeishuProjectContext({
+      chatId: 'oc_a84d5b6ca478220d0a37964b50776edb',
+      approvedChatIds: ['oc_a84d5b6ca478220d0a37964b50776edb'],
+      since: new Date('2026-07-01T00:00:00.000Z'),
+      feishu: {
+        async listMessages() {
+          return {
+            messages: [
+              { messageId: 'om_empty', messageType: 'text', text: null, createdAt: '2026-07-30T00:00:00.000Z' },
+              { messageId: 'om_image', messageType: 'image', text: null, createdAt: '2026-07-30T00:01:00.000Z' },
+              { messageId: 'om_unknown', messageType: 'unknown', text: null, createdAt: '2026-07-30T00:02:00.000Z' },
+              { messageId: 'om_large', messageType: 'post', text: '字'.repeat(5_000), createdAt: '2026-07-30T00:03:00.000Z' }
+            ],
+            nextCursor: null
+          };
+        },
+        async listReferencedFiles() { return []; }
+      },
+      saveSnapshot: async (snapshot) => { snapshots.push(snapshot); }
+    });
+
+    expect(report.gaps.map((gap) => gap.code)).toEqual(expect.arrayContaining([
+      'MESSAGE_TEXT_UNAVAILABLE',
+      'IMAGE_SKIPPED',
+      'MESSAGE_UNSUPPORTED'
+    ]));
+    expect(snapshots.filter((snapshot) => snapshot.sourceKind === 'feishu_post').every(
+      (snapshot) => Buffer.byteLength(snapshot.content, 'utf8') <= 8 * 1024
+    )).toBe(true);
+  });
 });
+
+function fakeFeishu() {
+  return {
+    async listMessages() { return { messages: [], nextCursor: null }; },
+    async listReferencedFiles() { return []; }
+  };
+}

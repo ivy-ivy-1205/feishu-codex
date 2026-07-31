@@ -268,7 +268,7 @@ function toContextMessage(value: unknown): FeishuContextMessage | null {
   }
   const messageType = normalizeContextMessageType(value.msg_type);
   const body = isRecord(value.body) ? value.body : {};
-  const content = typeof body.content === 'string' ? parseMessageText(body.content) : null;
+  const content = typeof body.content === 'string' ? parseMessageText(body.content, messageType) : null;
   const createdAt = typeof value.create_time === 'string'
     ? new Date(Number(value.create_time) * 1_000).toISOString()
     : new Date(0).toISOString();
@@ -286,16 +286,52 @@ function normalizeContextMessageType(value: string): FeishuContextMessage['messa
     : 'unknown';
 }
 
-function parseMessageText(content: string): string | null {
+function parseMessageText(content: string, messageType: FeishuContextMessage['messageType']): string | null {
   try {
     const parsed = JSON.parse(content);
     if (isRecord(parsed) && typeof parsed.text === 'string') {
       return parsed.text;
     }
+    if (messageType === 'post' && isRecord(parsed)) {
+      return extractPostText(parsed);
+    }
   } catch {
     // Post/file message content is not guaranteed to be JSON text.
   }
   return null;
+}
+
+function extractPostText(post: Record<string, unknown>): string | null {
+  const locale = isRecord(post.zh_cn)
+    ? post.zh_cn
+    : Object.values(post).find(isRecord);
+  if (!locale) {
+    return null;
+  }
+  const lines: string[] = [];
+  if (typeof locale.title === 'string' && locale.title.trim()) {
+    lines.push(locale.title.trim());
+  }
+  if (Array.isArray(locale.content)) {
+    for (const paragraph of locale.content) {
+      const fragments = collectPostText(paragraph);
+      if (fragments.length > 0) {
+        lines.push(fragments.join(''));
+      }
+    }
+  }
+  const text = lines.join('\n').trim();
+  return text || null;
+}
+
+function collectPostText(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(collectPostText);
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+  return typeof value.text === 'string' && value.text.trim() ? [value.text] : [];
 }
 
 function extractReferencedFiles(value: unknown): FeishuContextFile[] {

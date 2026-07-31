@@ -227,6 +227,34 @@ describe('FeishuSdkApiClient', () => {
       }
     });
   });
+
+  it('extracts readable text from a realistic multilingual post body', async () => {
+    const context = new FeishuSdkContextClient(createFakeSdkClient({
+      contextMessages: [{
+        message_id: 'om_post_1',
+        msg_type: 'post',
+        create_time: '1780000000',
+        body: { content: JSON.stringify({
+          zh_cn: {
+            title: '项目更新',
+            content: [
+              [{ tag: 'text', text: 'OpenMontage B-roll 已完成。' }],
+              [{ tag: 'a', text: '查看方案', href: 'https://example.test/plan' }]
+            ]
+          },
+          en_us: { title: 'Project update', content: [[{ tag: 'text', text: 'English fallback' }]] }
+        }) }
+      }]
+    }));
+
+    await expect(context.listMessages({
+      chatId: 'oc_a84d5b6ca478220d0a37964b50776edb',
+      cursor: null,
+      since: new Date('2026-07-01T00:00:00.000Z')
+    })).resolves.toMatchObject({
+      messages: [{ messageId: 'om_post_1', messageType: 'post', text: '项目更新\nOpenMontage B-roll 已完成。\n查看方案' }]
+    });
+  });
 });
 
 function createFakeSdkClient(options: {

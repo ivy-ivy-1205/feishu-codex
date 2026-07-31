@@ -6,6 +6,13 @@ const commaSeparatedIds = (prefix: string, message: string) =>
     value.split(',').map((id) => id.trim()).filter(Boolean)
   ).refine((ids) => ids.every((id) => id.startsWith(prefix)), message);
 
+const approvedProjectContextChatId = 'oc_a84d5b6ca478220d0a37964b50776edb';
+const projectContextChatIds = commaSeparatedIds('oc_', 'chat_id must start with oc_')
+  .refine(
+    (ids) => ids.every((id) => id === approvedProjectContextChatId),
+    'only approved project context chat_id may be configured'
+  );
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().trim().min(1).default('127.0.0.1'),
@@ -36,7 +43,7 @@ const envSchema = z.object({
   WORKER_LEASE_SECONDS: z.coerce.number().int().positive().default(180),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
   PROJECT_CONTEXT_SYNC_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
-  PROJECT_CONTEXT_CHAT_IDS: commaSeparatedIds('oc_', 'chat_id must start with oc_').default([]),
+  PROJECT_CONTEXT_CHAT_IDS: projectContextChatIds.default([]),
   PROJECT_CONTEXT_SYNC_SINCE_DAYS: z.coerce.number().int().positive().default(30)
 }).superRefine((config, context) => {
   if (
