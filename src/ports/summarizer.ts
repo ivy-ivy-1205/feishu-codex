@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { todoCapabilitySchema } from '../domain/meeting.js';
+import { projectConfidenceSchema } from '../domain/project.js';
 import type { MinuteContext } from './feishu.js';
 
 const summaryOutputLimitBytes = 64 * 1024;
@@ -25,7 +26,12 @@ export const MeetingSummaryDraft = z.object({
     title: boundedText('Todo title', todoTitleLimitBytes),
     description: boundedText('Todo description', todoDescriptionLimitBytes),
     risk: z.enum(['low', 'high']),
-    capability: todoCapabilitySchema
+    capability: todoCapabilitySchema,
+    projectKey: z.string().trim().min(1).nullable(),
+    subprojectKey: z.string().trim().min(1).nullable(),
+    projectConfidence: projectConfidenceSchema,
+    projectEvidence: boundedText('project evidence', 1024),
+    projectPrompt: boundedText('project prompt', 4096)
   })).max(5)
 }).superRefine((draft, context) => {
   if (Buffer.byteLength(JSON.stringify(draft), 'utf8') > summaryOutputLimitBytes) {

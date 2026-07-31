@@ -104,7 +104,12 @@ function fakeSummarizer(): MeetingSummarizer {
           title: '整理会后事项',
           description: '输出一版可直接发给 Ivy 的行动清单。',
           risk: 'low',
-          capability: 'content_draft'
+          capability: 'content_draft',
+          projectKey: null,
+          subprojectKey: null,
+          projectConfidence: 'low',
+          projectEvidence: '会议没有足够证据',
+          projectPrompt: '需要 Ivy 先确认项目的下一步问题。'
         }]
       };
     }

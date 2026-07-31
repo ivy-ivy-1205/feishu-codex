@@ -35,19 +35,34 @@ const summaryDraft: MeetingSummaryDraft = {
       title: '整理核心信息',
       description: '整理本次会议的三条核心信息',
       risk: 'low',
-      capability: 'content_draft'
+      capability: 'content_draft',
+      projectKey: null,
+      subprojectKey: null,
+      projectConfidence: 'low',
+      projectEvidence: '会议没有足够证据',
+      projectPrompt: '需要 Ivy 先确认项目的下一步问题。'
     },
     {
       title: '起草用户提示',
       description: '起草转录未就绪时的用户提示',
       risk: 'low',
-      capability: 'content_draft'
+      capability: 'content_draft',
+      projectKey: null,
+      subprojectKey: null,
+      projectConfidence: 'low',
+      projectEvidence: '会议没有足够证据',
+      projectPrompt: '需要 Ivy 先确认项目的下一步问题。'
     },
     {
       title: '生成验收清单',
       description: '生成 Phase 1A 验收清单',
       risk: 'low',
-      capability: 'content_draft'
+      capability: 'content_draft',
+      projectKey: null,
+      subprojectKey: null,
+      projectConfidence: 'low',
+      projectEvidence: '会议没有足够证据',
+      projectPrompt: '需要 Ivy 先确认项目的下一步问题。'
     }
   ]
 };

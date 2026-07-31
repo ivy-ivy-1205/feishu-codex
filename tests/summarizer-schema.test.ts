@@ -18,11 +18,56 @@ const boundedDraft = {
     title: '起草内容',
     description: '整理会议判断',
     risk: 'low',
-    capability: 'content_draft'
+    capability: 'content_draft',
+    projectKey: null,
+    subprojectKey: null,
+    projectConfidence: 'low',
+    projectEvidence: '会议没有足够证据',
+    projectPrompt: '需要 Ivy 先确认项目的下一步问题。'
   }]
 };
 
 describe('MeetingSummaryDraft bounds', () => {
+  it('requires every Todo to include project mapping metadata and a project prompt', () => {
+    expect(MeetingSummaryDraft.safeParse({
+      oneLineConclusion: '核心判断',
+      progress: [],
+      decisions: [],
+      risks: [],
+      todos: [{
+        title: '起草 follow-up 自动映射 Prompt',
+        description: '把会议 follow-up 映射到 FeishuAdaptor。',
+        risk: 'low',
+        capability: 'content_draft',
+        projectKey: 'feishu-adaptor',
+        subprojectKey: null,
+        projectConfidence: 'high',
+        projectEvidence: '会议明确提到 follow-up 自动映射 Prompt。',
+        projectPrompt: '在 FeishuAdaptor 中设计 follow-up 自动映射 Prompt，保持 Todo 不自动执行。'
+      }]
+    }).success).toBe(true);
+  });
+
+  it('rejects a mapped Todo without project evidence or prompt', () => {
+    expect(MeetingSummaryDraft.safeParse({
+      oneLineConclusion: '核心判断',
+      progress: [],
+      decisions: [],
+      risks: [],
+      todos: [{
+        title: '整理 B-roll 优化清单',
+        description: 'OpenMontage 相关。',
+        risk: 'low',
+        capability: 'content_draft',
+        projectKey: 'openmontage',
+        subprojectKey: null,
+        projectConfidence: 'high',
+        projectEvidence: '',
+        projectPrompt: ''
+      }]
+    }).success).toBe(false);
+  });
+
   it('allows an honest summary with no decisions, risks, or executable Todos', () => {
     expect(MeetingSummaryDraft.safeParse(validDraft).success).toBe(true);
   });
@@ -34,7 +79,12 @@ describe('MeetingSummaryDraft bounds', () => {
         title: '界'.repeat(300),
         description: '起草内容',
         risk: 'low',
-        capability: 'content_draft'
+        capability: 'content_draft',
+        projectKey: null,
+        subprojectKey: null,
+        projectConfidence: 'low',
+        projectEvidence: '会议没有足够证据',
+        projectPrompt: '需要 Ivy 先确认项目的下一步问题。'
       }]
     });
 
@@ -52,7 +102,12 @@ describe('MeetingSummaryDraft bounds', () => {
         title: `Todo ${index}`,
         description: '起草内容',
         risk: 'low',
-        capability: 'content_draft'
+        capability: 'content_draft',
+        projectKey: null,
+        subprojectKey: null,
+        projectConfidence: 'low',
+        projectEvidence: '会议没有足够证据',
+        projectPrompt: '需要 Ivy 先确认项目的下一步问题。'
       }))
     }).success).toBe(false);
   });

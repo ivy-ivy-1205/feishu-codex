@@ -617,7 +617,12 @@ function seedDeliveredTodo(meetingRepository: MeetingRepository): void {
       title: '起草会议行动清单',
       description: '只生成内容草稿',
       risk: 'low',
-      capability: 'content_draft'
+      capability: 'content_draft',
+      projectKey: null,
+      subprojectKey: null,
+      projectConfidence: 'low',
+      projectEvidence: '会议没有足够证据',
+      projectPrompt: '需要 Ivy 先确认项目的下一步问题。'
     }]
   });
   outboxRepository.acknowledgeMeetingSummaryDelivery({

@@ -2,6 +2,7 @@ import { CodexAuthProbe, CodexCliAdapter, NodeCodexProcessRunner } from '../adap
 import { CodexMeetingSummarizer } from '../adapters/codex-summarizer.js';
 import type { MeetingSummarizer, MeetingSummaryDraft } from '../ports/summarizer.js';
 import type { MinuteContext } from '../ports/feishu.js';
+import { EmptyProjectContextProvider, type ProjectContextProvider } from '../services/project-context.js';
 
 export interface MeetingSummarizerCompositionConfig {
   codex: {
@@ -15,12 +16,14 @@ export interface MeetingSummarizerCompositionConfig {
 export interface CreateMeetingSummarizerOptions {
   config: MeetingSummarizerCompositionConfig;
   env?: Record<string, string | undefined>;
+  projectContextProvider?: ProjectContextProvider;
   exposeInternalsForTest?: false;
 }
 
 export interface CreateMeetingSummarizerTestOptions {
   config: MeetingSummarizerCompositionConfig;
   env?: Record<string, string | undefined>;
+  projectContextProvider?: ProjectContextProvider;
   exposeInternalsForTest: true;
 }
 
@@ -65,7 +68,10 @@ export function createMeetingSummarizer(
     ...codexOptions,
     runner
   });
-  const summarizer = new CodexMeetingSummarizer({ codex });
+  const summarizer = new CodexMeetingSummarizer({
+    codex,
+    projectContextProvider: options.projectContextProvider ?? new EmptyProjectContextProvider()
+  });
 
   if (options.exposeInternalsForTest) {
     return {

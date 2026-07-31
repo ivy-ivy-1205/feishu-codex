@@ -88,7 +88,12 @@ function createDeliveryHarness() {
       title: '确认 reply lookup',
       description: '使用真实消息 ID 恢复 Todo',
       risk: 'low',
-      capability: 'content_draft'
+      capability: 'content_draft',
+      projectKey: null,
+      subprojectKey: null,
+      projectConfidence: 'low',
+      projectEvidence: '会议没有足够证据',
+      projectPrompt: '需要 Ivy 先确认项目的下一步问题。'
     }]
   });
 

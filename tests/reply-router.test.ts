@@ -371,6 +371,11 @@ function seedMeeting(
       risk: 'low' | 'high';
       capability: 'unknown' | 'content_draft' | 'code_write' | 'external_message' |
         'deploy' | 'delete' | 'production_access';
+      projectKey?: string | null;
+      subprojectKey?: string | null;
+      projectConfidence?: 'high' | 'medium' | 'low';
+      projectEvidence?: string;
+      projectPrompt?: string;
       status: 'proposed';
     }>;
   }
@@ -399,11 +404,26 @@ function seedMeeting(
     progress: ['测试回复绑定'],
     decisions: ['只授权已投递总结'],
     risks: ['伪造 replyTo'],
-    todos: input.todos.map(({ title, description, risk, capability }) => ({
+    todos: input.todos.map(({
       title,
       description,
       risk,
-      capability
+      capability,
+      projectKey = null,
+      subprojectKey = null,
+      projectConfidence = 'low',
+      projectEvidence = '会议没有足够证据',
+      projectPrompt = '需要 Ivy 先确认项目的下一步问题。'
+    }) => ({
+      title,
+      description,
+      risk,
+      capability,
+      projectKey,
+      subprojectKey,
+      projectConfidence,
+      projectEvidence,
+      projectPrompt
     }))
   });
   outboxRepository.acknowledgeMeetingSummaryDelivery({
@@ -460,7 +480,12 @@ function seedUntrustedSummary(
         title: todo.title,
         description: todo.description,
         risk: todo.risk,
-        capability: todo.capability
+        capability: todo.capability,
+        projectKey: null,
+        subprojectKey: null,
+        projectConfidence: 'low',
+        projectEvidence: '会议没有足够证据',
+        projectPrompt: '需要 Ivy 先确认项目的下一步问题。'
       }]
     });
   }

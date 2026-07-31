@@ -1,4 +1,5 @@
 import type { MinuteContext } from '../ports/feishu.js';
+import type { ProjectContextCard, ProjectContextProvider } from '../services/project-context.js';
 import {
   parseMeetingSummaryDraft,
   type MeetingSummarizer,
@@ -14,6 +15,7 @@ export interface CodexJsonExecutor {
 
 export interface CodexMeetingSummarizerOptions {
   codex: CodexJsonExecutor;
+  projectContextProvider: ProjectContextProvider;
 }
 
 export const meetingSummaryOutputSchema = {
@@ -46,7 +48,10 @@ export const meetingSummaryOutputSchema = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['title', 'description', 'risk', 'capability'],
+        required: [
+          'title', 'description', 'risk', 'capability', 'projectKey',
+          'subprojectKey', 'projectConfidence', 'projectEvidence', 'projectPrompt'
+        ],
         properties: {
           title: { type: 'string', minLength: 1 },
           description: { type: 'string', minLength: 1 },
@@ -61,7 +66,12 @@ export const meetingSummaryOutputSchema = {
               'delete',
               'production_access'
             ]
-          }
+          },
+          projectKey: { type: ['string', 'null'], minLength: 1 },
+          subprojectKey: { type: ['string', 'null'], minLength: 1 },
+          projectConfidence: { enum: ['high', 'medium', 'low'] },
+          projectEvidence: { type: 'string', minLength: 1 },
+          projectPrompt: { type: 'string', minLength: 1 }
         }
       }
     }
@@ -70,22 +80,30 @@ export const meetingSummaryOutputSchema = {
 
 export class CodexMeetingSummarizer implements MeetingSummarizer {
   readonly #codex: CodexJsonExecutor;
+  readonly #projectContextProvider: ProjectContextProvider;
 
   constructor(options: CodexMeetingSummarizerOptions) {
     this.#codex = options.codex;
+    this.#projectContextProvider = options.projectContextProvider;
   }
 
   async summarize(context: MinuteContext): Promise<MeetingSummaryDraft> {
     return parseMeetingSummaryDraft(
       await this.#codex.executeJson({
-        prompt: renderMeetingSummaryPrompt(context),
+        prompt: renderMeetingSummaryPrompt(
+          context,
+          await this.#projectContextProvider.getProjectCards()
+        ),
         outputSchema: meetingSummaryOutputSchema
       })
     );
   }
 }
 
-function renderMeetingSummaryPrompt(context: MinuteContext): string {
+function renderMeetingSummaryPrompt(
+  context: MinuteContext,
+  projectCards: readonly ProjectContextCard[]
+): string {
   return [
     '你是 AiJia 的 Codex 会议助手。请基于飞书妙记逐字稿，生成给 Ivy 的个性化会后总结。',
     '',
@@ -99,6 +117,18 @@ function renderMeetingSummaryPrompt(context: MinuteContext): string {
     '- 不要把需要人际判断、线下行动或外部发送的事项伪装成 Codex 可独立完成。',
     '- 代码修改、对外发送、部署、删除、生产访问必须标为 high risk 和对应 capability。',
     '- 没有可推进 Todo 时返回空 todos，但 oneLineConclusion 仍必须诚实总结。',
+    '',
+    'Project Registry:',
+    ...(projectCards.length > 0
+      ? projectCards.map((card) => (
+        `- ${card.projectKey} | ${card.displayName} | aliases: ${card.aliases.join(', ')} | context: ${card.summary}`
+      ))
+      : ['- 当前没有可用项目卡片；不要猜测项目归属。']),
+    '',
+    'Todo project mapping rules:',
+    '- 先使用明确关键词和会议证据，不要靠愿望猜项目。',
+    '- 无法确定时 projectKey 必须为 null，projectConfidence 为 low，projectEvidence 写“会议没有足够证据”，projectPrompt 写需要 Ivy 先确认项目的下一步问题。',
+    '- projectPrompt 是给未来 Codex task 的项目化执行提示，但当前阶段不会自动执行。',
     '',
     `minute_id: ${context.minuteId}`,
     `title: ${context.title}`,

@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { CodexMeetingSummarizer } from '../src/adapters/codex-summarizer.js';
 import { CodexAuthProbe, CodexCliAdapter, NodeCodexProcessRunner } from '../src/adapters/codex-cli.js';
 import { createMeetingSummarizer } from '../src/composition/meeting-summarizer.js';
+import { ProjectRepository } from '../src/repositories/project-repository.js';
+import { ProjectRepositoryContextProvider } from '../src/services/project-context.js';
+import { createTestMeetingRepository } from './helpers/test-db.js';
 
 const baseConfig = {
   codex: {
@@ -13,6 +16,33 @@ const baseConfig = {
 } as const;
 
 describe('createMeetingSummarizer', () => {
+  it('builds project cards from active registry projects and their newest persisted snapshot', async () => {
+    const database = createTestMeetingRepository();
+    database.client.prepare(`
+      INSERT INTO project_context_snapshots (
+        id, project_key, source_kind, source_ref, content, digest, captured_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'snapshot:openmontage:newest',
+      'openmontage',
+      'manual',
+      'fixture',
+      '最新 OpenMontage 上下文。',
+      'fixture-digest',
+      '2026-07-31T12:00:00.000Z'
+    );
+    const provider = new ProjectRepositoryContextProvider(new ProjectRepository(database.client));
+
+    const cards = await provider.getProjectCards();
+
+    expect(cards.find((card) => card.projectKey === 'openmontage')).toMatchObject({
+      displayName: 'OpenMontage',
+      summary: '最新 OpenMontage 上下文。'
+    });
+    expect(cards.find((card) => card.projectKey === 'feishu-adaptor')?.summary)
+      .toContain('FeishuAdaptor');
+  });
+
   it('keeps production composition on fake summarizer by default', async () => {
     const summarizer = createMeetingSummarizer({
       config: baseConfig,
