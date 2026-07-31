@@ -2,6 +2,11 @@ import * as lark from '@larksuiteoapi/node-sdk';
 import type { Readable } from 'node:stream';
 import type { FeishuApiClient, FeishuApiRequestOptions } from './feishu.js';
 import { parseMinuteTranscriptStream } from './minute-transcript-parser.js';
+import type {
+  FeishuContextClient,
+  FeishuContextFile,
+  FeishuContextMessage
+} from '../services/feishu-context-sync.js';
 
 export interface FeishuSdkClientOptions {
   appId: string;
@@ -19,6 +24,19 @@ export interface FeishuSdkClientLike {
           content: string;
         };
       }): Promise<unknown>;
+    };
+    v1?: {
+      message: {
+        list(payload: {
+          params: {
+            container_id_type: 'chat';
+            container_id: string;
+            page_size: number;
+            page_token?: string;
+            start_time: string;
+          };
+        }): Promise<unknown>;
+      };
     };
   };
   minutes: {
@@ -38,6 +56,57 @@ export interface FeishuSdkClientLike {
       };
     };
   };
+}
+
+/**
+ * Minimal official-SDK adapter for the explicit project-context sync boundary.
+ * File bodies deliberately remain unavailable until an approved reader/parser is supplied;
+ * the sync service records that access gap instead of calling it a complete file sync.
+ */
+export class FeishuSdkContextClient implements FeishuContextClient {
+  readonly #sdkClient: FeishuSdkClientLike;
+  readonly #filesByMessageId = new Map<string, FeishuContextFile[]>();
+
+  constructor(sdkClient: FeishuSdkClientLike) {
+    this.#sdkClient = sdkClient;
+  }
+
+  async listMessages(input: { chatId: string; cursor: string | null; since: Date }): Promise<{
+    messages: FeishuContextMessage[];
+    nextCursor: string | null;
+  }> {
+    if (!this.#sdkClient.im.v1) {
+      throw new Error('Feishu SDK context message API is unavailable');
+    }
+    const response = await this.#sdkClient.im.v1.message.list({
+      params: {
+        container_id_type: 'chat',
+        container_id: input.chatId,
+        page_size: 50,
+        ...(input.cursor ? { page_token: input.cursor } : {}),
+        start_time: String(Math.floor(input.since.getTime() / 1_000))
+      }
+    });
+    const data = responseData(response);
+    const record = isRecord(data) ? data : {};
+    const items = Array.isArray(record.items) ? record.items : [];
+    const messages = items.map(toContextMessage).filter((message): message is FeishuContextMessage => message !== null);
+    for (const item of items) {
+      const parsed = toContextMessage(item);
+      if (parsed) {
+        this.#filesByMessageId.set(parsed.messageId, extractReferencedFiles(item));
+      }
+    }
+    return {
+      messages,
+      nextCursor: typeof record.page_token === 'string' && record.page_token.trim() ? record.page_token : null
+    };
+  }
+
+  async listReferencedFiles(input: { chatId: string; messageIds: readonly string[] }): Promise<FeishuContextFile[]> {
+    void input.chatId;
+    return input.messageIds.flatMap((messageId) => this.#filesByMessageId.get(messageId) ?? []);
+  }
 }
 
 export interface FeishuSdkApiClientOptions {
@@ -191,6 +260,62 @@ function extractMessageId(response: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function toContextMessage(value: unknown): FeishuContextMessage | null {
+  if (!isRecord(value) || typeof value.message_id !== 'string' || typeof value.msg_type !== 'string') {
+    return null;
+  }
+  const messageType = normalizeContextMessageType(value.msg_type);
+  const body = isRecord(value.body) ? value.body : {};
+  const content = typeof body.content === 'string' ? parseMessageText(body.content) : null;
+  const createdAt = typeof value.create_time === 'string'
+    ? new Date(Number(value.create_time) * 1_000).toISOString()
+    : new Date(0).toISOString();
+  return {
+    messageId: value.message_id,
+    messageType,
+    text: content,
+    createdAt
+  };
+}
+
+function normalizeContextMessageType(value: string): FeishuContextMessage['messageType'] {
+  return ['text', 'post', 'file', 'image', 'video', 'audio', 'voice'].includes(value)
+    ? value as FeishuContextMessage['messageType']
+    : 'unknown';
+}
+
+function parseMessageText(content: string): string | null {
+  try {
+    const parsed = JSON.parse(content);
+    if (isRecord(parsed) && typeof parsed.text === 'string') {
+      return parsed.text;
+    }
+  } catch {
+    // Post/file message content is not guaranteed to be JSON text.
+  }
+  return null;
+}
+
+function extractReferencedFiles(value: unknown): FeishuContextFile[] {
+  if (!isRecord(value) || !isRecord(value.body) || typeof value.body.content !== 'string') {
+    return [];
+  }
+  try {
+    const content = JSON.parse(value.body.content);
+    if (!isRecord(content) || typeof content.file_key !== 'string') {
+      return [];
+    }
+    return [{
+      fileToken: content.file_key,
+      title: typeof content.file_name === 'string' ? content.file_name : content.file_key,
+      mimeType: typeof content.mime_type === 'string' ? content.mime_type : 'application/octet-stream',
+      text: null
+    }];
+  } catch {
+    return [];
+  }
 }
 
 function isReadableStreamResponse(value: unknown): value is {

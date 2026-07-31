@@ -16,6 +16,14 @@ export interface RecordIvyCorrectionInput {
   createdAt: Date;
 }
 
+export interface SaveProjectContextSnapshotInput {
+  projectKey?: string | null;
+  sourceKind: string;
+  sourceRef: string;
+  content: string;
+  capturedAt: Date;
+}
+
 export class ProjectRepository {
   constructor(readonly client: Database.Database) {}
 
@@ -86,6 +94,29 @@ export class ProjectRepository {
       source: 'ivy_correction',
       active: true
     });
+  }
+
+  saveContextSnapshot(input: SaveProjectContextSnapshotInput): void {
+    const digest = createHash('sha256').update(input.content).digest('hex');
+    const id = `snapshot:${createHash('sha256')
+      .update(`${input.projectKey ?? ''}:${input.sourceKind}:${input.sourceRef}:${digest}:${input.capturedAt.toISOString()}`)
+      .digest('hex')
+      .slice(0, 24)}`;
+
+    this.client.prepare(`
+      INSERT INTO project_context_snapshots (
+        id, project_key, source_kind, source_ref, content, digest, captured_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO NOTHING
+    `).run(
+      id,
+      input.projectKey ?? null,
+      input.sourceKind,
+      input.sourceRef,
+      input.content,
+      digest,
+      input.capturedAt.toISOString()
+    );
   }
 }
 

@@ -34,7 +34,10 @@ const envSchema = z.object({
   CODEX_SUMMARIZER_MODE: z.enum(['fake', 'codex']).default('fake'),
   WORKER_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
   WORKER_LEASE_SECONDS: z.coerce.number().int().positive().default(180),
-  WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1_000)
+  WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
+  PROJECT_CONTEXT_SYNC_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  PROJECT_CONTEXT_CHAT_IDS: commaSeparatedIds('oc_', 'chat_id must start with oc_').default([]),
+  PROJECT_CONTEXT_SYNC_SINCE_DAYS: z.coerce.number().int().positive().default(30)
 }).superRefine((config, context) => {
   if (
     config.NODE_ENV !== 'test' &&
@@ -110,6 +113,11 @@ export interface AppConfig {
     leaseSeconds: number;
     pollIntervalMs: number;
   };
+  projectContext: {
+    syncEnabled: boolean;
+    approvedChatIds: string[];
+    syncSinceDays: number;
+  };
 }
 
 export interface PublicConfig {
@@ -168,6 +176,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       enabled: parsed.WORKER_ENABLED,
       leaseSeconds: parsed.WORKER_LEASE_SECONDS,
       pollIntervalMs: parsed.WORKER_POLL_INTERVAL_MS
+    },
+    projectContext: {
+      syncEnabled: parsed.PROJECT_CONTEXT_SYNC_ENABLED,
+      approvedChatIds: parsed.PROJECT_CONTEXT_CHAT_IDS,
+      syncSinceDays: parsed.PROJECT_CONTEXT_SYNC_SINCE_DAYS
     }
   };
 }

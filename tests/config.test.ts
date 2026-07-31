@@ -82,6 +82,22 @@ describe('loadConfig', () => {
     });
   });
 
+  it('keeps project context sync disabled unless explicitly configured for the approved group', () => {
+    expect(loadConfig(baseEnv).projectContext).toMatchObject({
+      syncEnabled: false,
+      approvedChatIds: [],
+      syncSinceDays: 30
+    });
+    expect(loadConfig({
+      ...baseEnv,
+      PROJECT_CONTEXT_SYNC_ENABLED: 'true',
+      PROJECT_CONTEXT_CHAT_IDS: 'oc_a84d5b6ca478220d0a37964b50776edb'
+    }).projectContext).toMatchObject({
+      syncEnabled: true,
+      approvedChatIds: ['oc_a84d5b6ca478220d0a37964b50776edb']
+    });
+  });
+
   it('keeps Feishu OAuth disabled unless explicitly configured with a redirect URI and token key file', () => {
     expect(loadConfig(baseEnv).feishu.oauth).toMatchObject({
       enabled: false,

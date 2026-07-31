@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Readable } from 'node:stream';
 import {
   createFeishuSdkClient,
+  FeishuSdkContextClient,
   FeishuSdkApiClient,
   type FeishuSdkClientLike
 } from '../src/adapters/feishu-sdk.js';
@@ -193,6 +194,39 @@ describe('FeishuSdkApiClient', () => {
       text: '会议总结'
     })).rejects.toThrow(/message id/i);
   });
+
+  it('lists group context through the official SDK without reading file bodies', async () => {
+    const calls: unknown[] = [];
+    const context = new FeishuSdkContextClient(createFakeSdkClient({
+      contextMessages: [{
+        message_id: 'om_context_1',
+        msg_type: 'text',
+        create_time: '1780000000',
+        body: { content: JSON.stringify({ text: '项目群上下文' }) }
+      }],
+      calls
+    }));
+
+    await expect(context.listMessages({
+      chatId: 'oc_a84d5b6ca478220d0a37964b50776edb',
+      cursor: null,
+      since: new Date('2026-07-01T00:00:00.000Z')
+    })).resolves.toMatchObject({
+      messages: [{ messageId: 'om_context_1', messageType: 'text', text: '项目群上下文' }],
+      nextCursor: null
+    });
+    expect(calls).toContainEqual({
+      method: 'im.v1.message.list',
+      payload: {
+        params: {
+          container_id_type: 'chat',
+          container_id: 'oc_a84d5b6ca478220d0a37964b50776edb',
+          page_size: 50,
+          start_time: '1782864000'
+        }
+      }
+    });
+  });
 });
 
 function createFakeSdkClient(options: {
@@ -200,6 +234,7 @@ function createFakeSdkClient(options: {
   minute?: unknown;
   transcript?: unknown;
   transcriptStream?: Readable;
+  contextMessages?: unknown[];
   calls?: unknown[];
 }): FeishuSdkClientLike {
   return {
@@ -208,6 +243,15 @@ function createFakeSdkClient(options: {
         async create(payload) {
           options.calls?.push({ method: 'im.message.create', payload });
           return { data: { message_id: options.messageId } };
+        }
+      }
+      ,
+      v1: {
+        message: {
+          async list(payload) {
+            options.calls?.push({ method: 'im.v1.message.list', payload });
+            return { data: { items: options.contextMessages ?? [] } };
+          }
         }
       }
     },
