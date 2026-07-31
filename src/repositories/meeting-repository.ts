@@ -1,6 +1,10 @@
 import type Database from 'better-sqlite3';
 import { MeetingSummaryDraft, type MeetingTodoDraft } from '../domain/meeting.js';
 import type { ProjectConfidence, ProjectMappingStatus } from '../domain/project.js';
+import {
+  ProjectRepository,
+  type RecordIvyCorrectionInput
+} from './project-repository.js';
 
 export interface MeetingSummaryRecord {
   id: string;
@@ -210,6 +214,28 @@ export class MeetingRepository {
       FROM meeting_todos WHERE id = ?
     `).get(input.todoId) as TodoRow | undefined;
     return row ? toMeetingTodoRecord(row) : null;
+  }
+
+  applyTodoProjectCorrection(input: {
+    mapping: {
+      todoId: string;
+      projectKey: string | null;
+      subprojectKey: string | null;
+      projectConfidence: 'high' | 'medium' | 'low';
+      projectEvidence: string;
+      projectMappingStatus: 'mapped' | 'needs_confirmation' | 'unmapped' | 'dismissed';
+      projectPrompt: string;
+    };
+    rule: RecordIvyCorrectionInput;
+  }): MeetingTodoRecord | null {
+    return this.client.transaction(() => {
+      const updated = this.updateTodoProjectMapping(input.mapping);
+      if (updated === null) {
+        return null;
+      }
+      new ProjectRepository(this.client).createCorrectionRule(input.rule);
+      return updated;
+    })();
   }
 
   dismissTodo(todoId: string): boolean {

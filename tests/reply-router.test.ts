@@ -27,6 +27,21 @@ describe('routeReply', () => {
     });
   });
 
+  it('rejects Amy subprojects paired with a non-RealAgent project', () => {
+    const harness = createHarness();
+
+    expect(harness.route({
+      chatId: ivyPrivateChatId,
+      openId: ivyOpenId,
+      replyTo: 'om_summary_a',
+      text: '3 是 OpenMontage / Amy Voice'
+    })).toMatchObject({ kind: 'clarify', reason: 'todo_not_found' });
+    expect(harness.dependencies.meetingRepository.listTodos('summary_a')[2]).toMatchObject({
+      projectKey: null,
+      subprojectKey: null
+    });
+  });
+
   it('records a long-lived keyword rule when Ivy says以后', () => {
     const harness = createHarness();
 
@@ -68,6 +83,30 @@ describe('routeReply', () => {
     })).toMatchObject({
       kind: 'dismiss_todo',
       todoId: 'todo_a_3'
+    });
+  });
+
+  it('corrects the only Todo matching “不是 <wrong>，是 <project>”', () => {
+    const harness = createHarness();
+    harness.dependencies.meetingRepository.updateTodoProjectMapping({
+      todoId: 'todo_a_3',
+      projectKey: 'aijia-landingpage',
+      subprojectKey: null,
+      projectConfidence: 'medium',
+      projectEvidence: '初始映射',
+      projectMappingStatus: 'mapped',
+      projectPrompt: '初始 prompt'
+    });
+
+    expect(harness.route({
+      chatId: ivyPrivateChatId,
+      openId: ivyOpenId,
+      replyTo: 'om_summary_a',
+      text: '不是 Hero，是 OpenMontage'
+    })).toMatchObject({
+      kind: 'record_project_correction',
+      todoId: 'todo_a_3',
+      projectKey: 'openmontage'
     });
   });
 

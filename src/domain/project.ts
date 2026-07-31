@@ -44,7 +44,13 @@ export const ProjectMappingDraft = z.object({
   confidence: projectConfidenceSchema,
   evidence: z.string(),
   status: projectMappingStatusSchema,
-  projectPrompt: z.string()
+  projectPrompt: z.string(),
+  conflict: z.object({
+    existingProjectKey: ProjectKey,
+    candidateProjectKey: ProjectKey,
+    candidateConfidence: projectConfidenceSchema,
+    candidateEvidence: z.string().min(1)
+  }).nullable().default(null)
 });
 export type ProjectMappingDraft = z.infer<typeof ProjectMappingDraft>;
 

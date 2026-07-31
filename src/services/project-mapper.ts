@@ -34,13 +34,26 @@ export function mapTodoToProject(
       .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id));
     const matchingRule = rules.find((rule) => matches(rule, matchingText));
     if (matchingRule && activeProjects.some((project) => project.projectKey === matchingRule.projectKey)) {
+      const hasConflictingHighConfidenceProposal = input.proposedConfidence === 'high'
+        && input.proposedEvidence.trim().length > 0
+        && input.proposedProjectKey !== null
+        && input.proposedProjectKey !== matchingRule.projectKey
+        && activeProjects.some((project) => project.projectKey === input.proposedProjectKey);
       return ProjectMappingDraft.parse({
         projectKey: matchingRule.projectKey,
         subprojectKey: matchingRule.subprojectKey,
         confidence: matchingRule.confidenceHint,
         evidence: `${matchingRule.source}:${matchingRule.id} matched ${matchingRule.pattern}`,
         status: 'mapped',
-        projectPrompt: input.proposedProjectPrompt
+        projectPrompt: input.proposedProjectPrompt,
+        conflict: hasConflictingHighConfidenceProposal
+          ? {
+              existingProjectKey: matchingRule.projectKey,
+              candidateProjectKey: input.proposedProjectKey,
+              candidateConfidence: input.proposedConfidence,
+              candidateEvidence: input.proposedEvidence
+            }
+          : null
       });
     }
   }
@@ -52,7 +65,8 @@ export function mapTodoToProject(
       confidence: input.proposedConfidence,
       evidence: input.proposedEvidence,
       status: 'mapped',
-      projectPrompt: input.proposedProjectPrompt
+      projectPrompt: input.proposedProjectPrompt,
+      conflict: null
     });
   }
 
@@ -62,7 +76,8 @@ export function mapTodoToProject(
     confidence: 'low',
     evidence: '',
     status: 'needs_confirmation',
-    projectPrompt: input.proposedProjectPrompt
+    projectPrompt: input.proposedProjectPrompt,
+    conflict: null
   });
 }
 

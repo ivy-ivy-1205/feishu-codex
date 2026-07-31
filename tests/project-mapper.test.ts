@@ -92,4 +92,38 @@ describe('mapTodoToProject', () => {
       status: 'needs_confirmation'
     });
   });
+
+  it('keeps Ivy correction selected while surfacing conflicting high-confidence context', () => {
+    expect(mapTodoToProject({
+      title: '处理 B-roll 发布页',
+      description: '新会议上下文明确说明这是官网首页交付。',
+      proposedProjectKey: 'aijia-landingpage',
+      proposedSubprojectKey: null,
+      proposedConfidence: 'high',
+      proposedEvidence: '会议明确指向官网首页仓库与 Hero 交付。',
+      proposedProjectPrompt: '请推进发布页。'
+    }, {
+      ...registry,
+      rules: [{
+        id: 'ivy:b-roll',
+        pattern: 'B-roll',
+        patternKind: 'keyword',
+        projectKey: 'openmontage',
+        subprojectKey: null,
+        confidenceHint: 'high',
+        priority: 1000,
+        source: 'ivy_correction',
+        active: true
+      }]
+    })).toMatchObject({
+      projectKey: 'openmontage',
+      status: 'mapped',
+      conflict: {
+        existingProjectKey: 'openmontage',
+        candidateProjectKey: 'aijia-landingpage',
+        candidateConfidence: 'high',
+        candidateEvidence: '会议明确指向官网首页仓库与 Hero 交付。'
+      }
+    });
+  });
 });

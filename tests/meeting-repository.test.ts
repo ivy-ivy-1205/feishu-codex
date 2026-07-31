@@ -172,6 +172,52 @@ describe('MeetingRepository', () => {
 
     expect(repo.listTodos('summary_1')).toEqual([]);
   });
+
+  it('rolls back the Todo mapping when its persistent correction rule cannot be written', () => {
+    const repo = createTestMeetingRepository();
+    repo.ingestMinute({ minuteId: 'min_atomic', eventId: 'evt_atomic' });
+    repo.saveSummary({
+      id: 'summary_atomic',
+      minuteId: 'min_atomic',
+      summaryMessageId: 'om_atomic',
+      content: '原子纠错测试',
+      todos: [{
+        id: 'todo_atomic',
+        displayedNumber: 1,
+        title: '原始 Todo',
+        description: '不能留下半个纠错',
+        risk: 'low',
+        capability: 'content_draft',
+        status: 'proposed'
+      }]
+    });
+
+    expect(() => repo.applyTodoProjectCorrection({
+      mapping: {
+        todoId: 'todo_atomic',
+        projectKey: 'openmontage',
+        subprojectKey: null,
+        projectConfidence: 'high',
+        projectEvidence: 'Ivy correction',
+        projectMappingStatus: 'mapped',
+        projectPrompt: '项目化 prompt'
+      },
+      rule: {
+        pattern: '原始 Todo',
+        patternKind: 'exact',
+        projectKey: 'not-an-active-project',
+        subprojectKey: null,
+        confidenceHint: 'high',
+        createdAt: new Date('2026-07-31T10:00:00.000Z')
+      }
+    })).toThrow();
+
+    expect(repo.listTodos('summary_atomic')[0]).toMatchObject({
+      projectKey: null,
+      projectMappingStatus: 'unmapped',
+      projectEvidence: ''
+    });
+  });
 });
 
 function deliverSummary(

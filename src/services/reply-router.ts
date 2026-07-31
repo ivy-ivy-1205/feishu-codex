@@ -84,26 +84,28 @@ export function routeReply(
         : { kind: 'clarify', reason: 'todo_not_found' };
     }
 
-    const updated = dependencies.meetingRepository.updateTodoProjectMapping({
-      todoId: correction.todo.id,
-      projectKey: correction.project.projectKey,
-      subprojectKey: correction.subprojectKey,
-      projectConfidence: 'high',
-      projectEvidence: `Ivy correction: ${reply.text}`,
-      projectMappingStatus: 'mapped',
-      projectPrompt: projectPrompt(correction.project, correction.subprojectDisplayName)
+    const updated = dependencies.meetingRepository.applyTodoProjectCorrection({
+      mapping: {
+        todoId: correction.todo.id,
+        projectKey: correction.project.projectKey,
+        subprojectKey: correction.subprojectKey,
+        projectConfidence: 'high',
+        projectEvidence: `Ivy correction: ${reply.text}`,
+        projectMappingStatus: 'mapped',
+        projectPrompt: projectPrompt(correction.project, correction.subprojectDisplayName)
+      },
+      rule: {
+        pattern: correction.todo.title,
+        patternKind: 'exact',
+        projectKey: correction.project.projectKey,
+        subprojectKey: correction.subprojectKey,
+        confidenceHint: 'high',
+        createdAt: new Date()
+      }
     });
     if (updated === null) {
       return { kind: 'clarify', reason: 'todo_not_found' };
     }
-    projectRepository.createCorrectionRule({
-      pattern: correction.todo.title,
-      patternKind: 'exact',
-      projectKey: correction.project.projectKey,
-      subprojectKey: correction.subprojectKey,
-      confidenceHint: 'high',
-      createdAt: new Date()
-    });
     return {
       kind: 'record_project_correction',
       todoId: correction.todo.id,
@@ -218,7 +220,7 @@ function resolveProjectAlias(value: string, projects: ProjectDefinition[]): Reso
   const entry = Object.entries(subprojectAliases).find(
     ([alias]) => normalizeAlias(alias) === normalizeAlias(subprojectPart)
   );
-  return entry
+  return entry && project.projectKey === 'realagent-ai-cc'
     ? { project, subprojectKey: entry[1], subprojectDisplayName: entry[0] }
     : null;
 }
