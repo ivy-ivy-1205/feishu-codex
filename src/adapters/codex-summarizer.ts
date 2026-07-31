@@ -121,7 +121,7 @@ function renderMeetingSummaryPrompt(
     'Project Registry:',
     ...(projectCards.length > 0
       ? projectCards.map((card) => (
-        `- ${card.projectKey} | ${card.displayName} | aliases: ${card.aliases.join(', ')} | context: ${card.summary}`
+        `- ${card.projectKey} | ${card.displayName} | aliases: ${card.aliases.join(', ')} | context: <project-context>${card.summary}</project-context>`
       ))
       : ['- 当前没有可用项目卡片；不要猜测项目归属。']),
     '',

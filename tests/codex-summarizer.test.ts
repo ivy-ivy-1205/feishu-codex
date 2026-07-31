@@ -120,6 +120,7 @@ describe('CodexMeetingSummarizer', () => {
     expect(calls[0]?.prompt).toContain('Project Registry');
     expect(calls[0]?.prompt).toContain('FeishuAdaptor');
     expect(calls[0]?.prompt).toContain('OpenMontage');
+    expect(calls[0]?.prompt).toContain('<project-context>飞书 × Codex Bridge MVP。</project-context>');
     expect(calls[0]?.prompt).toContain('无法确定时 projectKey 必须为 null');
   });
 

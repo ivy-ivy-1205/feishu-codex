@@ -2,7 +2,12 @@ import { CodexAuthProbe, CodexCliAdapter, NodeCodexProcessRunner } from '../adap
 import { CodexMeetingSummarizer } from '../adapters/codex-summarizer.js';
 import type { MeetingSummarizer, MeetingSummaryDraft } from '../ports/summarizer.js';
 import type { MinuteContext } from '../ports/feishu.js';
-import { EmptyProjectContextProvider, type ProjectContextProvider } from '../services/project-context.js';
+import { ProjectRepository } from '../repositories/project-repository.js';
+import {
+  EmptyProjectContextProvider,
+  ProjectRepositoryContextProvider,
+  type ProjectContextProvider
+} from '../services/project-context.js';
 
 export interface MeetingSummarizerCompositionConfig {
   codex: {
@@ -16,6 +21,7 @@ export interface MeetingSummarizerCompositionConfig {
 export interface CreateMeetingSummarizerOptions {
   config: MeetingSummarizerCompositionConfig;
   env?: Record<string, string | undefined>;
+  projectRepository?: ProjectRepository;
   projectContextProvider?: ProjectContextProvider;
   exposeInternalsForTest?: false;
 }
@@ -23,6 +29,7 @@ export interface CreateMeetingSummarizerOptions {
 export interface CreateMeetingSummarizerTestOptions {
   config: MeetingSummarizerCompositionConfig;
   env?: Record<string, string | undefined>;
+  projectRepository?: ProjectRepository;
   projectContextProvider?: ProjectContextProvider;
   exposeInternalsForTest: true;
 }
@@ -32,6 +39,7 @@ export interface MeetingSummarizerStackForTest {
   codex: CodexCliAdapter;
   authProbe: CodexAuthProbe;
   runner: NodeCodexProcessRunner;
+  projectContextProvider: ProjectContextProvider;
   codexOptions: {
     command: string;
     workdir: string;
@@ -68,10 +76,11 @@ export function createMeetingSummarizer(
     ...codexOptions,
     runner
   });
-  const summarizer = new CodexMeetingSummarizer({
-    codex,
-    projectContextProvider: options.projectContextProvider ?? new EmptyProjectContextProvider()
-  });
+  const projectContextProvider = options.projectContextProvider
+    ?? (options.projectRepository
+      ? new ProjectRepositoryContextProvider(options.projectRepository)
+      : new EmptyProjectContextProvider());
+  const summarizer = new CodexMeetingSummarizer({ codex, projectContextProvider });
 
   if (options.exposeInternalsForTest) {
     return {
@@ -79,6 +88,7 @@ export function createMeetingSummarizer(
       codex,
       authProbe,
       runner,
+      projectContextProvider,
       codexOptions
     };
   }

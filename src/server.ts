@@ -13,6 +13,7 @@ import { JobRepository } from './repositories/job-repository.js';
 import { MeetingRepository } from './repositories/meeting-repository.js';
 import { OAuthTokenRepository } from './repositories/oauth-token-repository.js';
 import { OutboxRepository } from './repositories/outbox-repository.js';
+import { ProjectRepository } from './repositories/project-repository.js';
 import { createServiceReadiness } from './routes/health.js';
 import { FeishuOAuthService, InMemoryOAuthStateStore } from './services/feishu-oauth.js';
 import { ingestMinuteGenerated } from './services/minute-ingestion.js';
@@ -31,7 +32,11 @@ const jobRepository = new JobRepository(database.client, {
   leaseDurationMs: config.worker.leaseSeconds * 1_000
 });
 const outboxRepository = new OutboxRepository(database.client);
-const meetingSummarizer = createMeetingSummarizer({ config });
+const projectRepository = new ProjectRepository(database.client);
+const meetingSummarizer = createMeetingSummarizer({
+  config,
+  projectRepository
+});
 let oauth: FeishuOAuthService | undefined;
 const feishuIntegration = createFeishuIntegration({
   config,

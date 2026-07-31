@@ -43,6 +43,30 @@ describe('createMeetingSummarizer', () => {
       .toContain('FeishuAdaptor');
   });
 
+  it('caps persisted snapshot text before it can become prompt context', async () => {
+    const database = createTestMeetingRepository();
+    database.client.prepare(`
+      INSERT INTO project_context_snapshots (
+        id, project_key, source_kind, source_ref, content, digest, captured_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'snapshot:feishu-adaptor:large',
+      'feishu-adaptor',
+      'manual',
+      'fixture',
+      '界'.repeat(2_000),
+      'fixture-digest-large',
+      '2026-07-31T12:00:00.000Z'
+    );
+    const provider = new ProjectRepositoryContextProvider(new ProjectRepository(database.client));
+
+    const card = (await provider.getProjectCards())
+      .find((candidate) => candidate.projectKey === 'feishu-adaptor');
+
+    expect(Buffer.byteLength(card?.summary ?? '', 'utf8')).toBeLessThanOrEqual(4 * 1024 + 3);
+    expect(card?.summary).toMatch(/…$/);
+  });
+
   it('keeps production composition on fake summarizer by default', async () => {
     const summarizer = createMeetingSummarizer({
       config: baseConfig,
@@ -82,7 +106,8 @@ describe('createMeetingSummarizer', () => {
     expect(summarizer).toBeInstanceOf(CodexMeetingSummarizer);
   });
 
-  it('builds the Codex CLI execution stack with configured command, workdir, timeout, and env', () => {
+  it('builds the Codex CLI execution stack with configured command, workdir, timeout, and env', async () => {
+    const database = createTestMeetingRepository();
     const stack = createMeetingSummarizer({
       config: {
         ...baseConfig,
@@ -94,6 +119,7 @@ describe('createMeetingSummarizer', () => {
         }
       },
       env: { PATH: '/usr/bin' },
+      projectRepository: new ProjectRepository(database.client),
       exposeInternalsForTest: true
     });
 
@@ -107,5 +133,11 @@ describe('createMeetingSummarizer', () => {
       timeoutMs: 90_000,
       baseEnv: { PATH: '/usr/bin' }
     });
+    expect(stack.projectContextProvider).toBeInstanceOf(ProjectRepositoryContextProvider);
+    await expect(stack.projectContextProvider.getProjectCards()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ projectKey: 'feishu-adaptor', displayName: 'FeishuAdaptor' })
+      ])
+    );
   });
 });
