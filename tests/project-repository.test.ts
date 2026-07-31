@@ -33,4 +33,22 @@ describe('ProjectRepository', () => {
       active: true
     });
   });
+
+  it('creates a persistent correction rule for an active project', () => {
+    const database = createTestMeetingRepository();
+    const repo = new ProjectRepository(database.client);
+
+    expect(repo.createCorrectionRule({
+      pattern: 'B-roll',
+      patternKind: 'keyword',
+      projectKey: 'openmontage',
+      subprojectKey: null,
+      confidenceHint: 'high',
+      createdAt: new Date('2026-07-31T10:00:00.000Z')
+    })).toMatchObject({
+      pattern: 'B-roll',
+      projectKey: 'openmontage',
+      source: 'ivy_correction'
+    });
+  });
 });

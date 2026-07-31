@@ -395,6 +395,43 @@ describe('POST /webhooks/feishu/events', () => {
     await harness.close();
   });
 
+  it('persists and acknowledges an Ivy project correction before execution routing', async () => {
+    const sentMessages: Array<{ chatId: string; text: string }> = [];
+    const harness = createHarness({
+      sendTextMessage: async (message) => {
+        sentMessages.push(message);
+        return { messageId: 'om_correction_ack' };
+      }
+    });
+    seedDeliveredTodo(harness.meetingRepository);
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/webhooks/feishu/events',
+      payload: replyEvent({
+        openId: 'ou_ivy_fixture',
+        chatId: privateChatId,
+        replyTo: 'om_http_summary',
+        text: '1 是 OpenMontage'
+      })
+    });
+
+    expect(response.json()).toMatchObject({
+      status: 'reply_decision',
+      decision: {
+        kind: 'record_project_correction',
+        todoId: 'todo_http_1',
+        projectKey: 'openmontage'
+      },
+      acknowledgement: { status: 'delivered', messageId: 'om_correction_ack' }
+    });
+    expect(sentMessages).toEqual([{
+      chatId: privateChatId,
+      text: '已记录：第 1 项以后按 OpenMontage 处理。若后续上下文冲突，我会先提示你判断。'
+    }]);
+    await harness.close();
+  });
+
   it('returns a fixed safe error when reply routing throws', async () => {
     const secretPath = '/credentials/tenant/secret.json';
     const chunks: string[] = [];

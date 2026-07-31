@@ -14,6 +14,9 @@ export const safeTodoCapabilities = ['content_draft'] as const satisfies readonl
 export type ReplyDecision =
   | TodoReplyDecision<'authorize_low_risk'>
   | TodoReplyDecision<'require_high_risk_confirmation'>
+  | ProjectCorrectionDecision
+  | ProjectRuleDecision
+  | { kind: 'dismiss_todo'; todoId: string; displayedNumber: number }
   | { kind: 'identify_ivy' }
   | { kind: 'clarify'; reason: ClarificationReason }
   | { kind: 'reject'; reason: RejectionReason };
@@ -35,6 +38,27 @@ interface TodoReplyDecision<Kind extends string> {
   kind: Kind;
   todoId: string;
   todo: ReplyTodo;
+}
+
+export interface ProjectCorrectionDecision {
+  kind: 'record_project_correction';
+  todoId: string;
+  displayedNumber: number;
+  projectKey: string;
+  subprojectKey: string | null;
+  projectDisplayName: string;
+  subprojectDisplayName: string | null;
+  persistentRuleCreated: boolean;
+}
+
+export interface ProjectRuleDecision {
+  kind: 'record_project_rule';
+  pattern: string;
+  projectKey: string;
+  subprojectKey: string | null;
+  projectDisplayName: string;
+  subprojectDisplayName: string | null;
+  persistentRuleCreated: true;
 }
 
 export interface ReplyTodo extends MeetingTodoDraft {

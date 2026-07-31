@@ -178,6 +178,49 @@ export class MeetingRepository {
 
     return rows.map(toMeetingTodoRecord);
   }
+
+  updateTodoProjectMapping(input: {
+    todoId: string;
+    projectKey: string | null;
+    subprojectKey: string | null;
+    projectConfidence: 'high' | 'medium' | 'low';
+    projectEvidence: string;
+    projectMappingStatus: 'mapped' | 'needs_confirmation' | 'unmapped' | 'dismissed';
+    projectPrompt: string;
+  }): MeetingTodoRecord | null {
+    this.client.prepare(`
+      UPDATE meeting_todos
+      SET project_key = ?, subproject_key = ?, project_confidence = ?, project_evidence = ?,
+        project_mapping_status = ?, project_prompt = ?
+      WHERE id = ?
+    `).run(
+      input.projectKey,
+      input.subprojectKey,
+      input.projectConfidence,
+      input.projectEvidence,
+      input.projectMappingStatus,
+      input.projectPrompt,
+      input.todoId
+    );
+
+    const row = this.client.prepare(`
+      SELECT id, summary_id, displayed_number, title, description, risk, capability, status,
+        project_key, subproject_key, project_confidence, project_evidence, project_mapping_status,
+        project_prompt, created_at
+      FROM meeting_todos WHERE id = ?
+    `).get(input.todoId) as TodoRow | undefined;
+    return row ? toMeetingTodoRecord(row) : null;
+  }
+
+  dismissTodo(todoId: string): boolean {
+    const result = this.client.prepare(`
+      UPDATE meeting_todos
+      SET project_mapping_status = 'dismissed',
+        project_prompt = 'Ivy 已明确表示此项不需要 Codex 推进。'
+      WHERE id = ?
+    `).run(todoId);
+    return result.changes === 1;
+  }
 }
 
 interface TodoRow {

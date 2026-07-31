@@ -11,6 +11,66 @@ const ivyPrivateChatId = 'oc_d851c3e986007dc0f97ab582bcb2e7c8';
 const ivyOpenId = 'ou_ivy';
 
 describe('routeReply', () => {
+  it('records a project correction for a numbered Todo reply', () => {
+    const harness = createHarness();
+
+    expect(harness.route({
+      chatId: ivyPrivateChatId,
+      openId: ivyOpenId,
+      replyTo: 'om_summary_a',
+      text: '3 是 RealAgentAI_cc / Amy Voice'
+    })).toMatchObject({
+      kind: 'record_project_correction',
+      todoId: 'todo_a_3',
+      projectKey: 'realagent-ai-cc',
+      subprojectKey: 'amy-voice'
+    });
+  });
+
+  it('records a long-lived keyword rule when Ivy says以后', () => {
+    const harness = createHarness();
+
+    expect(harness.route({
+      chatId: ivyPrivateChatId,
+      openId: ivyOpenId,
+      replyTo: 'om_summary_a',
+      text: '以后 B-roll 都归 OpenMontage'
+    })).toMatchObject({
+      kind: 'record_project_rule',
+      pattern: 'B-roll',
+      projectKey: 'openmontage'
+    });
+  });
+
+  it('accepts an unambiguous long-lived rule without a summary reply', () => {
+    const harness = createHarness();
+
+    expect(harness.route({
+      chatId: ivyPrivateChatId,
+      openId: ivyOpenId,
+      replyTo: null,
+      text: '以后 B-roll 都归 OpenMontage'
+    })).toMatchObject({
+      kind: 'record_project_rule',
+      pattern: 'B-roll',
+      projectKey: 'openmontage'
+    });
+  });
+
+  it('dismisses a Todo when Ivy says it does not need Codex', () => {
+    const harness = createHarness();
+
+    expect(harness.route({
+      chatId: ivyPrivateChatId,
+      openId: ivyOpenId,
+      replyTo: 'om_summary_a',
+      text: '这条不需要 Codex 推进：3'
+    })).toMatchObject({
+      kind: 'dismiss_todo',
+      todoId: 'todo_a_3'
+    });
+  });
+
   it('authorizes Todo 1 only for verified Ivy replying to its summary', () => {
     const harness = createHarness();
 

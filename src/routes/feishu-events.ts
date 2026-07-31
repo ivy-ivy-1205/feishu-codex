@@ -239,6 +239,15 @@ function directAcknowledgementTextFor(
   if (decision.kind === 'clarify' && decision.reason === 'missing_reply_context') {
     return directMessageAcknowledgementText;
   }
+  if (decision.kind === 'record_project_correction') {
+    return `已记录：第 ${decision.displayedNumber} 项以后按 ${decision.projectDisplayName}${decision.subprojectDisplayName ? ` / ${decision.subprojectDisplayName}` : ''} 处理。若后续上下文冲突，我会先提示你判断。`;
+  }
+  if (decision.kind === 'record_project_rule') {
+    return `已记录：以后“${decision.pattern}”按 ${decision.projectDisplayName}${decision.subprojectDisplayName ? ` / ${decision.subprojectDisplayName}` : ''} 处理。若后续上下文冲突，我会先提示你判断。`;
+  }
+  if (decision.kind === 'dismiss_todo') {
+    return `已记录：第 ${decision.displayedNumber} 项不再作为 Codex 可推进事项。`;
+  }
   return null;
 }
 

@@ -42,6 +42,10 @@ export class ProjectRepository {
   }
 
   recordIvyCorrection(input: RecordIvyCorrectionInput): ProjectMappingRule {
+    return this.createCorrectionRule(input);
+  }
+
+  createCorrectionRule(input: RecordIvyCorrectionInput): ProjectMappingRule {
     const id = `ivy:${createHash('sha256').update(`${input.pattern}:${input.projectKey}:${input.subprojectKey ?? ''}`).digest('hex').slice(0, 16)}`;
     const timestamp = input.createdAt.toISOString();
 
