@@ -148,3 +148,33 @@ Short term, the existing `realagent-nginx` may still be the only process bound t
 ```
 
 Then both RealAgent and Feishu Codex become upstream services behind that edge layer.
+
+## Phase 1D Project-aware Follow-ups
+
+The SQLite Project Registry is seeded with nine active projects: `FeishuAdaptor`,
+`OpenMontage`, `aijia-landingpage`, `RealAgentAI_cc`,
+`ljhooker-audiobooks`, `ivy-xhs`, `James公众号`, `family-first-ai-os`, and
+`aijia-compass-work`. The initial aliases and mapping rules come from Ivy's
+confirmed project list, including the explicitly supplied local-path hints and
+the first-round mappings for Amy, B-roll, landing page, compass, and content
+projects.
+
+The designated Feishu context source is the approved group
+`oc_a84d5b6ca478220d0a37964b50776edb`. This records the intended source
+boundary only; it does not authorize or start a context sync. Context sync is
+disabled by default and requires a separate Ivy-approved production change
+before it is run.
+
+The cloud worker cannot read Ivy's Mac paths directly. A production project
+card must therefore use a server checkout, GitHub, or an explicitly approved
+synced snapshot; a `local_path_hint` is not an executable cloud filesystem
+path.
+
+Phase 1D maps meeting follow-ups to project metadata and stores a projectized
+Prompt. It does not create or run a Codex task, and every generated Todo stays
+`proposed` until a separate Ivy-approved action authorizes it.
+
+`GET /diag/projects` is a read-only aggregate diagnostic for active/archived
+projects, active rules, context-snapshot counts/timestamps, and open mapping
+conflicts. It must not expose raw group messages, file text, transcripts,
+tokens, environment values, or secrets.
