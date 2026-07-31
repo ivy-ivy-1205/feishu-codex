@@ -24,6 +24,21 @@ export interface SaveProjectContextSnapshotInput {
   capturedAt: Date;
 }
 
+export interface RecordMappingConflictInput {
+  todoId: string;
+  candidateProjectKey: string;
+  existingProjectKey: string;
+  evidence: string;
+  createdAt: Date;
+}
+
+export interface ProjectDiagnostics {
+  projects: { active: number; archived: number };
+  rules: { active: number; ivyCorrections: number };
+  contextSnapshots: { total: number; latestCapturedAt: string | null };
+  conflicts: { open: number };
+}
+
 export class ProjectRepository {
   constructor(readonly client: Database.Database) {}
 
@@ -118,6 +133,79 @@ export class ProjectRepository {
       input.capturedAt.toISOString()
     );
   }
+
+  recordMappingConflict(input: RecordMappingConflictInput): void {
+    const id = `conflict:${createHash('sha256')
+      .update(`${input.todoId}:${input.existingProjectKey}:${input.candidateProjectKey}`)
+      .digest('hex')
+      .slice(0, 24)}`;
+
+    this.client.prepare(`
+      INSERT INTO project_mapping_conflicts (
+        id, todo_id, candidate_project_key, existing_project_key, evidence, status, created_at, resolved_at
+      ) VALUES (?, ?, ?, ?, ?, 'open', ?, NULL)
+      ON CONFLICT(id) DO NOTHING
+    `).run(
+      id,
+      input.todoId,
+      input.candidateProjectKey,
+      input.existingProjectKey,
+      input.evidence,
+      input.createdAt.toISOString()
+    );
+  }
+
+  getDiagnostics(): ProjectDiagnostics {
+    const projects = this.client.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0) AS active,
+        COALESCE(SUM(CASE WHEN status = 'archived' THEN 1 ELSE 0 END), 0) AS archived
+      FROM projects
+    `).get() as CountRow;
+    const rules = this.client.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END), 0) AS active,
+        COALESCE(SUM(CASE WHEN active = 1 AND source = 'ivy_correction' THEN 1 ELSE 0 END), 0) AS ivy_corrections
+      FROM project_mapping_rules
+    `).get() as RuleCountRow;
+    const contextSnapshots = this.client.prepare(`
+      SELECT COUNT(*) AS total, MAX(captured_at) AS latest_captured_at
+      FROM project_context_snapshots
+    `).get() as SnapshotCountRow;
+    const conflicts = this.client.prepare(`
+      SELECT COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), 0) AS open
+      FROM project_mapping_conflicts
+    `).get() as ConflictCountRow;
+
+    return {
+      projects: { active: projects.active, archived: projects.archived },
+      rules: { active: rules.active, ivyCorrections: rules.ivy_corrections },
+      contextSnapshots: {
+        total: contextSnapshots.total,
+        latestCapturedAt: contextSnapshots.latest_captured_at
+      },
+      conflicts: { open: conflicts.open }
+    };
+  }
+}
+
+interface CountRow {
+  active: number;
+  archived: number;
+}
+
+interface RuleCountRow {
+  active: number;
+  ivy_corrections: number;
+}
+
+interface SnapshotCountRow {
+  total: number;
+  latest_captured_at: string | null;
+}
+
+interface ConflictCountRow {
+  open: number;
 }
 
 interface ProjectRow {

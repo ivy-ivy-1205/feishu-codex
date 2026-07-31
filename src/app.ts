@@ -15,6 +15,8 @@ import {
 } from './routes/health.js';
 import type { FeishuOAuthService } from './services/feishu-oauth.js';
 import type { IngestionResult } from './services/minute-ingestion.js';
+import type { ProjectRepository } from './repositories/project-repository.js';
+import { registerProjectDiagnosticsRoute } from './routes/project-diagnostics.js';
 
 type LoggerOption = FastifyServerOptions['logger'];
 
@@ -26,6 +28,7 @@ export interface AppDependencies {
   routeReply(input: unknown): ReplyDecision;
   sendTextMessage?(input: { chatId: string; text: string }): Promise<{ messageId: string }>;
   oauth?: FeishuOAuthService;
+  projectRepository?: ProjectRepository;
   logger?: LoggerOption;
 }
 
@@ -50,6 +53,9 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
   });
   if (dependencies.oauth) {
     registerFeishuOAuthRoutes(app, { oauth: dependencies.oauth });
+  }
+  if (dependencies.projectRepository) {
+    registerProjectDiagnosticsRoute(app, dependencies.projectRepository);
   }
 
   return app;

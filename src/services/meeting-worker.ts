@@ -73,7 +73,8 @@ export async function processMinuteJob(
         projectConfidence: mapping.confidence,
         projectEvidence: mapping.evidence,
         projectMappingStatus: mapping.status,
-        projectPrompt: mapping.projectPrompt
+        projectPrompt: mapping.projectPrompt,
+        mappingConflict: mapping.conflict
       };
     });
     const projectLabels = new Map(
@@ -130,6 +131,17 @@ export async function processMinuteJob(
             projectMappingStatus: todo.projectMappingStatus,
             projectPrompt: todo.projectPrompt
           }))
+        });
+        todos.forEach((todo, index) => {
+          if (todo.mappingConflict) {
+            projectRepository.recordMappingConflict({
+              todoId: `todo:${job.minuteId}:${index + 1}`,
+              existingProjectKey: todo.mappingConflict.existingProjectKey,
+              candidateProjectKey: todo.mappingConflict.candidateProjectKey,
+              evidence: todo.mappingConflict.candidateEvidence,
+              createdAt: operationNow
+            });
+          }
         });
       }
 

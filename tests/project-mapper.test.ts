@@ -126,4 +126,39 @@ describe('mapTodoToProject', () => {
       }
     });
   });
+
+  it('surfaces conflicts when Ivy correction disagrees with strong context evidence', () => {
+    const result = mapTodoToProject({
+      title: 'Hero 区视频设计方案',
+      description: '会议同时提到 compass 工作台。',
+      proposedProjectKey: 'aijia-compass-work',
+      proposedSubprojectKey: null,
+      proposedConfidence: 'high',
+      proposedEvidence: 'Codex saw compass in transcript.',
+      proposedProjectPrompt: '请处理 compass。'
+    }, {
+      projects: [...initialProjectDefinitions],
+      rules: [{
+        id: 'ivy:hero-landing',
+        pattern: 'Hero 区',
+        patternKind: 'keyword',
+        projectKey: 'aijia-landingpage',
+        subprojectKey: null,
+        confidenceHint: 'high',
+        priority: 1000,
+        source: 'ivy_correction',
+        active: true
+      }],
+      contextSnapshots: []
+    });
+
+    expect(result).toMatchObject({
+      projectKey: 'aijia-landingpage',
+      status: 'mapped'
+    });
+    expect(result.conflict).toMatchObject({
+      existingProjectKey: 'aijia-landingpage',
+      candidateProjectKey: 'aijia-compass-work'
+    });
+  });
 });

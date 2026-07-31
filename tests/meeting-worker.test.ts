@@ -96,6 +96,44 @@ describe('processMinuteJob', () => {
     });
   });
 
+  it('records an open conflict when an Ivy correction overrides strong Codex context', async () => {
+    const harness = createHarness({
+      summary: {
+        ...summaryDraft,
+        todos: [{
+          title: 'Hero 区视频设计方案',
+          description: '会议同时提到 compass 工作台。',
+          risk: 'low',
+          capability: 'content_draft',
+          projectKey: 'aijia-compass-work',
+          subprojectKey: null,
+          projectConfidence: 'high',
+          projectEvidence: 'Codex saw compass in transcript.',
+          projectPrompt: '请处理 compass。'
+        }]
+      }
+    });
+    harness.client.prepare(`
+      INSERT INTO project_mapping_rules (
+        id, pattern, pattern_kind, project_key, subproject_key, confidence_hint,
+        priority, source, active, created_at, updated_at
+      ) VALUES ('ivy:hero-landing', 'Hero 区', 'keyword', 'aijia-landingpage', NULL, 'high', 1000, 'ivy_correction', 1, ?, ?)
+    `).run(now.toISOString(), now.toISOString());
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+
+    expect(harness.client.prepare(`
+      SELECT todo_id, existing_project_key, candidate_project_key, evidence, status
+      FROM project_mapping_conflicts
+    `).all()).toEqual([{
+      todo_id: `todo:${minuteFixture.minuteId}:1`,
+      existing_project_key: 'aijia-landingpage',
+      candidate_project_key: 'aijia-compass-work',
+      evidence: 'Codex saw compass in transcript.',
+      status: 'open'
+    }]);
+  });
+
   it('persists one structured summary and numbered todos', async () => {
     const harness = createHarness();
 

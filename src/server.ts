@@ -119,6 +119,7 @@ const app = buildApp({
     isCodexAuthAvailable: async () =>
       config.codex.summarizerMode === 'codex' && await codexAuthProbe.isAvailable()
   }),
+  projectRepository,
   verificationToken: config.feishu.verificationToken,
   encryptKey: config.feishu.encryptKey,
   ingestMinute: (event) => ingestMinuteGenerated(event, {
