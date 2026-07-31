@@ -13,6 +13,8 @@ import {
 } from '../repositories/job-repository.js';
 import { MeetingRepository } from '../repositories/meeting-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
+import { ProjectRepository } from '../repositories/project-repository.js';
+import { mapTodoToProject } from './project-mapper.js';
 import {
   MeetingSummaryRenderError,
   renderMeetingSummary
@@ -48,6 +50,35 @@ export async function processMinuteJob(
     const draft = parseMeetingSummaryDraft(
       await dependencies.summarizer.summarize(context)
     );
+    const projectRepository = new ProjectRepository(dependencies.meetingRepository.client);
+    const registry = {
+      projects: projectRepository.listActiveProjects(),
+      rules: projectRepository.listActiveRules(),
+      contextSnapshots: []
+    };
+    const todos = draft.todos.map((todo) => {
+      const mapping = mapTodoToProject({
+        title: todo.title,
+        description: todo.description,
+        proposedProjectKey: todo.projectKey,
+        proposedSubprojectKey: todo.subprojectKey,
+        proposedConfidence: todo.projectConfidence,
+        proposedEvidence: todo.projectEvidence,
+        proposedProjectPrompt: todo.projectPrompt
+      }, registry);
+      return {
+        ...todo,
+        projectKey: mapping.projectKey,
+        subprojectKey: mapping.subprojectKey,
+        projectConfidence: mapping.confidence,
+        projectEvidence: mapping.evidence,
+        projectMappingStatus: mapping.status,
+        projectPrompt: mapping.projectPrompt
+      };
+    });
+    const projectLabels = new Map(
+      registry.projects.map((project) => [project.projectKey, project.displayName])
+    );
     const summaryId = `summary:${job.minuteId}`;
     const meeting = {
       title: context.title,
@@ -62,10 +93,13 @@ export async function processMinuteJob(
         decisions: draft.decisions,
         risks: draft.risks
       },
-      draft.todos.map((todo, index) => ({
+      todos.map((todo, index) => ({
         displayedNumber: index + 1,
         title: todo.title,
-        capability: todo.capability
+        capability: todo.capability,
+        projectLabel: todo.projectKey ? projectLabels.get(todo.projectKey) ?? null : null,
+        projectConfidence: todo.projectConfidence,
+        projectMappingStatus: todo.projectMappingStatus
       }))
     );
     const operationNow = now();
@@ -81,14 +115,20 @@ export async function processMinuteJob(
           minuteId: job.minuteId,
           summaryMessageId: `pending:minute-summary:${job.minuteId}`,
           content: JSON.stringify(draft),
-          todos: draft.todos.map((todo, index) => ({
+          todos: todos.map((todo, index) => ({
             id: `todo:${job.minuteId}:${index + 1}`,
             displayedNumber: index + 1,
             title: todo.title,
             description: todo.description,
             risk: todo.risk,
             capability: todo.capability,
-            status: 'proposed' as const
+            status: 'proposed' as const,
+            projectKey: todo.projectKey,
+            subprojectKey: todo.subprojectKey,
+            projectConfidence: todo.projectConfidence,
+            projectEvidence: todo.projectEvidence,
+            projectMappingStatus: todo.projectMappingStatus,
+            projectPrompt: todo.projectPrompt
           }))
         });
       }

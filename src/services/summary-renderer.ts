@@ -1,4 +1,5 @@
 import type { TodoCapability } from '../domain/meeting.js';
+import type { ProjectConfidence, ProjectMappingStatus } from '../domain/project.js';
 
 const messageSizeLimitBytes = 28_000;
 
@@ -25,7 +26,16 @@ export interface MeetingTodoRenderInput {
   displayedNumber: number;
   title: string;
   capability: TodoCapability | 'human_only';
+  projectLabel?: string | null;
+  projectConfidence?: ProjectConfidence;
+  projectMappingStatus?: ProjectMappingStatus;
 }
+
+const confidenceLabels: Record<ProjectConfidence, string> = {
+  high: '高置信度',
+  medium: '中置信度',
+  low: '低置信度'
+};
 
 export function renderMeetingSummary(
   summary: MeetingSummaryRenderInput,
@@ -65,9 +75,7 @@ export function renderMeetingSummary(
     (left, right) => left.displayedNumber - right.displayedNumber
   );
   const todoLines = sortedTodos.length > 0
-    ? sortedTodos.map((todo) => (
-      `${todo.displayedNumber}. ${normalizeLine(todo.title, 'Todo title')}`
-    ))
+    ? sortedTodos.map((todo) => formatTodoLine(todo))
     : ['暂无可由 Codex 直接推进的事项。'];
   const text = [
     `${title}｜会后行动摘要`,
@@ -93,6 +101,22 @@ export function renderMeetingSummary(
     );
   }
   return text;
+}
+
+function projectLabel(todo: MeetingTodoRenderInput): string {
+  if (todo.projectMappingStatus === undefined && todo.projectLabel === undefined) {
+    return '';
+  }
+  if (todo.projectMappingStatus !== 'mapped' || todo.projectLabel === null || !todo.projectLabel) {
+    return '[待确认项目]';
+  }
+  return `[${normalizeLine(todo.projectLabel, 'project label')}｜${confidenceLabels[todo.projectConfidence ?? 'low']}]`;
+}
+
+function formatTodoLine(todo: MeetingTodoRenderInput): string {
+  const label = projectLabel(todo);
+  const title = normalizeLine(todo.title, 'Todo title');
+  return `${todo.displayedNumber}. ${label ? `${label} ` : ''}${title}`;
 }
 
 function renderSection(title: string, items: readonly string[]): string[] {

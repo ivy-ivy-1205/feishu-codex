@@ -38,6 +38,30 @@ const fixtureTodos: MeetingTodoRenderInput[] = [
 ];
 
 describe('renderMeetingSummary', () => {
+  it('renders project labels and pending mappings in the follow-up list', () => {
+    const text = renderMeetingSummary(fixtureSummary, [
+      {
+        displayedNumber: 1,
+        title: '整理视频号 B-roll 优化清单',
+        capability: 'content_draft',
+        projectLabel: 'OpenMontage',
+        projectConfidence: 'high',
+        projectMappingStatus: 'mapped'
+      },
+      {
+        displayedNumber: 2,
+        title: '生成 Amy Live 复测与 Demo 剪辑清单',
+        capability: 'content_draft',
+        projectLabel: null,
+        projectConfidence: 'low',
+        projectMappingStatus: 'needs_confirmation'
+      }
+    ]);
+
+    expect(text).toContain('1. [OpenMontage｜高置信度] 整理视频号 B-roll 优化清单');
+    expect(text).toContain('2. [待确认项目] 生成 Amy Live 复测与 Demo 剪辑清单');
+  });
+
   it('renders the reference interaction structure', () => {
     const text = renderMeetingSummary(fixtureSummary, fixtureTodos);
 

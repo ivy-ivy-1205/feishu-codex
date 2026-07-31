@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  projectConfidenceSchema,
+  projectMappingStatusSchema
+} from './project.js';
 
 export const todoRiskSchema = z.enum(['low', 'high']);
 export const todoCapabilitySchema = z.enum([
@@ -42,7 +46,13 @@ export const MeetingTodoDraft = z.object({
   description: z.string().trim().min(1),
   risk: todoRiskSchema,
   capability: todoCapabilitySchema,
-  status: todoStatusSchema.default('proposed')
+  status: todoStatusSchema.default('proposed'),
+  projectKey: z.string().trim().min(1).nullable().default(null),
+  subprojectKey: z.string().trim().min(1).nullable().default(null),
+  projectConfidence: projectConfidenceSchema.default('low'),
+  projectEvidence: z.string().trim().max(1024).default(''),
+  projectMappingStatus: projectMappingStatusSchema.default('unmapped'),
+  projectPrompt: z.string().trim().max(4096).default('')
 });
 
 export const MeetingSummaryDraft = z.object({

@@ -68,6 +68,34 @@ const summaryDraft: MeetingSummaryDraft = {
 };
 
 describe('processMinuteJob', () => {
+  it('persists registry-enriched project mapping instead of trusting Codex alone', async () => {
+    const harness = createHarness({
+      summary: {
+        ...summaryDraft,
+        todos: [{
+          title: '生成 Amy Live 复测与 Demo 剪辑清单',
+          description: '验证 Amy 语音通话。',
+          risk: 'low',
+          capability: 'content_draft',
+          projectKey: null,
+          subprojectKey: null,
+          projectConfidence: 'low',
+          projectEvidence: '会议没有足够证据',
+          projectPrompt: '请确认项目后整理复测清单。'
+        }]
+      }
+    });
+
+    expect(await processMinuteJob(harness.job, harness.dependencies)).toBe('completed');
+
+    expect(readResult(harness.client).todos[0]).toMatchObject({
+      projectKey: 'realagent-ai-cc',
+      subprojectKey: 'amy-voice',
+      projectConfidence: 'high',
+      projectMappingStatus: 'mapped'
+    });
+  });
+
   it('persists one structured summary and numbered todos', async () => {
     const harness = createHarness();
 
@@ -602,8 +630,15 @@ function readResult(client: Database.Database) {
     SELECT id, content FROM meeting_summaries ORDER BY created_at
   `).all() as Array<{ id: string; content: string }>;
   const todoRows = client.prepare(`
-    SELECT displayed_number FROM meeting_todos ORDER BY displayed_number
-  `).all() as Array<{ displayed_number: number }>;
+    SELECT displayed_number, project_key, subproject_key, project_confidence, project_mapping_status
+    FROM meeting_todos ORDER BY displayed_number
+  `).all() as Array<{
+    displayed_number: number;
+    project_key: string | null;
+    subproject_key: string | null;
+    project_confidence: string;
+    project_mapping_status: string;
+  }>;
   const outbox = new OutboxRepository(client).list();
   const job = client.prepare(`
     SELECT status FROM batch_jobs WHERE stable_key = ?
@@ -612,7 +647,13 @@ function readResult(client: Database.Database) {
   return {
     summary: summaryRows[0] ? JSON.parse(summaryRows[0].content) as MeetingSummaryDraft : null,
     summaryCount: summaryRows.length,
-    todos: todoRows.map((todo) => ({ displayedNumber: todo.displayed_number })),
+    todos: todoRows.map((todo) => ({
+      displayedNumber: todo.displayed_number,
+      projectKey: todo.project_key,
+      subprojectKey: todo.subproject_key,
+      projectConfidence: todo.project_confidence,
+      projectMappingStatus: todo.project_mapping_status
+    })),
     todoCount: todoRows.length,
     outbox,
     outboxCount: outbox.length,

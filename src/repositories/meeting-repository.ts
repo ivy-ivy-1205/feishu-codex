@@ -81,8 +81,9 @@ export class MeetingRepository {
       const insertTodo = this.client.prepare(`
         INSERT INTO meeting_todos (
           id, summary_id, displayed_number, title, description, risk, capability, status,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          project_key, subproject_key, project_confidence, project_evidence,
+          project_mapping_status, project_prompt, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const todo of draft.todos) {
         insertTodo.run(
@@ -94,6 +95,12 @@ export class MeetingRepository {
           todo.risk,
           todo.capability,
           todo.status,
+          todo.projectKey,
+          todo.subprojectKey,
+          todo.projectConfidence,
+          todo.projectEvidence,
+          todo.projectMappingStatus,
+          todo.projectPrompt,
           createdAt
         );
       }
