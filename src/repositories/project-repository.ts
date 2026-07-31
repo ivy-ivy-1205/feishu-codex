@@ -71,8 +71,17 @@ export class ProjectRepository {
   createCorrectionRule(input: RecordIvyCorrectionInput): ProjectMappingRule {
     const id = `ivy:${createHash('sha256').update(`${input.pattern}:${input.projectKey}:${input.subprojectKey ?? ''}`).digest('hex').slice(0, 16)}`;
     const timestamp = input.createdAt.toISOString();
-
-    this.client.prepare(`
+    const activeRules = this.client.prepare(`
+      SELECT id, pattern
+      FROM project_mapping_rules
+      WHERE source = 'ivy_correction' AND active = 1 AND pattern_kind = ?
+    `);
+    const deactivateRule = this.client.prepare(`
+      UPDATE project_mapping_rules
+      SET active = 0, updated_at = ?
+      WHERE id = ?
+    `);
+    const upsertRule = this.client.prepare(`
       INSERT INTO project_mapping_rules (
         id, pattern, pattern_kind, project_key, subproject_key, confidence_hint,
         priority, source, active, created_at, updated_at
@@ -87,16 +96,27 @@ export class ProjectRepository {
         source = excluded.source,
         active = excluded.active,
         updated_at = excluded.updated_at
-    `).run(
-      id,
-      input.pattern,
-      input.patternKind,
-      input.projectKey,
-      input.subprojectKey,
-      input.confidenceHint,
-      timestamp,
-      timestamp
-    );
+    `);
+
+    this.client.transaction(() => {
+      const normalizedPattern = normalizeRulePattern(input.pattern);
+      const priorRules = activeRules.all(input.patternKind) as Array<{ id: string; pattern: string }>;
+      for (const rule of priorRules) {
+        if (rule.id !== id && normalizeRulePattern(rule.pattern) === normalizedPattern) {
+          deactivateRule.run(timestamp, rule.id);
+        }
+      }
+      upsertRule.run(
+        id,
+        input.pattern,
+        input.patternKind,
+        input.projectKey,
+        input.subprojectKey,
+        input.confidenceHint,
+        timestamp,
+        timestamp
+      );
+    })();
 
     return ProjectMappingRule.parse({
       id,
@@ -187,6 +207,10 @@ export class ProjectRepository {
       conflicts: { open: conflicts.open }
     };
   }
+}
+
+function normalizeRulePattern(value: string): string {
+  return value.normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim();
 }
 
 interface CountRow {

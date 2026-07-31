@@ -216,7 +216,6 @@ function seedProjectRegistry(client: Database.Database): void {
       local_path_hint = excluded.local_path_hint,
       repo_url = excluded.repo_url,
       default_branch = excluded.default_branch,
-      status = excluded.status,
       updated_at = excluded.updated_at
   `);
   const insertRule = client.prepare(`
@@ -231,7 +230,6 @@ function seedProjectRegistry(client: Database.Database): void {
       confidence_hint = excluded.confidence_hint,
       priority = excluded.priority,
       source = excluded.source,
-      active = excluded.active,
       updated_at = excluded.updated_at
   `);
 

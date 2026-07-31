@@ -93,6 +93,23 @@ describe('mapTodoToProject', () => {
     });
   });
 
+  it('keeps a valid low-confidence candidate as evidence but requires confirmation', () => {
+    expect(mapTodoToProject({
+      title: '整理候选项目材料',
+      description: '没有命中任何确定性规则。',
+      proposedProjectKey: 'openmontage',
+      proposedSubprojectKey: null,
+      proposedConfidence: 'low',
+      proposedEvidence: 'Codex 只找到弱相关线索。',
+      proposedProjectPrompt: '确认项目后再整理材料。'
+    }, registry)).toMatchObject({
+      projectKey: 'openmontage',
+      confidence: 'low',
+      evidence: 'Codex 只找到弱相关线索。',
+      status: 'needs_confirmation'
+    });
+  });
+
   it('keeps Ivy correction selected while surfacing conflicting high-confidence context', () => {
     expect(mapTodoToProject({
       title: '处理 B-roll 发布页',

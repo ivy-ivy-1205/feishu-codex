@@ -228,6 +228,28 @@ describe('FeishuSdkApiClient', () => {
     });
   });
 
+  it('parses real 13-digit millisecond create_time values in group history', async () => {
+    const context = new FeishuSdkContextClient(createFakeSdkClient({
+      contextMessages: [{
+        message_id: 'om_context_ms',
+        msg_type: 'text',
+        create_time: '1783425868000',
+        body: { content: JSON.stringify({ text: '毫秒时间戳消息' }) }
+      }]
+    }));
+
+    await expect(context.listMessages({
+      chatId: 'oc_a84d5b6ca478220d0a37964b50776edb',
+      cursor: null,
+      since: new Date('2026-07-01T00:00:00.000Z')
+    })).resolves.toMatchObject({
+      messages: [{
+        messageId: 'om_context_ms',
+        createdAt: new Date(1_783_425_868_000).toISOString()
+      }]
+    });
+  });
+
   it('extracts readable text from a realistic multilingual post body', async () => {
     const context = new FeishuSdkContextClient(createFakeSdkClient({
       contextMessages: [{

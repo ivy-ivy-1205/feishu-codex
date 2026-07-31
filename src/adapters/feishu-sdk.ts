@@ -269,9 +269,10 @@ function toContextMessage(value: unknown): FeishuContextMessage | null {
   const messageType = normalizeContextMessageType(value.msg_type);
   const body = isRecord(value.body) ? value.body : {};
   const content = typeof body.content === 'string' ? parseMessageText(body.content, messageType) : null;
-  const createdAt = typeof value.create_time === 'string'
-    ? new Date(Number(value.create_time) * 1_000).toISOString()
-    : new Date(0).toISOString();
+  const createdAtMs = typeof value.create_time === 'string'
+    ? parseFeishuTimestampMs(value.create_time)
+    : null;
+  const createdAt = new Date(createdAtMs ?? 0).toISOString();
   return {
     messageId: value.message_id,
     messageType,

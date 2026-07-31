@@ -108,7 +108,7 @@ describe('processMinuteJob', () => {
           projectKey: 'aijia-compass-work',
           subprojectKey: null,
           projectConfidence: 'high',
-          projectEvidence: 'Codex saw compass in transcript.',
+          projectEvidence: 'private customer detail: Codex saw compass in transcript.',
           projectPrompt: '请处理 compass。'
         }]
       }
@@ -129,9 +129,14 @@ describe('processMinuteJob', () => {
       todo_id: `todo:${minuteFixture.minuteId}:1`,
       existing_project_key: 'aijia-landingpage',
       candidate_project_key: 'aijia-compass-work',
-      evidence: 'Codex saw compass in transcript.',
+      evidence: 'private customer detail: Codex saw compass in transcript.',
       status: 'open'
     }]);
+    const body = readResult(harness.client).outbox[0]?.body ?? '';
+    expect(body).toContain('1. [待确认项目] Hero 区视频设计方案');
+    expect(body).toContain('第 1 项项目归属冲突');
+    expect(body).toContain('请回复“1 是 <项目名>”确认');
+    expect(body).not.toContain('private customer detail');
   });
 
   it('persists one structured summary and numbered todos', async () => {

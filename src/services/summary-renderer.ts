@@ -29,6 +29,10 @@ export interface MeetingTodoRenderInput {
   projectLabel?: string | null;
   projectConfidence?: ProjectConfidence;
   projectMappingStatus?: ProjectMappingStatus;
+  projectConflict?: {
+    existingProjectLabel: string;
+    candidateProjectLabel: string;
+  } | null;
 }
 
 const confidenceLabels: Record<ProjectConfidence, string> = {
@@ -77,6 +81,9 @@ export function renderMeetingSummary(
   const todoLines = sortedTodos.length > 0
     ? sortedTodos.map((todo) => formatTodoLine(todo))
     : ['暂无可由 Codex 直接推进的事项。'];
+  const conflictLines = sortedTodos
+    .filter((todo) => todo.projectConflict)
+    .map((todo) => formatConflictLine(todo));
   const text = [
     `${title}｜会后行动摘要`,
     `会议：${title}`,
@@ -92,7 +99,10 @@ export function renderMeetingSummary(
     ...renderSection('风险/卡点', risks),
     '',
     '我可以帮你推进',
-    ...todoLines
+    ...todoLines,
+    ...(conflictLines.length > 0
+      ? ['', '项目映射待确认', ...conflictLines]
+      : [])
   ].join('\n');
 
   if (Buffer.byteLength(text, 'utf8') >= messageSizeLimitBytes) {
@@ -107,10 +117,26 @@ function projectLabel(todo: MeetingTodoRenderInput): string {
   if (todo.projectMappingStatus === undefined && todo.projectLabel === undefined) {
     return '';
   }
-  if (todo.projectMappingStatus !== 'mapped' || todo.projectLabel === null || !todo.projectLabel) {
+  if (
+    todo.projectConflict ||
+    todo.projectConfidence === 'low' ||
+    todo.projectMappingStatus !== 'mapped' ||
+    todo.projectLabel === null ||
+    !todo.projectLabel
+  ) {
     return '[待确认项目]';
   }
   return `[${normalizeLine(todo.projectLabel, 'project label')}｜${confidenceLabels[todo.projectConfidence ?? 'low']}]`;
+}
+
+function formatConflictLine(todo: MeetingTodoRenderInput): string {
+  const conflict = todo.projectConflict;
+  if (!conflict) {
+    throw new MeetingSummaryRenderError('project conflict details are required');
+  }
+  const existing = normalizeLine(conflict.existingProjectLabel, 'existing project label');
+  const candidate = normalizeLine(conflict.candidateProjectLabel, 'candidate project label');
+  return `⚠️ 第 ${todo.displayedNumber} 项项目归属冲突：长期规则为 ${existing}，新会议候选为 ${candidate}。请回复“${todo.displayedNumber} 是 <项目名>”确认。`;
 }
 
 function formatTodoLine(todo: MeetingTodoRenderInput): string {

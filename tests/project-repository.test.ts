@@ -51,4 +51,40 @@ describe('ProjectRepository', () => {
       source: 'ivy_correction'
     });
   });
+
+  it('deactivates the previous same-pattern correction while preserving its audit row', () => {
+    const database = createTestMeetingRepository();
+    const repo = new ProjectRepository(database.client);
+    const first = repo.createCorrectionRule({
+      pattern: 'B-roll',
+      patternKind: 'keyword',
+      projectKey: 'openmontage',
+      subprojectKey: null,
+      confidenceHint: 'high',
+      createdAt: new Date('2026-07-31T10:00:00.000Z')
+    });
+    const replacement = repo.createCorrectionRule({
+      pattern: '  b-ROLL  ',
+      patternKind: 'keyword',
+      projectKey: 'aijia-landingpage',
+      subprojectKey: null,
+      confidenceHint: 'high',
+      createdAt: new Date('2026-07-31T11:00:00.000Z')
+    });
+
+    expect(repo.listActiveRules().filter((rule) => (
+      rule.source === 'ivy_correction' && rule.pattern.toLowerCase().includes('b-roll')
+    ))).toEqual([expect.objectContaining({
+      id: replacement.id,
+      projectKey: 'aijia-landingpage',
+      active: true
+    })]);
+    expect(database.client.prepare(`
+      SELECT id, project_key, active FROM project_mapping_rules
+      WHERE source = 'ivy_correction' ORDER BY created_at ASC
+    `).all()).toEqual([
+      { id: first.id, project_key: 'openmontage', active: 0 },
+      { id: replacement.id, project_key: 'aijia-landingpage', active: 1 }
+    ]);
+  });
 });

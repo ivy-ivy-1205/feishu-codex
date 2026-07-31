@@ -100,7 +100,15 @@ export async function processMinuteJob(
         capability: todo.capability,
         projectLabel: todo.projectKey ? projectLabels.get(todo.projectKey) ?? null : null,
         projectConfidence: todo.projectConfidence,
-        projectMappingStatus: todo.projectMappingStatus
+        projectMappingStatus: todo.projectMappingStatus,
+        projectConflict: todo.mappingConflict
+          ? {
+              existingProjectLabel: projectLabels.get(todo.mappingConflict.existingProjectKey)
+                ?? todo.mappingConflict.existingProjectKey,
+              candidateProjectLabel: projectLabels.get(todo.mappingConflict.candidateProjectKey)
+                ?? todo.mappingConflict.candidateProjectKey
+            }
+          : null
       }))
     );
     const operationNow = now();

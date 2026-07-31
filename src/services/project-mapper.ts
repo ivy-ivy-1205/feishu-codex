@@ -26,13 +26,14 @@ export function mapTodoToProject(
   registry: ProjectRegistry
 ) {
   const activeProjects = registry.projects.filter((project) => project.status === 'active');
+  const normalizedTitle = normalize(input.title);
   const matchingText = normalize(`${input.title}\n${input.description}`);
 
   for (const source of ['ivy_correction', 'system'] as const) {
     const rules = registry.rules
       .filter((rule) => rule.active && rule.source === source)
       .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id));
-    const matchingRule = rules.find((rule) => matches(rule, matchingText));
+    const matchingRule = rules.find((rule) => matches(rule, normalizedTitle, matchingText));
     if (matchingRule && activeProjects.some((project) => project.projectKey === matchingRule.projectKey)) {
       const hasConflictingHighConfidenceProposal = input.proposedConfidence === 'high'
         && input.proposedEvidence.trim().length > 0
@@ -64,7 +65,7 @@ export function mapTodoToProject(
       subprojectKey: input.proposedSubprojectKey,
       confidence: input.proposedConfidence,
       evidence: input.proposedEvidence,
-      status: 'mapped',
+      status: input.proposedConfidence === 'low' ? 'needs_confirmation' : 'mapped',
       projectPrompt: input.proposedProjectPrompt,
       conflict: null
     });
@@ -81,12 +82,16 @@ export function mapTodoToProject(
   });
 }
 
-function matches(rule: ProjectMappingRule, normalizedText: string): boolean {
+function matches(
+  rule: ProjectMappingRule,
+  normalizedTitle: string,
+  normalizedText: string
+): boolean {
   if (rule.patternKind === 'keyword') {
     return normalizedText.includes(normalize(rule.pattern));
   }
   if (rule.patternKind === 'exact') {
-    return normalizedText === normalize(rule.pattern);
+    return normalizedTitle === normalize(rule.pattern);
   }
   try {
     return new RegExp(rule.pattern, 'iu').test(normalizedText);

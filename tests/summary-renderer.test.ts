@@ -62,6 +62,40 @@ describe('renderMeetingSummary', () => {
     expect(text).toContain('2. [待确认项目] 生成 Amy Live 复测与 Demo 剪辑清单');
   });
 
+  it('fails closed for a low-confidence candidate even when it has a project label', () => {
+    const text = renderMeetingSummary(fixtureSummary, [{
+      displayedNumber: 1,
+      title: '整理弱相关候选材料',
+      capability: 'content_draft',
+      projectLabel: 'OpenMontage',
+      projectConfidence: 'low',
+      projectMappingStatus: 'mapped'
+    }]);
+
+    expect(text).toContain('1. [待确认项目] 整理弱相关候选材料');
+    expect(text).not.toContain('[OpenMontage｜低置信度]');
+  });
+
+  it('surfaces a project conflict with an explicit confirmation prompt and no raw evidence', () => {
+    const text = renderMeetingSummary(fixtureSummary, [{
+      displayedNumber: 1,
+      title: 'Hero 区视频设计方案',
+      capability: 'content_draft',
+      projectLabel: 'aijia-landingpage',
+      projectConfidence: 'high',
+      projectMappingStatus: 'mapped',
+      projectConflict: {
+        existingProjectLabel: 'aijia-landingpage',
+        candidateProjectLabel: 'aijia-compass-work'
+      }
+    }]);
+
+    expect(text).toContain('1. [待确认项目] Hero 区视频设计方案');
+    expect(text).toContain('第 1 项项目归属冲突');
+    expect(text).toContain('请回复“1 是 <项目名>”确认');
+    expect(text).not.toContain('[aijia-landingpage｜高置信度]');
+  });
+
   it('renders the reference interaction structure', () => {
     const text = renderMeetingSummary(fixtureSummary, fixtureTodos);
 

@@ -4,7 +4,9 @@ import {
   requiresHighRiskConfirmation
 } from '../src/domain/authorization.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
+import { ProjectRepository } from '../src/repositories/project-repository.js';
 import { createTestMeetingRepository } from './helpers/test-db.js';
+import { mapTodoToProject } from '../src/services/project-mapper.js';
 import { routeReply, type ReplyRouterDependencies } from '../src/services/reply-router.js';
 
 const ivyPrivateChatId = 'oc_d851c3e986007dc0f97ab582bcb2e7c8';
@@ -24,6 +26,36 @@ describe('routeReply', () => {
       todoId: 'todo_a_3',
       projectKey: 'realagent-ai-cc',
       subprojectKey: 'amy-voice'
+    });
+  });
+
+  it('applies a numbered exact-title correction to the same Todo title in a later meeting', () => {
+    const harness = createHarness();
+
+    expect(harness.route({
+      chatId: ivyPrivateChatId,
+      openId: ivyOpenId,
+      replyTo: 'om_summary_a',
+      text: '3 是 OpenMontage'
+    })).toMatchObject({ kind: 'record_project_correction', projectKey: 'openmontage' });
+
+    const projectRepository = new ProjectRepository(harness.dependencies.meetingRepository.client);
+    expect(mapTodoToProject({
+      title: '整理共享草稿',
+      description: '这是下一次会议生成的不同描述。',
+      proposedProjectKey: null,
+      proposedSubprojectKey: null,
+      proposedConfidence: 'low',
+      proposedEvidence: '',
+      proposedProjectPrompt: '请整理下一次会议的共享草稿。'
+    }, {
+      projects: projectRepository.listActiveProjects(),
+      rules: projectRepository.listActiveRules(),
+      contextSnapshots: []
+    })).toMatchObject({
+      projectKey: 'openmontage',
+      confidence: 'high',
+      status: 'mapped'
     });
   });
 

@@ -279,4 +279,24 @@ describe('migrateDatabase', () => {
       { name: 'project_mapping_conflicts' }
     ]);
   });
+
+  it('preserves archived projects and disabled seed rules across repeated migration', () => {
+    const database = createSqliteDatabase(':memory:');
+    migrateDatabase(database.client);
+    database.client.prepare(`
+      UPDATE projects SET status = 'archived' WHERE project_key = 'feishu-adaptor'
+    `).run();
+    database.client.prepare(`
+      UPDATE project_mapping_rules SET active = 0 WHERE id = 'system:amy-live'
+    `).run();
+
+    migrateDatabase(database.client);
+
+    expect(database.client.prepare(`
+      SELECT status FROM projects WHERE project_key = 'feishu-adaptor'
+    `).get()).toEqual({ status: 'archived' });
+    expect(database.client.prepare(`
+      SELECT active FROM project_mapping_rules WHERE id = 'system:amy-live'
+    `).get()).toEqual({ active: 0 });
+  });
 });
