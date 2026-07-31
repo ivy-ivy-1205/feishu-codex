@@ -67,15 +67,14 @@ export function mapTodoToProject(
 }
 
 function matches(rule: ProjectMappingRule, normalizedText: string): boolean {
-  const pattern = normalize(rule.pattern);
   if (rule.patternKind === 'keyword') {
-    return normalizedText.includes(pattern);
+    return normalizedText.includes(normalize(rule.pattern));
   }
   if (rule.patternKind === 'exact') {
-    return normalizedText === pattern;
+    return normalizedText === normalize(rule.pattern);
   }
   try {
-    return new RegExp(pattern, 'iu').test(normalizedText);
+    return new RegExp(rule.pattern, 'iu').test(normalizedText);
   } catch {
     return false;
   }

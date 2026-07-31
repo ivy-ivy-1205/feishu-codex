@@ -45,6 +45,38 @@ describe('mapTodoToProject', () => {
     });
   });
 
+  it('preserves Unicode regex syntax while matching normalized candidate text', () => {
+    expect(mapTodoToProject({
+      title: 'ABC',
+      description: '',
+      proposedProjectKey: null,
+      proposedSubprojectKey: null,
+      proposedConfidence: 'low',
+      proposedEvidence: '',
+      proposedProjectPrompt: '请整理 ABC。'
+    }, {
+      ...registry,
+      rules: [
+        ...registry.rules,
+        {
+          id: 'system:unicode-uppercase',
+          pattern: '^\\p{Lu}+$',
+          patternKind: 'regex',
+          projectKey: 'feishu-adaptor',
+          subprojectKey: null,
+          confidenceHint: 'high',
+          priority: 200,
+          source: 'system',
+          active: true
+        }
+      ]
+    })).toMatchObject({
+      projectKey: 'feishu-adaptor',
+      confidence: 'high',
+      status: 'mapped'
+    });
+  });
+
   it('keeps unknown items as needs_confirmation and renders them as pending', () => {
     expect(mapTodoToProject({
       title: '整理未命名项目的材料',
