@@ -74,7 +74,16 @@ describe('MeetingRepository', () => {
     });
 
     expect(summary.id).toBe('summary_1');
-    expect(repo.listTodos(summary.id).map((todo) => todo.id)).toEqual(['todo_1', 'todo_2']);
+    const todos = repo.listTodos(summary.id);
+    expect(todos.map((todo) => todo.id)).toEqual(['todo_1', 'todo_2']);
+    expect(todos[0]).toMatchObject({
+      projectKey: null,
+      subprojectKey: null,
+      projectConfidence: 'low',
+      projectEvidence: '',
+      projectMappingStatus: 'unmapped',
+      projectPrompt: ''
+    });
   });
 
   it('resolves a displayed number only inside its summary message', () => {

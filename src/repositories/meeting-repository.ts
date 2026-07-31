@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { MeetingSummaryDraft, type MeetingTodoDraft } from '../domain/meeting.js';
+import type { ProjectConfidence, ProjectMappingStatus } from '../domain/project.js';
 
 export interface MeetingSummaryRecord {
   id: string;
@@ -11,6 +12,12 @@ export interface MeetingSummaryRecord {
 
 export interface MeetingTodoRecord extends MeetingTodoDraft {
   summaryId: string;
+  projectKey: string | null;
+  subprojectKey: string | null;
+  projectConfidence: ProjectConfidence;
+  projectEvidence: string;
+  projectMappingStatus: ProjectMappingStatus;
+  projectPrompt: string;
   createdAt: string;
 }
 
@@ -122,7 +129,8 @@ export class MeetingRepository {
   listTodos(summaryId: string): MeetingTodoRecord[] {
     const rows = this.client.prepare(`
       SELECT id, summary_id, displayed_number, title, description, risk, capability, status,
-        created_at
+        project_key, subproject_key, project_confidence, project_evidence, project_mapping_status,
+        project_prompt, created_at
       FROM meeting_todos
       WHERE summary_id = ?
       ORDER BY displayed_number ASC
@@ -134,7 +142,9 @@ export class MeetingRepository {
   findTodoByReply(summaryMessageId: string, displayedNumber: number): MeetingTodoRecord | null {
     const row = this.client.prepare(`
       SELECT todos.id, todos.summary_id, todos.displayed_number, todos.title,
-        todos.description, todos.risk, todos.capability, todos.status, todos.created_at
+        todos.description, todos.risk, todos.capability, todos.status, todos.project_key,
+        todos.subproject_key, todos.project_confidence, todos.project_evidence,
+        todos.project_mapping_status, todos.project_prompt, todos.created_at
       FROM meeting_todos AS todos
       INNER JOIN meeting_summaries AS summaries ON summaries.id = todos.summary_id
       INNER JOIN outbox ON outbox.idempotency_key = 'minute-summary:' || summaries.minute_id
@@ -148,7 +158,9 @@ export class MeetingRepository {
   listTodosByReply(summaryMessageId: string): MeetingTodoRecord[] {
     const rows = this.client.prepare(`
       SELECT todos.id, todos.summary_id, todos.displayed_number, todos.title,
-        todos.description, todos.risk, todos.capability, todos.status, todos.created_at
+        todos.description, todos.risk, todos.capability, todos.status, todos.project_key,
+        todos.subproject_key, todos.project_confidence, todos.project_evidence,
+        todos.project_mapping_status, todos.project_prompt, todos.created_at
       FROM meeting_todos AS todos
       INNER JOIN meeting_summaries AS summaries ON summaries.id = todos.summary_id
       INNER JOIN outbox ON outbox.idempotency_key = 'minute-summary:' || summaries.minute_id
@@ -170,6 +182,12 @@ interface TodoRow {
   risk: MeetingTodoDraft['risk'];
   capability: MeetingTodoDraft['capability'];
   status: MeetingTodoDraft['status'];
+  project_key: string | null;
+  subproject_key: string | null;
+  project_confidence: ProjectConfidence;
+  project_evidence: string;
+  project_mapping_status: ProjectMappingStatus;
+  project_prompt: string;
   created_at: string;
 }
 
@@ -191,6 +209,12 @@ function toMeetingTodoRecord(row: TodoRow): MeetingTodoRecord {
     risk: row.risk,
     capability: row.capability,
     status: row.status,
+    projectKey: row.project_key,
+    subprojectKey: row.subproject_key,
+    projectConfidence: row.project_confidence,
+    projectEvidence: row.project_evidence,
+    projectMappingStatus: row.project_mapping_status,
+    projectPrompt: row.project_prompt,
     createdAt: row.created_at
   };
 }
