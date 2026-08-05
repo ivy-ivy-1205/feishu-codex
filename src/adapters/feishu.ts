@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { randomBytes } from 'node:crypto';
 import type {
   FeishuMinuteReadOptions,
   FeishuUserAccessTokenResolver,
@@ -7,7 +8,8 @@ import type {
 } from '../ports/feishu.js';
 import {
   OutboxRepository,
-  type IvyMeetingSummaryMessage
+  type IvyMeetingSummaryMessage,
+  type IvyContextReviewMessage
 } from '../repositories/outbox-repository.js';
 
 const minuteBasicInfoSchema = z.object({
@@ -146,6 +148,50 @@ export class FeishuMessageDeliveryAdapter {
       text: message.body
     });
   }
+
+  async sendContextReview(message: IvyContextReviewMessage): Promise<{ messageId: string }> {
+    return this.sendInteractiveCard({ chatId: message.targetChatId, card: message.card });
+  }
+}
+
+export async function deliverPendingContextReviews(dependencies: {
+  outboxRepository: OutboxRepository;
+  delivery: FeishuMessageDeliveryAdapter;
+  now?: () => Date;
+  nonceFactory?: () => string;
+}): Promise<{ delivered: number; retried: number }> {
+  const now = dependencies.now ?? (() => new Date());
+  const nonceFactory = dependencies.nonceFactory ?? (() => randomBytes(24).toString('base64url'));
+  let delivered = 0;
+  let retried = 0;
+  const tickAt = now();
+  for (const pending of dependencies.outboxRepository.listPendingContextReviewDeliveries(tickAt)) {
+    let message = pending.message;
+    if (!Number.isFinite(Date.parse(message.expiresAt)) || Date.parse(message.expiresAt) <= tickAt.getTime()) {
+      message = dependencies.outboxRepository.refreshExpiredContextReview({
+        extractionRunId: message.extractionRunId,
+        cardNonce: nonceFactory(),
+        expiresAt: new Date(tickAt.getTime() + 7 * 24 * 60 * 60 * 1_000)
+      });
+    }
+    try {
+      const result = await dependencies.delivery.sendContextReview(message);
+      const acknowledgement = dependencies.outboxRepository.acknowledgeContextReviewDelivery({
+        extractionRunId: message.extractionRunId,
+        messageId: result.messageId,
+        deliveredAt: tickAt
+      });
+      if (acknowledgement.updated) delivered += 1;
+    } catch {
+      dependencies.outboxRepository.markContextReviewRetry({
+        extractionRunId: message.extractionRunId,
+        errorCode: 'FEISHU_CONTEXT_REVIEW_DELIVERY_FAILED',
+        retryAt: new Date(tickAt.getTime() + Math.min(1_000 * 2 ** pending.attemptCount, 60_000))
+      });
+      retried += 1;
+    }
+  }
+  return { delivered, retried };
 }
 
 export async function deliverPendingMeetingSummaries(dependencies: {

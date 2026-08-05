@@ -251,7 +251,7 @@ function directAcknowledgementTextFor(
   return null;
 }
 
-function decryptFeishuBody(body: unknown, encryptKey: string): unknown | null {
+export function decryptFeishuBody(body: unknown, encryptKey: string): unknown | null {
   const encrypted = encryptedPayloadSchema.safeParse(body);
   if (!encrypted.success) {
     return body;

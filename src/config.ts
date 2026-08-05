@@ -44,7 +44,13 @@ const envSchema = z.object({
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
   PROJECT_CONTEXT_SYNC_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
   PROJECT_CONTEXT_CHAT_IDS: projectContextChatIds.default([]),
-  PROJECT_CONTEXT_SYNC_SINCE_DAYS: z.coerce.number().int().positive().default(30)
+  PROJECT_CONTEXT_SYNC_SINCE_DAYS: z.coerce.number().int().positive().default(30),
+  CONTEXT_CANDIDATES_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  CONTEXT_REVIEW_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  CONTEXT_SOURCE_MAX_BYTES: z.coerce.number().int().positive().default(2_000_000),
+  CONTEXT_SOURCE_MAX_SEGMENTS: z.coerce.number().int().positive().default(10_000),
+  CONTEXT_EXTRACTOR_MAX_BYTES: z.coerce.number().int().positive().default(500_000),
+  CONTEXT_EXTRACTOR_MAX_SEGMENTS: z.coerce.number().int().positive().default(2_000)
 }).superRefine((config, context) => {
   if (
     config.NODE_ENV !== 'test' &&
@@ -78,6 +84,21 @@ const envSchema = z.object({
       path: ['FEISHU_OAUTH_TOKEN_KEY_FILE'],
       message: 'Feishu OAuth token key file is required when OAuth is enabled'
     });
+  }
+  if (config.CONTEXT_REVIEW_ENABLED && !config.CONTEXT_CANDIDATES_ENABLED) {
+    context.addIssue({
+      code: 'custom',
+      path: ['CONTEXT_REVIEW_ENABLED'],
+      message: 'Context review requires Context candidates to be enabled'
+    });
+  }
+  if (config.CONTEXT_EXTRACTOR_MAX_BYTES > config.CONTEXT_SOURCE_MAX_BYTES) {
+    context.addIssue({ code: 'custom', path: ['CONTEXT_EXTRACTOR_MAX_BYTES'],
+      message: 'Context extractor byte limit cannot exceed the stored source byte limit' });
+  }
+  if (config.CONTEXT_EXTRACTOR_MAX_SEGMENTS > config.CONTEXT_SOURCE_MAX_SEGMENTS) {
+    context.addIssue({ code: 'custom', path: ['CONTEXT_EXTRACTOR_MAX_SEGMENTS'],
+      message: 'Context extractor segment limit cannot exceed the stored source segment limit' });
   }
 });
 
@@ -124,6 +145,14 @@ export interface AppConfig {
     syncEnabled: boolean;
     approvedChatIds: string[];
     syncSinceDays: number;
+  };
+  context: {
+    candidatesEnabled: boolean;
+    reviewEnabled: boolean;
+    sourceMaxBytes: number;
+    sourceMaxSegments: number;
+    extractorMaxBytes: number;
+    extractorMaxSegments: number;
   };
 }
 
@@ -188,6 +217,14 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       syncEnabled: parsed.PROJECT_CONTEXT_SYNC_ENABLED,
       approvedChatIds: parsed.PROJECT_CONTEXT_CHAT_IDS,
       syncSinceDays: parsed.PROJECT_CONTEXT_SYNC_SINCE_DAYS
+    },
+    context: {
+      candidatesEnabled: parsed.CONTEXT_CANDIDATES_ENABLED,
+      reviewEnabled: parsed.CONTEXT_REVIEW_ENABLED,
+      sourceMaxBytes: parsed.CONTEXT_SOURCE_MAX_BYTES,
+      sourceMaxSegments: parsed.CONTEXT_SOURCE_MAX_SEGMENTS,
+      extractorMaxBytes: parsed.CONTEXT_EXTRACTOR_MAX_BYTES,
+      extractorMaxSegments: parsed.CONTEXT_EXTRACTOR_MAX_SEGMENTS
     }
   };
 }

@@ -2,6 +2,7 @@ import fastify, {
   type FastifyInstance,
   type FastifyServerOptions
 } from 'fastify';
+import type Database from 'better-sqlite3';
 import type { ReplyDecision } from './domain/authorization.js';
 import {
   registerFeishuEventRoutes
@@ -17,6 +18,10 @@ import type { FeishuOAuthService } from './services/feishu-oauth.js';
 import type { IngestionResult } from './services/minute-ingestion.js';
 import type { ProjectRepository } from './repositories/project-repository.js';
 import { registerProjectDiagnosticsRoute } from './routes/project-diagnostics.js';
+import { registerContextDiagnosticsRoute } from './routes/context-diagnostics.js';
+import { registerContextReviewActionRoutes } from './routes/context-review-actions.js';
+import type { OutboxRepository } from './repositories/outbox-repository.js';
+import type { ContextRecordRepository } from './repositories/context-record-repository.js';
 
 type LoggerOption = FastifyServerOptions['logger'];
 
@@ -29,6 +34,15 @@ export interface AppDependencies {
   sendTextMessage?(input: { chatId: string; text: string }): Promise<{ messageId: string }>;
   oauth?: FeishuOAuthService;
   projectRepository?: ProjectRepository;
+  context?: {
+    client: Database.Database;
+    review?: {
+      ivyPrivateChatId: string;
+      approverOpenIds: readonly string[];
+      outboxRepository: OutboxRepository;
+      recordRepository: ContextRecordRepository;
+    };
+  };
   logger?: LoggerOption;
 }
 
@@ -56,6 +70,16 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
   }
   if (dependencies.projectRepository) {
     registerProjectDiagnosticsRoute(app, dependencies.projectRepository);
+  }
+  if (dependencies.context) {
+    registerContextDiagnosticsRoute(app, dependencies.context.client);
+    if (dependencies.context.review) {
+      registerContextReviewActionRoutes(app, {
+        verificationToken: dependencies.verificationToken,
+        encryptKey: dependencies.encryptKey,
+        ...dependencies.context.review
+      });
+    }
   }
 
   return app;

@@ -6,6 +6,7 @@ import { createFeishuSdkClient } from './adapters/feishu-sdk.js';
 import { createFeishuIntegration } from './composition/feishu.js';
 import { createMeetingSummarizer } from './composition/meeting-summarizer.js';
 import { createWorkerRuntime } from './composition/worker-runtime.js';
+import { createContextRuntime } from './composition/context-runtime.js';
 import { loadConfig } from './config.js';
 import { createSqliteDatabase } from './db/client.js';
 import { migrateDatabase } from './db/migrate.js';
@@ -37,6 +38,22 @@ const meetingSummarizer = createMeetingSummarizer({
   config,
   projectRepository
 });
+const contextRuntime = config.context.candidatesEnabled
+  ? createContextRuntime({
+    client: database.client,
+    jobRepository,
+    outboxRepository,
+    projectRepository,
+    targetChatId: config.feishu.ivyPrivateChatId,
+    reviewEnabled: config.context.reviewEnabled,
+    sourceMaxBytes: config.context.sourceMaxBytes,
+    sourceMaxSegments: config.context.sourceMaxSegments,
+    extractorMaxBytes: config.context.extractorMaxBytes,
+    extractorMaxSegments: config.context.extractorMaxSegments,
+    codex: config.codex,
+    env: process.env
+  })
+  : null;
 let oauth: FeishuOAuthService | undefined;
 const feishuIntegration = createFeishuIntegration({
   config,
@@ -102,7 +119,10 @@ const workerRuntime = createWorkerRuntime(
       summarizer: meetingSummarizer,
       delivery: feishuIntegration.delivery,
       targetChatId: config.feishu.ivyPrivateChatId,
-      intervalMs: config.worker.pollIntervalMs
+      intervalMs: config.worker.pollIntervalMs,
+      ...(contextRuntime
+        ? { context: { capture: contextRuntime.capture, worker: contextRuntime.worker } }
+        : {})
     }
     : {
       enabled: false
@@ -117,9 +137,23 @@ const app = buildApp({
     isFeishuDeliveryAvailable: () => config.worker.enabled,
     isWorkerConsumptionAvailable: () => workerRuntime.isConsumptionAvailable(),
     isCodexAuthAvailable: async () =>
-      config.codex.summarizerMode === 'codex' && await codexAuthProbe.isAvailable()
+      (config.codex.summarizerMode === 'codex' || config.context.candidatesEnabled) &&
+      await codexAuthProbe.isAvailable()
   }),
   projectRepository,
+  ...(contextRuntime ? {
+    context: {
+      client: database.client,
+      ...(config.context.reviewEnabled ? {
+        review: {
+          ivyPrivateChatId: config.feishu.ivyPrivateChatId,
+          approverOpenIds: config.feishu.approverOpenIds,
+          outboxRepository,
+          recordRepository: contextRuntime.recordRepository
+        }
+      } : {})
+    }
+  } : {}),
   verificationToken: config.feishu.verificationToken,
   encryptKey: config.feishu.encryptKey,
   ingestMinute: (event) => ingestMinuteGenerated(event, {

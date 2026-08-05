@@ -178,3 +178,33 @@ Prompt. It does not create or run a Codex task, and every generated Todo stays
 projects, active rules, context-snapshot counts/timestamps, and open mapping
 conflicts. It must not expose raw group messages, file text, transcripts,
 tokens, environment values, or secrets.
+
+## Phase 1E Enterprise Context rollout boundary
+
+Phase 1E adds an immutable Context source/evidence/candidate/review/record-version
+schema and a separate `extract_context_candidates` durable job. This is a local
+implementation boundary only; it has not been deployed or enabled in production.
+
+Both production switches must remain off until Ivy approves a separate rollout:
+
+```text
+CONTEXT_CANDIDATES_ENABLED=false
+CONTEXT_REVIEW_ENABLED=false
+```
+
+Before enabling either switch, the production change must include a SQLite backup,
+additive migration audit, rollback procedure, Ivy private-card callback verification,
+and an explicit decision for transcript retention period, deletion workflow, access
+control, and encryption at rest. Enabling Context candidates does not authorize
+historical group sync; `PROJECT_CONTEXT_SYNC_ENABLED` remains independently false.
+
+`GET /diag/context` is aggregate-only. It exposes counts and the latest source capture
+timestamp, never normalized source content, evidence excerpts, locators, open IDs,
+tokens, or candidate payloads.
+
+The first-slice limits are intentionally separate and must pass startup validation:
+the immutable transcript snapshot defaults to `2000000` UTF-8 bytes / `10000`
+segments, while extractor input defaults to `500000` UTF-8 bytes / `2000` segments.
+The extractor limits cannot exceed the source limits. Inputs beyond either boundary
+are never truncated; they produce a typed Context-only failure so the Phase 1D
+summary and follow-up path can continue.

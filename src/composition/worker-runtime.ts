@@ -6,7 +6,9 @@ import { MeetingRepository } from '../repositories/meeting-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
 import { DurableJobConsumer, type JobProcessResult } from '../services/job-consumer.js';
 import { processMinuteJob } from '../services/meeting-worker.js';
-import { deliverPendingMeetingSummaries } from '../adapters/feishu.js';
+import { deliverPendingContextReviews, deliverPendingMeetingSummaries } from '../adapters/feishu.js';
+import { processContextCandidateJob, type ContextCandidateWorkerDependencies } from '../services/context-candidate-worker.js';
+import type { MeetingWorkerDependencies } from '../services/meeting-worker.js';
 
 export interface DisabledWorkerRuntimeOptions {
   enabled: false;
@@ -26,6 +28,10 @@ export interface EnabledWorkerRuntimeOptions {
   intervalMs?: number;
   now?: () => Date;
   onError?: (error: unknown) => void;
+  context?: {
+    capture: NonNullable<MeetingWorkerDependencies['context']>;
+    worker: ContextCandidateWorkerDependencies;
+  };
 }
 
 export interface WorkerRuntime {
@@ -46,8 +52,19 @@ export function createWorkerRuntime(
     intervalMs: options.intervalMs,
     now: options.now,
     onError: options.onError,
-    leaseNext: (availableAt) => options.jobRepository.leaseNextProcessMinute(availableAt),
+    ...(options.context ? { afterTick: async () => {
+      await deliverPendingContextReviews({ outboxRepository: options.outboxRepository,
+        delivery: options.delivery, now: options.now });
+    } } : {}),
+    leaseNext: (availableAt) => options.jobRepository.leaseNextSupportedJob(
+      availableAt,
+      options.context ? ['process_minute', 'extract_context_candidates'] : ['process_minute']
+    ),
     process: async (job) => {
+      if (job.kind === 'extract_context_candidates') {
+        if (!options.context) throw new Error('Context job was leased without Context runtime');
+        return processContextCandidateJob(job, options.context.worker);
+      }
       const result = await processMinuteJob(job, {
         reader: options.reader,
         summarizer: options.summarizer,
@@ -55,7 +72,8 @@ export function createWorkerRuntime(
         jobRepository: options.jobRepository,
         outboxRepository: options.outboxRepository,
         targetChatId: options.targetChatId,
-        now: options.now
+        now: options.now,
+        context: options.context?.capture ?? { enabled: false }
       });
       if (result === 'completed') {
         await deliverPendingMeetingSummaries({

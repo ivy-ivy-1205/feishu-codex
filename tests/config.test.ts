@@ -17,6 +17,25 @@ const baseEnv = {
 };
 
 describe('loadConfig', () => {
+  it('keeps Context extraction and review independently disabled by default', () => {
+    expect(loadConfig(baseEnv).context).toEqual({
+      candidatesEnabled: false,
+      reviewEnabled: false,
+      sourceMaxBytes: 2_000_000,
+      sourceMaxSegments: 10_000,
+      extractorMaxBytes: 500_000,
+      extractorMaxSegments: 2_000
+    });
+    expect(loadConfig({ ...baseEnv, CONTEXT_CANDIDATES_ENABLED: 'true', CONTEXT_REVIEW_ENABLED: 'true' }).context)
+      .toMatchObject({ candidatesEnabled: true, reviewEnabled: true });
+    expect(() => loadConfig({ ...baseEnv, CONTEXT_CANDIDATES_ENABLED: '1' })).toThrow();
+    expect(() => loadConfig({ ...baseEnv,
+      CONTEXT_SOURCE_MAX_BYTES: '100', CONTEXT_EXTRACTOR_MAX_BYTES: '101'
+    })).toThrow(/extractor/i);
+    expect(() => loadConfig({ ...baseEnv,
+      CONTEXT_SOURCE_MAX_SEGMENTS: '10', CONTEXT_EXTRACTOR_MAX_SEGMENTS: '11'
+    })).toThrow(/extractor/i);
+  });
   it('keeps the private chat ID separate from Ivy user identity', () => {
     const config = loadConfig(baseEnv);
     expect(config.feishu.ivyPrivateChatId).toMatch(/^oc_/);

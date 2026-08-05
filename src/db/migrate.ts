@@ -64,7 +64,11 @@ const migrationSql = `
     idempotency_key TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT NOT NULL,
-    delivered_at TEXT
+    delivered_at TEXT,
+    delivered_message_id TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT,
+    last_error_code TEXT
   );
 
   CREATE TABLE IF NOT EXISTS approval_actions (
@@ -135,6 +139,174 @@ const migrationSql = `
     last_event_at TEXT,
     updated_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS context_sources (
+    id TEXT PRIMARY KEY,
+    source_system TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    logical_key TEXT NOT NULL,
+    source_version INTEGER NOT NULL CHECK(source_version > 0),
+    occurred_at TEXT NOT NULL,
+    authors_json TEXT NOT NULL,
+    locator_uri TEXT,
+    content_format TEXT NOT NULL,
+    content_text TEXT NOT NULL,
+    metadata_json TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    availability_status TEXT NOT NULL CHECK(availability_status IN ('available', 'deleted', 'permission_lost', 'unknown')),
+    captured_at TEXT NOT NULL,
+    UNIQUE(logical_key, content_hash),
+    UNIQUE(logical_key, source_version)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_source_relations (
+    from_source_id TEXT NOT NULL REFERENCES context_sources(id),
+    to_source_id TEXT NOT NULL REFERENCES context_sources(id),
+    relation_type TEXT NOT NULL CHECK(relation_type IN ('derived_from', 'part_of', 'revises')),
+    created_at TEXT NOT NULL,
+    CHECK(from_source_id <> to_source_id),
+    UNIQUE(from_source_id, to_source_id, relation_type)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_evidence (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL REFERENCES context_sources(id),
+    source_version INTEGER NOT NULL CHECK(source_version > 0),
+    excerpt TEXT NOT NULL,
+    locator_json TEXT NOT NULL,
+    excerpt_hash TEXT NOT NULL,
+    evidence_level TEXT NOT NULL CHECK(evidence_level IN ('derived_summary', 'primary_statement', 'authoritative_record', 'direct_observation')),
+    captured_at TEXT NOT NULL,
+    UNIQUE(source_id, excerpt_hash, locator_json)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_extraction_runs (
+    id TEXT PRIMARY KEY,
+    source_set_hash TEXT NOT NULL,
+    extractor_name TEXT NOT NULL,
+    extractor_version TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('processing', 'completed', 'failed')),
+    error_code TEXT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    UNIQUE(source_set_hash, extractor_name, extractor_version, prompt_version)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_extraction_run_sources (
+    extraction_run_id TEXT NOT NULL REFERENCES context_extraction_runs(id),
+    source_id TEXT NOT NULL REFERENCES context_sources(id),
+    source_role TEXT NOT NULL CHECK(source_role IN ('primary', 'context')),
+    UNIQUE(extraction_run_id, source_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_candidates (
+    id TEXT PRIMARY KEY,
+    extraction_run_id TEXT NOT NULL REFERENCES context_extraction_runs(id),
+    candidate_type TEXT NOT NULL CHECK(candidate_type IN ('proposal', 'decision', 'reported_progress', 'claim', 'risk', 'blocker', 'requirement', 'status_update', 'action_item')),
+    scope TEXT NOT NULL CHECK(scope IN ('company', 'project')),
+    summary TEXT NOT NULL,
+    subject_key TEXT,
+    structured_payload TEXT NOT NULL,
+    extraction_confidence REAL NOT NULL CHECK(extraction_confidence >= 0 AND extraction_confidence <= 1),
+    factual_status TEXT NOT NULL CHECK(factual_status IN ('source_attested', 'reported', 'reviewer_confirmed', 'evidence_verified', 'disputed')),
+    review_status TEXT NOT NULL CHECK(review_status IN ('pending', 'approved', 'rejected', 'needs_clarification', 'conflict')),
+    candidate_fingerprint TEXT NOT NULL UNIQUE,
+    external_refs_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS context_candidate_projects (
+    candidate_id TEXT NOT NULL REFERENCES context_candidates(id),
+    project_key TEXT REFERENCES projects(project_key),
+    project_role TEXT NOT NULL CHECK(project_role IN ('primary', 'related')),
+    mapping_status TEXT NOT NULL CHECK(mapping_status IN ('mapped', 'needs_confirmation', 'unmapped', 'conflict')),
+    mapping_confidence TEXT NOT NULL CHECK(mapping_confidence IN ('high', 'medium', 'low')),
+    mapping_evidence TEXT NOT NULL,
+    UNIQUE(candidate_id, project_key, project_role)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_candidate_evidence (
+    candidate_id TEXT NOT NULL REFERENCES context_candidates(id),
+    evidence_id TEXT NOT NULL REFERENCES context_evidence(id),
+    evidence_role TEXT NOT NULL CHECK(evidence_role IN ('supporting', 'contradicting', 'context')),
+    UNIQUE(candidate_id, evidence_id, evidence_role)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_records (
+    id TEXT PRIMARY KEY,
+    record_type TEXT NOT NULL CHECK(record_type IN ('proposal', 'decision', 'reported_progress', 'claim', 'risk', 'blocker', 'requirement', 'status_update', 'action_item')),
+    scope TEXT NOT NULL CHECK(scope IN ('company', 'project')),
+    subject_key TEXT,
+    lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('active', 'disputed', 'archived')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS context_record_versions (
+    id TEXT PRIMARY KEY,
+    record_id TEXT NOT NULL REFERENCES context_records(id),
+    version_number INTEGER NOT NULL CHECK(version_number > 0),
+    summary TEXT NOT NULL,
+    structured_payload TEXT NOT NULL,
+    factual_status TEXT NOT NULL CHECK(factual_status IN ('source_attested', 'reported', 'reviewer_confirmed', 'evidence_verified', 'disputed')),
+    source_candidate_id TEXT NOT NULL REFERENCES context_candidates(id),
+    reviewer_open_id TEXT NOT NULL,
+    reviewed_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(record_id, version_number)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_candidate_record_relations (
+    candidate_id TEXT NOT NULL REFERENCES context_candidates(id),
+    record_id TEXT NOT NULL REFERENCES context_records(id),
+    relation_type TEXT NOT NULL CHECK(relation_type IN ('supplements', 'confirms', 'corrects', 'supersedes', 'conflicts_with', 'duplicates')),
+    status TEXT NOT NULL CHECK(status IN ('suggested', 'confirmed', 'rejected')),
+    rationale TEXT NOT NULL,
+    UNIQUE(candidate_id, record_id, relation_type)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_reviews (
+    id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL REFERENCES context_candidates(id),
+    action TEXT NOT NULL CHECK(action IN ('approve', 'reject', 'request_clarification', 'mark_conflict')),
+    reviewer_open_id TEXT NOT NULL,
+    approved_summary TEXT,
+    approved_payload TEXT,
+    decided_factual_status TEXT CHECK(decided_factual_status IN ('source_attested', 'reported', 'reviewer_confirmed', 'evidence_verified', 'disputed')),
+    target_record_id TEXT REFERENCES context_records(id),
+    relation_type TEXT CHECK(relation_type IN ('supplements', 'confirms', 'corrects', 'supersedes', 'conflicts_with', 'duplicates')),
+    reason TEXT,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS context_record_projects (
+    record_version_id TEXT NOT NULL REFERENCES context_record_versions(id),
+    project_key TEXT NOT NULL REFERENCES projects(project_key),
+    project_role TEXT NOT NULL CHECK(project_role IN ('primary', 'related')),
+    UNIQUE(record_version_id, project_key, project_role)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_record_evidence (
+    record_version_id TEXT NOT NULL REFERENCES context_record_versions(id),
+    evidence_id TEXT NOT NULL REFERENCES context_evidence(id),
+    evidence_role TEXT NOT NULL CHECK(evidence_role IN ('supporting', 'contradicting', 'context')),
+    UNIQUE(record_version_id, evidence_id, evidence_role)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_record_relations (
+    id TEXT PRIMARY KEY,
+    from_record_version_id TEXT NOT NULL REFERENCES context_record_versions(id),
+    to_record_version_id TEXT NOT NULL REFERENCES context_record_versions(id),
+    relation_type TEXT NOT NULL CHECK(relation_type IN ('supplements', 'confirms', 'corrects', 'supersedes', 'conflicts_with', 'duplicates')),
+    review_id TEXT NOT NULL REFERENCES context_reviews(id),
+    created_at TEXT NOT NULL,
+    CHECK(from_record_version_id <> to_record_version_id),
+    UNIQUE(from_record_version_id, to_record_version_id, relation_type)
+  );
 `;
 
 export function migrateDatabase(client: Database.Database): void {
@@ -142,6 +314,13 @@ export function migrateDatabase(client: Database.Database): void {
   client.exec(migrationSql);
   migrateProcessMinuteRetryPayloads(client);
   migrateOutboxDeliveryColumn(client);
+  migrateOutboxMessageIdColumn(client);
+  migrateContextOutboxRetryColumns(client);
+  client.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS outbox_delivered_message_id_unique
+      ON outbox(delivered_message_id)
+      WHERE delivered_message_id IS NOT NULL
+  `);
   migrateTodoCapabilityColumn(client);
   migrateTodoProjectColumns(client);
   seedProjectRegistry(client);
@@ -249,6 +428,27 @@ function migrateOutboxDeliveryColumn(client: Database.Database): void {
     return;
   }
   client.exec('ALTER TABLE outbox ADD COLUMN delivered_at TEXT');
+}
+
+function migrateOutboxMessageIdColumn(client: Database.Database): void {
+  const columns = client.prepare('PRAGMA table_info(outbox)').all() as TableColumn[];
+  if (!columns.some((column) => column.name === 'delivered_message_id')) {
+    client.exec('ALTER TABLE outbox ADD COLUMN delivered_message_id TEXT');
+  }
+}
+
+function migrateContextOutboxRetryColumns(client: Database.Database): void {
+  const columns = client.prepare('PRAGMA table_info(outbox)').all() as TableColumn[];
+  const additions = [
+    ['attempt_count', 'INTEGER NOT NULL DEFAULT 0'],
+    ['next_attempt_at', 'TEXT'],
+    ['last_error_code', 'TEXT']
+  ] as const;
+  for (const [name, definition] of additions) {
+    if (!columns.some((column) => column.name === name)) {
+      client.exec(`ALTER TABLE outbox ADD COLUMN ${name} ${definition}`);
+    }
+  }
 }
 
 function migrateLegacyBatchJobs(client: Database.Database): void {

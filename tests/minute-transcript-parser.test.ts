@@ -98,6 +98,28 @@ describe('parseMinuteTranscriptStream', () => {
       ]);
   });
 
+  it('keeps continuation lines inside the real speaker segment boundary', async () => {
+    const plainText = [
+      '2026-08-03 10:00:00 CST|多行 segment 回归',
+      '',
+      '发言人（2）:',
+      'James、Ivy',
+      '',
+      'James',
+      '第一行',
+      '第二行',
+      '',
+      'Ivy',
+      '后续决定'
+    ].join('\n');
+
+    await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
+      .resolves.toEqual([
+        { speakerName: 'James', startMs: 0, endMs: 1, text: '第一行\n第二行' },
+        { speakerName: 'Ivy', startMs: 1, endMs: 2, text: '后续决定' }
+      ]);
+  });
+
   it('infers speakers from repeated plain text heading lines when no speaker list exists', async () => {
     const plainText = [
       '2026-07-03 20:04:28 CST|56分钟 3秒',
