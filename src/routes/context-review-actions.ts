@@ -31,15 +31,24 @@ const callbackSchema = z.object({
     action: z.object({ value: actionValueSchema }).passthrough()
   }).passthrough()
 });
+const verificationRequestSchema = z.object({
+  type: z.literal('url_verification'),
+  token: z.string().min(1),
+  challenge: z.string().min(1)
+});
 
-export interface ContextReviewActionRouteDependencies {
-  verificationToken: string;
-  encryptKey: string;
+export interface ContextReviewActionDependencies {
   ivyPrivateChatId: string;
   approverOpenIds: readonly string[];
   outboxRepository: OutboxRepository;
   recordRepository: ContextRecordRepository;
   now?: () => Date;
+}
+
+export interface ContextReviewActionRouteDependencies {
+  verificationToken: string;
+  encryptKey: string;
+  review?: ContextReviewActionDependencies;
 }
 
 export function registerContextReviewActionRoutes(
@@ -49,20 +58,29 @@ export function registerContextReviewActionRoutes(
   app.post('/webhooks/feishu/card-actions', async (request, reply) => {
     const decrypted = decryptFeishuBody(request.body, dependencies.encryptKey);
     if (decrypted === null) return reply.code(400).send({ error: 'invalid_encrypted_payload' });
+    const verification = verificationRequestSchema.safeParse(decrypted);
+    if (verification.success) {
+      if (verification.data.token !== dependencies.verificationToken) {
+        return reply.code(401).send({ error: 'invalid_verification_token' });
+      }
+      return { challenge: verification.data.challenge };
+    }
     const callback = callbackSchema.safeParse(decrypted);
     if (!callback.success) return reply.code(400).send({ error: 'invalid_context_review_callback' });
     if (callback.data.header.token !== dependencies.verificationToken) {
       return reply.code(401).send({ error: 'invalid_verification_token' });
     }
+    const review = dependencies.review;
+    if (!review) return reply.code(503).send({ error: 'context_review_disabled' });
     const { event, header } = callback.data;
     const reviewerOpenId = event.operator.operator_id.open_id;
-    if (!dependencies.approverOpenIds.includes(reviewerOpenId)) {
+    if (!review.approverOpenIds.includes(reviewerOpenId)) {
       return reply.code(403).send({ error: 'context_reviewer_unauthorized' });
     }
-    if (event.context.open_chat_id !== dependencies.ivyPrivateChatId) {
+    if (event.context.open_chat_id !== review.ivyPrivateChatId) {
       return reply.code(403).send({ error: 'context_review_wrong_chat' });
     }
-    const delivery = dependencies.outboxRepository.findDeliveredContextReview(event.context.open_message_id);
+    const delivery = review.outboxRepository.findDeliveredContextReview(event.context.open_message_id);
     if (!delivery || delivery.targetChatId !== event.context.open_chat_id) {
       return reply.code(409).send({ error: 'context_review_delivery_not_found' });
     }
@@ -70,11 +88,11 @@ export function registerContextReviewActionRoutes(
     if (delivery.cardNonce !== value.cardNonce) {
       return reply.code(409).send({ error: 'context_review_nonce_mismatch' });
     }
-    const now = dependencies.now?.() ?? new Date();
+    const now = review.now?.() ?? new Date();
     if (!Number.isFinite(Date.parse(delivery.expiresAt)) || now.getTime() > Date.parse(delivery.expiresAt)) {
       return reply.code(409).send({ error: 'context_review_card_expired' });
     }
-    const candidateRepository = new ContextCandidateRepository(dependencies.recordRepository.client);
+    const candidateRepository = new ContextCandidateRepository(review.recordRepository.client);
     const candidate = candidateRepository.getCandidate(value.candidateId);
     if (!candidate) return reply.code(404).send({ error: 'context_candidate_not_found' });
     if (candidate.extractionRunId !== delivery.extractionRunId || !delivery.candidateIds.includes(candidate.id)) {
@@ -91,7 +109,7 @@ export function registerContextReviewActionRoutes(
       return reply.code(409).send({ error: 'context_promotion_intent_invalid' });
     }
     try {
-      const result = dependencies.recordRepository.promoteCandidate({
+      const result = review.recordRepository.promoteCandidate({
         candidateId: candidate.id,
         expectedReviewStatus: value.expectedReviewStatus,
         reviewerOpenId,

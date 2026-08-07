@@ -65,6 +65,11 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
       ? (event) => dependencies.oauth!.recordMinuteEvent(event)
       : undefined
   });
+  registerContextReviewActionRoutes(app, {
+    verificationToken: dependencies.verificationToken,
+    encryptKey: dependencies.encryptKey,
+    ...(dependencies.context?.review ? { review: dependencies.context.review } : {})
+  });
   if (dependencies.oauth) {
     registerFeishuOAuthRoutes(app, { oauth: dependencies.oauth });
   }
@@ -73,13 +78,6 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
   }
   if (dependencies.context) {
     registerContextDiagnosticsRoute(app, dependencies.context.client);
-    if (dependencies.context.review) {
-      registerContextReviewActionRoutes(app, {
-        verificationToken: dependencies.verificationToken,
-        encryptKey: dependencies.encryptKey,
-        ...dependencies.context.review
-      });
-    }
   }
 
   return app;

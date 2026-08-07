@@ -67,9 +67,9 @@ function relationHarness(options: { archived?: boolean; scopeMismatch?: boolean;
   outbox.acknowledgeContextReviewDelivery({ extractionRunId: incoming.run.id, messageId: 'om_relation',
     deliveredAt: new Date('2030-01-01T00:00:00.000Z') });
   const app = fastify();
-  registerContextReviewActionRoutes(app, { verificationToken: 'verify', encryptKey: 'encrypt',
+  registerContextReviewActionRoutes(app, { verificationToken: 'verify', encryptKey: 'encrypt', review: {
     ivyPrivateChatId: 'oc_ivy', approverOpenIds: ['ou_ivy'], outboxRepository: outbox,
-    recordRepository: records, now: () => new Date('2030-01-01T12:00:00.000Z') });
+    recordRepository: records, now: () => new Date('2030-01-01T12:00:00.000Z') } });
   const body = (value: Record<string, unknown>) => ({ schema: '2.0', header: { token: 'verify', event_id: 'evt' },
     event: { operator: { operator_id: { open_id: 'ou_ivy' } },
       context: { open_chat_id: 'oc_ivy', open_message_id: 'om_relation' },

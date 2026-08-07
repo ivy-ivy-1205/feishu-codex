@@ -1,5 +1,7 @@
+import { createCipheriv, createHash, randomBytes } from 'node:crypto';
 import fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
+import { buildApp } from '../src/app.js';
 import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
 import { ContextCandidateRepository } from '../src/repositories/context-candidate-repository.js';
@@ -22,10 +24,10 @@ function harness(expiresAt = '2030-01-02T00:00:00.000Z') {
     card: {}, cardNonce: 'nonce-1', expiresAt, candidateIds: [candidate.id], promotionIntents: [] });
   outbox.acknowledgeContextReviewDelivery({ extractionRunId: run.id, messageId: 'om_review', deliveredAt: new Date('2030-01-01T00:00:00.000Z') });
   const app = fastify();
-  registerContextReviewActionRoutes(app, { verificationToken: 'verify', encryptKey: 'encrypt',
+  registerContextReviewActionRoutes(app, { verificationToken: 'verify', encryptKey: 'encrypt', review: {
     ivyPrivateChatId: 'oc_ivy', approverOpenIds: ['ou_ivy'], outboxRepository: outbox,
     recordRepository: new ContextRecordRepository(database.client),
-    now: () => new Date('2030-01-01T12:00:00.000Z') });
+    now: () => new Date('2030-01-01T12:00:00.000Z') } });
   const body = (overrides: Record<string, unknown> = {}) => ({ schema: '2.0',
     header: { token: 'verify', event_id: 'evt-card-1' },
     event: { operator: { operator_id: { open_id: 'ou_ivy' } },
@@ -35,6 +37,63 @@ function harness(expiresAt = '2030-01-02T00:00:00.000Z') {
 }
 
 describe('Context review action callback', () => {
+  it('serves encrypted URL verification while Context review is disabled', async () => {
+    const database = createSqliteDatabase(':memory:'); migrateDatabase(database.client);
+    const app = buildApp({
+      readiness: () => ({ ready: true }), verificationToken: 'verify', encryptKey: 'encrypt',
+      ingestMinute: () => ({ status: 'ignored' }),
+      routeReply: () => ({ kind: 'reject', reason: 'invalid_input' }),
+      logger: false
+    });
+
+    const response = await app.inject({ method: 'POST', url: '/webhooks/feishu/card-actions',
+      payload: encryptFeishuPayload({ type: 'url_verification', token: 'verify', challenge: 'card-challenge' }) });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ challenge: 'card-challenge' });
+    await app.close(); database.close();
+  });
+
+  it.each([
+    ['wrong token', { type: 'url_verification', token: 'wrong', challenge: 'must-not-echo' }, 401],
+    ['missing challenge', { type: 'url_verification', token: 'verify' }, 400]
+  ] as const)('rejects URL verification with a %s', async (_label, payload, status) => {
+    const database = createSqliteDatabase(':memory:'); migrateDatabase(database.client);
+    const app = buildApp({
+      readiness: () => ({ ready: true }), verificationToken: 'verify', encryptKey: 'encrypt',
+      ingestMinute: () => ({ status: 'ignored' }),
+      routeReply: () => ({ kind: 'reject', reason: 'invalid_input' }), logger: false
+    });
+
+    const response = await app.inject({ method: 'POST', url: '/webhooks/feishu/card-actions', payload });
+
+    expect(response.statusCode).toBe(status);
+    await app.close(); database.close();
+  });
+
+  it('rejects real Card Actions without writes while Context review is disabled', async () => {
+    const database = createSqliteDatabase(':memory:'); migrateDatabase(database.client);
+    const app = buildApp({
+      readiness: () => ({ ready: true }), verificationToken: 'verify', encryptKey: 'encrypt',
+      ingestMinute: () => ({ status: 'ignored' }),
+      routeReply: () => ({ kind: 'reject', reason: 'invalid_input' }),
+      context: { client: database.client }, logger: false
+    });
+    const payload = { schema: '2.0', header: { token: 'verify', event_id: 'evt-disabled' },
+      event: { operator: { operator_id: { open_id: 'ou_ivy' } },
+        context: { open_chat_id: 'oc_ivy', open_message_id: 'om_review' },
+        action: { value: { candidateId: `ctxcand_${'0'.repeat(32)}`, action: 'approve_keep_status',
+          expectedReviewStatus: 'pending', cardNonce: 'nonce-1' } } } };
+
+    const response = await app.inject({ method: 'POST', url: '/webhooks/feishu/card-actions', payload });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'context_review_disabled' });
+    expect(database.client.prepare('SELECT COUNT(*) AS count FROM context_reviews').get()).toEqual({ count: 0 });
+    expect(database.client.prepare('SELECT COUNT(*) AS count FROM context_records').get()).toEqual({ count: 0 });
+    await app.close(); database.close();
+  });
+
   it('rejects malformed encrypted callback input', async () => {
     const h = harness();
     const response = await h.app.inject({ method: 'POST', url: '/webhooks/feishu/card-actions',
@@ -121,3 +180,11 @@ describe('Context review action callback', () => {
       .toEqual({ count: 1 });
   });
 });
+
+function encryptFeishuPayload(payload: Record<string, unknown>): { encrypt: string } {
+  const iv = randomBytes(16);
+  const key = createHash('sha256').update('encrypt', 'utf8').digest();
+  const cipher = createCipheriv('aes-256-cbc', key, iv);
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
+  return { encrypt: Buffer.concat([iv, encrypted]).toString('base64') };
+}
