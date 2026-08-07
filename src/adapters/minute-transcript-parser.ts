@@ -48,10 +48,13 @@ function parsePlainTextTranscript(raw: string): TranscriptSegmentRecord[] {
   }
 
   const speakerNames = extractPlainTextSpeakerNames(lines);
-  if (speakerNames.length === 0) {
+  const hasNumberedSpeakerHeadings = lines.some(
+    (line) => numberedSpeakerName(line) !== null
+  );
+  if (speakerNames.length === 0 && !hasNumberedSpeakerHeadings) {
     speakerNames.push(...inferPlainTextSpeakerNames(lines));
   }
-  if (speakerNames.length === 0) {
+  if (speakerNames.length === 0 && !hasNumberedSpeakerHeadings) {
     throw new MinuteTranscriptParseError();
   }
   const speakerSet = new Set(speakerNames.map(normalizeSpeakerKey));
@@ -69,6 +72,15 @@ function parsePlainTextTranscript(raw: string): TranscriptSegmentRecord[] {
     }
     if (skipSpeakerListLine) {
       skipSpeakerListLine = false;
+      continue;
+    }
+
+    const numberedSpeaker = numberedSpeakerName(line);
+    if (numberedSpeaker !== null) {
+      if (current !== null && current.textLines.length > 0) {
+        segments.push(current);
+      }
+      current = { speakerName: numberedSpeaker, textLines: [] };
       continue;
     }
 
@@ -138,7 +150,11 @@ function inferPlainTextSpeakerNames(lines: string[]): string[] {
 }
 
 function isPlainTextSpeakerCandidate(line: string): boolean {
-  if (isPlainTextHeaderLine(line) || isSpeakerMarkerLine(line)) {
+  if (
+    isPlainTextHeaderLine(line) ||
+    isSpeakerMarkerLine(line) ||
+    numberedSpeakerName(line) !== null
+  ) {
     return false;
   }
   if (line.length === 0 || line.length > 40) {
@@ -156,6 +172,11 @@ function isPlainTextHeaderLine(line: string): boolean {
 
 function isSpeakerMarkerLine(line: string): boolean {
   return /^发言人(?:\(\d+\)|（\d+）)?[:：]?$/u.test(line);
+}
+
+function numberedSpeakerName(line: string): string | null {
+  const match = /^说话人[ \t]+([1-9]\d*)$/u.exec(line);
+  return match?.[1] ? `说话人 ${match[1]}` : null;
 }
 
 function matchSpeakerName(

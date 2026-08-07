@@ -25,6 +25,7 @@ import {
   MeetingSummaryRenderError,
   renderMeetingSummary
 } from './summary-renderer.js';
+import { MinuteTranscriptParseError } from '../adapters/minute-transcript-parser.js';
 
 const maximumRetryDelayMs = 60_000;
 const retryBudgets = {
@@ -219,6 +220,15 @@ export async function processMinuteJob(
   } catch (error) {
     if (error instanceof LeaseLostError) {
       return 'lost_lease';
+    }
+
+    if (error instanceof MinuteTranscriptParseError) {
+      return markPermanentFailure(
+        dependencies.jobRepository,
+        job,
+        error.code,
+        now()
+      );
     }
 
     const retriableCode = retriableErrorCode(error);

@@ -14,6 +14,7 @@ import { JobRepository } from '../src/repositories/job-repository.js';
 import { MeetingRepository } from '../src/repositories/meeting-repository.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { processMinuteJob } from '../src/services/meeting-worker.js';
+import { MinuteTranscriptParseError } from '../src/adapters/minute-transcript-parser.js';
 
 const ivyChatId = 'oc_d851c3e986007dc0f97ab582bcb2e7c8';
 const now = new Date('2030-07-18T03:00:00.000Z');
@@ -291,6 +292,70 @@ describe('processMinuteJob', () => {
         failureReason: 'RATE_LIMITED_RETRY_EXHAUSTED'
       }
     });
+  });
+
+  it('terminally fails an invalid transcript once and never leases it after restart', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'aijia-invalid-transcript-'));
+    const filename = join(directory, 'bridge.sqlite');
+    const sensitiveTranscript = '完整转录正文绝不能进入失败原因';
+    try {
+      let database = createSqliteDatabase(filename);
+      migrateDatabase(database.client);
+      let meetingRepository = new MeetingRepository(database.client);
+      let jobRepository = new JobRepository(database.client);
+      meetingRepository.ingestMinute({ minuteId: 'min_invalid_transcript', eventId: 'evt_invalid' });
+      jobRepository.enqueueProcessMinute('min_invalid_transcript');
+      const job = jobRepository.leaseNextProcessMinute(now);
+      if (!job) throw new Error('expected invalid transcript job to be leased');
+
+      expect(await processMinuteJob(job, {
+        reader: {
+          async getMinute() {
+            const error = new MinuteTranscriptParseError();
+            error.message = sensitiveTranscript;
+            throw error;
+          }
+        },
+        summarizer: { async summarize() { return summaryDraft; } },
+        meetingRepository,
+        jobRepository,
+        outboxRepository: new OutboxRepository(database.client),
+        targetChatId: ivyChatId,
+        now: () => now,
+        context: { enabled: false }
+      })).toBe('completed');
+
+      const failedRow = database.client.prepare(`
+        SELECT status, payload, updated_at FROM batch_jobs WHERE stable_key = ?
+      `).get(job.key) as { status: string; payload: string; updated_at: string };
+      expect(failedRow.status).toBe('failed');
+      expect(failedRow.updated_at).toBe(now.toISOString());
+      expect(JSON.parse(failedRow.payload)).toMatchObject({
+        minuteId: 'min_invalid_transcript',
+        failureReason: 'MINUTE_TRANSCRIPT_INVALID'
+      });
+      expect(failedRow.payload).not.toContain(sensitiveTranscript);
+      expect(database.client.prepare('SELECT count(*) AS count FROM meeting_summaries').get())
+        .toEqual({ count: 0 });
+      expect(database.client.prepare('SELECT count(*) AS count FROM outbox').get())
+        .toEqual({ count: 0 });
+      expect(database.client.prepare('SELECT count(*) AS count FROM context_sources').get())
+        .toEqual({ count: 0 });
+
+      database.close();
+      database = createSqliteDatabase(filename);
+      migrateDatabase(database.client);
+      meetingRepository = new MeetingRepository(database.client);
+      jobRepository = new JobRepository(database.client);
+      expect(jobRepository.leaseNextProcessMinute(new Date('2040-01-01T00:00:00.000Z')))
+        .toBeNull();
+      expect(database.client.prepare(`
+        SELECT status FROM batch_jobs WHERE stable_key = ?
+      `).get(job.key)).toEqual({ status: 'failed' });
+      database.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('keeps alternating retry budgets independent across SQLite close and reopen', async () => {

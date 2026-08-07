@@ -120,6 +120,95 @@ describe('parseMinuteTranscriptStream', () => {
       ]);
   });
 
+  it('parses a real single-speaker numbered heading and preserves multiline text', async () => {
+    const plainText = [
+      '2026-08-07 17:30:41 CST|32秒',
+      '',
+      '关键词:',
+      '飞书、企业',
+      '',
+      '说话人 1',
+      '这是一场测试会议。',
+      '只有经过 Ivy 审核批准后，候选才能成为正式 Context。'
+    ].join('\n');
+
+    await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
+      .resolves.toEqual([{
+        speakerName: '说话人 1',
+        startMs: 0,
+        endMs: 1,
+        text: '这是一场测试会议。\n只有经过 Ivy 审核批准后，候选才能成为正式 Context。'
+      }]);
+  });
+
+  it('keeps numbered speakers distinct and stable across whitespace and repeated segments', async () => {
+    const plainText = [
+      '2026-08-07 17:30:41 CST|测试会议',
+      '',
+      '说话人    1',
+      '第一段第一行',
+      '第一段第二行',
+      '',
+      '说话人 2',
+      '第二位发言',
+      '',
+      '说话人\t1',
+      '第一位再次发言'
+    ].join('\n');
+
+    await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
+      .resolves.toEqual([
+        {
+          speakerName: '说话人 1',
+          startMs: 0,
+          endMs: 1,
+          text: '第一段第一行\n第一段第二行'
+        },
+        {
+          speakerName: '说话人 2',
+          startMs: 1,
+          endMs: 2,
+          text: '第二位发言'
+        },
+        {
+          speakerName: '说话人 1',
+          startMs: 2,
+          endMs: 3,
+          text: '第一位再次发言'
+        }
+      ]);
+  });
+
+  it('does not treat an inline numbered-speaker phrase as a segment heading', async () => {
+    const plainText = [
+      '2026-08-07 17:30:41 CST|测试会议',
+      '',
+      '说话人 1',
+      '正文中提到“说话人 1”时仍属于当前段落。',
+      '继续保留这一行。'
+    ].join('\n');
+
+    await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
+      .resolves.toEqual([{
+        speakerName: '说话人 1',
+        startMs: 0,
+        endMs: 1,
+        text: '正文中提到“说话人 1”时仍属于当前段落。\n继续保留这一行。'
+      }]);
+  });
+
+  it('still rejects plain text without a legal speaker heading', async () => {
+    const plainText = [
+      '2026-08-07 17:30:41 CST|测试会议',
+      '关键词:',
+      '飞书、企业',
+      '这段正文没有任何合法 speaker 标题。'
+    ].join('\n');
+
+    await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
+      .rejects.toMatchObject({ code: 'MINUTE_TRANSCRIPT_INVALID' });
+  });
+
   it('infers speakers from repeated plain text heading lines when no speaker list exists', async () => {
     const plainText = [
       '2026-07-03 20:04:28 CST|56分钟 3秒',

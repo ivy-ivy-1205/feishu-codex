@@ -6,6 +6,7 @@ import {
   FeishuSdkApiClient,
   type FeishuSdkClientLike
 } from '../src/adapters/feishu-sdk.js';
+import { FeishuMinutesReaderAdapter } from '../src/adapters/feishu.js';
 
 describe('FeishuSdkApiClient', () => {
   it('creates an official SDK client for a self-built Feishu app without exposing secrets', () => {
@@ -180,6 +181,42 @@ describe('FeishuSdkApiClient', () => {
       endMs: 1_000,
       text: '逐字稿来自 SDK stream'
     }]);
+  });
+
+  it('passes a real numbered-speaker stream through the production reader boundary', async () => {
+    const apiClient = new FeishuSdkApiClient({
+      sdkClient: createFakeSdkClient({
+        minute: {
+          minute: {
+            title: '单人测试会议',
+            create_time: '1786095041000',
+            duration: '32000'
+          }
+        },
+        transcriptStream: Readable.from([[
+          '2026-08-07 17:30:41 CST|32秒',
+          '',
+          '关键词:',
+          '飞书、企业',
+          '',
+          '说话人 1',
+          '第一行',
+          '第二行'
+        ].join('\n')])
+      })
+    });
+    const reader = new FeishuMinutesReaderAdapter(apiClient);
+
+    await expect(reader.getMinute('min_single_speaker')).resolves.toMatchObject({
+      minuteId: 'min_single_speaker',
+      title: '单人测试会议',
+      transcript: [{
+        speakerName: '说话人 1',
+        startMs: 0,
+        endMs: 1,
+        text: '第一行\n第二行'
+      }]
+    });
   });
 
   it('requires a real message ID when sending text', async () => {
