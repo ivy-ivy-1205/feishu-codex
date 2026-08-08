@@ -4,7 +4,7 @@ import {
   MinuteTranscriptParseError,
   parseMinuteTranscriptStream
 } from '../src/adapters/minute-transcript-parser.js';
-import { matchFeishuHeaderlessSingleSpeakerExport } from '../src/adapters/minute-transcript-classifier.js';
+import { matchFeishuSingleSpeakerSrtExport } from '../src/adapters/minute-transcript-srt.js';
 
 describe('parseMinuteTranscriptStream', () => {
   it('parses a JSON array stream into internal TranscriptSegment records', async () => {
@@ -210,59 +210,70 @@ describe('parseMinuteTranscriptStream', () => {
       .rejects.toMatchObject({ code: 'MINUTE_TRANSCRIPT_INVALID' });
   });
 
-  it('parses the verified Feishu self-speaker export only with an explicit boundary mode', async () => {
-    const plainText = [
-      '2026-08-07 21:52:47 CST|29秒',
+  it('parses verified single-speaker SRT cues with exact time and multiline boundaries', async () => {
+    const srt = [
+      '1',
+      '00:00:00,000 --> 00:00:04,250',
+      'Ivy: 第一行：候选 Context 必须由 Ivy 审核。',
+      '第二行：批准后才能成为正式 Context。',
       '',
-      '关键词:',
-      'Context、审核、来源',
-      '',
-      '我',
-      '第一行：候选 Context 必须由 Ivy 审核。',
-      '第二行：批准后才能成为正式 Context。'
+      '2',
+      '00:00:04,250 --> 00:00:09,000',
+      'Ivy: 后续决定。',
+      ''
     ].join('\n');
 
-    await expect(parseMinuteTranscriptStream(Readable.from([plainText]), {
-      speakerBoundaryMode: 'verified_single_speaker_without_header'
-    })).resolves.toEqual([{
-      speakerName: '说话人 1',
-      startMs: 0,
-      endMs: 1,
-      text: '第一行：候选 Context 必须由 Ivy 审核。\n第二行：批准后才能成为正式 Context。'
-    }]);
+    await expect(parseMinuteTranscriptStream(Readable.from([srt]), {
+      speakerBoundaryMode: 'verified_single_speaker_srt'
+    })).resolves.toEqual([
+      {
+        speakerName: '说话人 1',
+        startMs: 0,
+        endMs: 4_250,
+        text: '第一行：候选 Context 必须由 Ivy 审核。\n第二行：批准后才能成为正式 Context。'
+      },
+      {
+        speakerName: '说话人 1',
+        startMs: 4_250,
+        endMs: 9_000,
+        text: '后续决定。'
+      }
+    ]);
 
-    await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
+    await expect(parseMinuteTranscriptStream(Readable.from([srt])))
       .rejects.toMatchObject({ code: 'MINUTE_TRANSCRIPT_INVALID' });
 
-    const matched = matchFeishuHeaderlessSingleSpeakerExport(plainText);
-    expect(matched).not.toBeNull();
-    expect(plainText.slice(matched!.contentStart, matched!.contentEnd)).toBe(
-      '第一行：候选 Context 必须由 Ivy 审核。\n第二行：批准后才能成为正式 Context。'
-    );
+    const matched = matchFeishuSingleSpeakerSrtExport(srt);
+    expect(matched?.segments.map((segment) =>
+      srt.slice(segment.contentStart, segment.contentEnd))).toEqual([
+      '第一行：候选 Context 必须由 Ivy 审核。\n第二行：批准后才能成为正式 Context。',
+      '后续决定。'
+    ]);
   });
 
   it.each([
-    ['a second unknown content block', [
-      '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核', '', '我',
-      '第一段正文。', '', '第二个未知内容块。'
+    ['two distinct speaker prefixes', [
+      '1', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', '',
+      '2', '00:00:04,250 --> 00:00:09,000', 'James: 第二位发言。', ''
     ].join('\n')],
-    ['a second suspected speaker boundary', [
-      '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核', '', '我',
-      '第一段正文。', '说话人 2', '第二位发言。'
+    ['a cue without a speaker prefix', [
+      '1', '00:00:00,000 --> 00:00:04,250', '第一段正文。', ''
     ].join('\n')],
-    ['an unnumbered suspected speaker boundary', [
-      '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核', '', '我',
-      '第一段正文。', 'James', '第二位发言。'
+    ['a non-sequential cue ordinal', [
+      '2', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', ''
     ].join('\n')],
-    ['generic headerless prose', [
-      '2026-08-07 21:52:47 CST|29秒', '关键词:', 'Context、审核', '普通无标题正文。'
+    ['an inverted cue time range', [
+      '1', '00:00:04,250 --> 00:00:00,000', 'Ivy: 第一段正文。', ''
     ].join('\n')],
-    ['an empty body', [
-      '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核', '', '我'
+    ['an invalid minute component', [
+      '1', '00:61:00,000 --> 00:61:04,250', 'Ivy: 第一段正文。', ''
+    ].join('\n')],
+    ['an empty cue body', [
+      '1', '00:00:00,000 --> 00:00:04,250', ''
     ].join('\n')]
-  ])('rejects %s even when the caller requests the verified mode', async (_label, plainText) => {
-    await expect(parseMinuteTranscriptStream(Readable.from([plainText]), {
-      speakerBoundaryMode: 'verified_single_speaker_without_header'
+  ])('rejects %s in verified single-speaker SRT mode', async (_label, srt) => {
+    await expect(parseMinuteTranscriptStream(Readable.from([srt]), {
+      speakerBoundaryMode: 'verified_single_speaker_srt'
     })).rejects.toMatchObject({ code: 'MINUTE_TRANSCRIPT_INVALID' });
   });
 

@@ -1,8 +1,11 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { Readable } from 'node:stream';
 import type { FeishuApiClient, FeishuApiRequestOptions } from './feishu.js';
-import { matchFeishuHeaderlessSingleSpeakerExport } from './minute-transcript-classifier.js';
-import { parseMinuteTranscriptText } from './minute-transcript-parser.js';
+import { matchFeishuSingleSpeakerSrtExport } from './minute-transcript-srt.js';
+import {
+  MinuteTranscriptParseError,
+  parseMinuteTranscriptText
+} from './minute-transcript-parser.js';
 import type {
   FeishuContextClient,
   FeishuContextFile,
@@ -53,7 +56,11 @@ export interface FeishuSdkClientLike {
       minuteTranscript: {
         get(payload: {
           path: { minute_token: string };
-          params?: { need_speaker: boolean };
+          params?: {
+            need_speaker: boolean;
+            need_timestamp: boolean;
+            file_format: 'srt';
+          };
         }, options?: unknown): Promise<unknown>;
       };
     };
@@ -154,8 +161,7 @@ export class FeishuSdkApiClient implements FeishuApiClient {
     options?: FeishuApiRequestOptions
   ): Promise<unknown[]> {
     const payload = {
-      path: { minute_token: minuteId.trim() },
-      params: { need_speaker: true }
+      path: { minute_token: minuteId.trim() }
     };
     const requestOptions = this.#requestOptions(options);
     const response = requestOptions
@@ -163,10 +169,34 @@ export class FeishuSdkApiClient implements FeishuApiClient {
       : await this.#sdkClient.minutes.v1.minuteTranscript.get(payload);
     if (isReadableStreamResponse(response)) {
       const raw = await readUtf8(response.getReadableStream());
-      const verifiedSingleSpeaker = matchFeishuHeaderlessSingleSpeakerExport(raw) !== null;
-      return parseMinuteTranscriptText(raw, verifiedSingleSpeaker
-        ? { speakerBoundaryMode: 'verified_single_speaker_without_header' }
-        : {});
+      try {
+        return parseMinuteTranscriptText(raw);
+      } catch (error) {
+        if (!(error instanceof MinuteTranscriptParseError)) {
+          throw error;
+        }
+        const srtPayload = {
+          path: { minute_token: minuteId.trim() },
+          params: {
+            need_speaker: true,
+            need_timestamp: true,
+            file_format: 'srt' as const
+          }
+        };
+        const srtResponse = requestOptions
+          ? await this.#sdkClient.minutes.v1.minuteTranscript.get(srtPayload, requestOptions)
+          : await this.#sdkClient.minutes.v1.minuteTranscript.get(srtPayload);
+        if (!isReadableStreamResponse(srtResponse)) {
+          throw error;
+        }
+        const srtRaw = await readUtf8(srtResponse.getReadableStream());
+        if (!matchFeishuSingleSpeakerSrtExport(srtRaw)) {
+          throw error;
+        }
+        return parseMinuteTranscriptText(srtRaw, {
+          speakerBoundaryMode: 'verified_single_speaker_srt'
+        });
+      }
     }
     const data = responseData(response);
     return Array.isArray(data) ? data : [];

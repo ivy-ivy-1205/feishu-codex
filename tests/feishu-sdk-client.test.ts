@@ -106,10 +106,7 @@ describe('FeishuSdkApiClient', () => {
       },
       {
         method: 'minutes.v1.minuteTranscript.get',
-        payload: {
-          path: { minute_token: 'min_token_1' },
-          params: { need_speaker: true }
-        }
+        payload: { path: { minute_token: 'min_token_1' } }
       }
     ]);
   });
@@ -140,10 +137,7 @@ describe('FeishuSdkApiClient', () => {
       },
       {
         method: 'minutes.v1.minuteTranscript.get',
-        payload: {
-          path: { minute_token: 'min_token_user' },
-          params: { need_speaker: true }
-        },
+        payload: { path: { minute_token: 'min_token_user' } },
         options: { userAccessToken: 'u-ivy-token' }
       }
     ]);
@@ -225,7 +219,7 @@ describe('FeishuSdkApiClient', () => {
     });
   });
 
-  it('classifies the narrow Feishu self-speaker export at the production reader boundary', async () => {
+  it('falls back from real headerless TXT to verified single-speaker SRT at the production reader boundary', async () => {
     const calls: unknown[] = [];
     const apiClient = new FeishuSdkApiClient({
       sdkClient: createFakeSdkClient({
@@ -236,11 +230,18 @@ describe('FeishuSdkApiClient', () => {
             duration: '29000'
           }
         },
-        transcriptStream: Readable.from([[
-          '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核、来源', '', '我',
-          '第一行：候选 Context 必须由 Ivy 审核。',
-          '第二行：批准后才能成为正式 Context。'
-        ].join('\n')]),
+        transcriptStreams: [
+          Readable.from([[
+            '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核、来源', '',
+            '0:00', '第一行：候选 Context 必须由 Ivy 审核。'
+          ].join('\n')]),
+          Readable.from([[
+            '1', '00:00:00,000 --> 00:00:04,250',
+            'Ivy: 第一行：候选 Context 必须由 Ivy 审核。',
+            '第二行：批准后才能成为正式 Context。', '',
+            '2', '00:00:04,250 --> 00:00:09,000', 'Ivy: 后续决定。', ''
+          ].join('\n')])
+        ],
         calls
       })
     });
@@ -248,20 +249,28 @@ describe('FeishuSdkApiClient', () => {
 
     await expect(reader.getMinute('min_headerless_single')).resolves.toMatchObject({
       minuteId: 'min_headerless_single',
-      transcript: [{
-        speakerName: '说话人 1',
-        startMs: 0,
-        endMs: 1,
-        text: '第一行：候选 Context 必须由 Ivy 审核。\n第二行：批准后才能成为正式 Context。'
-      }]
+      transcript: [
+        {
+          speakerName: '说话人 1', startMs: 0, endMs: 4_250,
+          text: '第一行：候选 Context 必须由 Ivy 审核。\n第二行：批准后才能成为正式 Context。'
+        },
+        { speakerName: '说话人 1', startMs: 4_250, endMs: 9_000, text: '后续决定。' }
+      ]
     });
-    expect(calls).toContainEqual({
-      method: 'minutes.v1.minuteTranscript.get',
-      payload: {
-        path: { minute_token: 'min_headerless_single' },
-        params: { need_speaker: true }
+    expect(calls.filter((call) => (call as { method?: string }).method ===
+      'minutes.v1.minuteTranscript.get')).toEqual([
+      {
+        method: 'minutes.v1.minuteTranscript.get',
+        payload: { path: { minute_token: 'min_headerless_single' } }
+      },
+      {
+        method: 'minutes.v1.minuteTranscript.get',
+        payload: {
+          path: { minute_token: 'min_headerless_single' },
+          params: { need_speaker: true, need_timestamp: true, file_format: 'srt' }
+        }
       }
-    });
+    ]);
   });
 
   it.each([
@@ -273,9 +282,15 @@ describe('FeishuSdkApiClient', () => {
         minute: {
           minute: { title, create_time: '1786095047000', duration: '29000' }
         },
-        transcriptStream: Readable.from([[
-          '2026-08-07 21:52:47 CST|29秒', '关键词:', 'Context、审核', '普通无标题正文。'
-        ].join('\n')])
+        transcriptStreams: [
+          Readable.from([[
+            '2026-08-07 21:52:47 CST|29秒', '关键词:', 'Context、审核', '普通无标题正文。'
+          ].join('\n')]),
+          Readable.from([[
+            '1', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', '',
+            '2', '00:00:04,250 --> 00:00:09,000', 'James: 第二位发言。', ''
+          ].join('\n')])
+        ]
       })
     });
 
@@ -385,6 +400,7 @@ function createFakeSdkClient(options: {
   minute?: unknown;
   transcript?: unknown;
   transcriptStream?: Readable;
+  transcriptStreams?: Readable[];
   contextMessages?: unknown[];
   calls?: unknown[];
 }): FeishuSdkClientLike {
@@ -429,10 +445,11 @@ function createFakeSdkClient(options: {
               payload,
               ...(requestOptions ? { options: requestOptions } : {})
             });
-            if (options.transcriptStream) {
+            const transcriptStream = options.transcriptStreams?.shift() ?? options.transcriptStream;
+            if (transcriptStream) {
               return {
                 getReadableStream() {
-                  return options.transcriptStream!;
+                  return transcriptStream;
                 }
               };
             }

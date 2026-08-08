@@ -1,9 +1,9 @@
 import type { Readable } from 'node:stream';
 import { TranscriptSegment, type TranscriptSegment as TranscriptSegmentRecord } from '../domain/meeting.js';
-import { matchFeishuHeaderlessSingleSpeakerExport } from './minute-transcript-classifier.js';
+import { matchFeishuSingleSpeakerSrtExport } from './minute-transcript-srt.js';
 
 export type MinuteTranscriptSpeakerBoundaryMode =
-  | 'verified_single_speaker_without_header';
+  | 'verified_single_speaker_srt';
 
 export interface MinuteTranscriptParseOptions {
   speakerBoundaryMode?: MinuteTranscriptSpeakerBoundaryMode;
@@ -34,8 +34,8 @@ export function parseMinuteTranscriptText(
   try {
     payload = JSON.parse(raw);
   } catch {
-    if (options.speakerBoundaryMode === 'verified_single_speaker_without_header') {
-      return parseVerifiedHeaderlessSingleSpeaker(raw);
+    if (options.speakerBoundaryMode === 'verified_single_speaker_srt') {
+      return parseVerifiedSingleSpeakerSrt(raw);
     }
     return parsePlainTextTranscript(raw);
   }
@@ -48,18 +48,18 @@ export function parseMinuteTranscriptText(
   }
 }
 
-function parseVerifiedHeaderlessSingleSpeaker(raw: string): TranscriptSegmentRecord[] {
-  const matched = matchFeishuHeaderlessSingleSpeakerExport(raw);
+function parseVerifiedSingleSpeakerSrt(raw: string): TranscriptSegmentRecord[] {
+  const matched = matchFeishuSingleSpeakerSrtExport(raw);
   if (!matched) {
     throw new MinuteTranscriptParseError();
   }
   try {
-    return [TranscriptSegment.parse({
+    return matched.segments.map((segment) => TranscriptSegment.parse({
       speakerName: '说话人 1',
-      startMs: 0,
-      endMs: 1,
-      text: matched.text
-    })];
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      text: segment.text
+    }));
   } catch {
     throw new MinuteTranscriptParseError();
   }
