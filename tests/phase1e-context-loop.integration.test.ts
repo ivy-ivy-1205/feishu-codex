@@ -101,4 +101,37 @@ describe('Phase 1E local context loop', () => {
     expect(loop.database.client.prepare('SELECT summary, review_status FROM context_candidates').get())
       .toEqual({ summary: '后续决定', review_status: 'pending' });
   });
+
+  it('persists evidence from the continuation line of a verified headerless single-speaker export', async () => {
+    const transcript = await parseMinuteTranscriptStream(Readable.from([[
+      '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核、来源', '', '我',
+      '第一行：候选 Context 必须由 Ivy 审核。',
+      '第二行：批准后才能成为正式 Context。'
+    ].join('\n')]), { speakerBoundaryMode: 'verified_single_speaker_without_header' });
+    const loop = createLoop({ async extract(input) { return { candidates: [{
+      candidateType: 'decision', scope: 'company', summary: '批准后才能成为正式 Context',
+      subjectKey: 'headerless-single-speaker', structuredPayload: {}, extractionConfidence: 0.9,
+      factualStatus: 'source_attested', projectMappings: [], evidence: [{
+        sourceId: input.sources[0]!.id,
+        excerpt: '第二行：批准后才能成为正式 Context。',
+        locator: { segmentOrdinal: 0, sourceVersion: input.sources[0]!.sourceVersion,
+          contentHash: input.sources[0]!.contentHash, speakerName: '说话人 1', startMs: 0, endMs: 1 },
+        evidenceLevel: 'primary_statement', role: 'supporting'
+      }], suggestedRelations: [], externalRefs: []
+    }] }; } }, transcript);
+
+    await loop.runtime.runOnce();
+    await loop.runtime.runOnce();
+
+    const source = loop.database.client.prepare('SELECT metadata_json FROM context_sources').get() as { metadata_json: string };
+    expect(JSON.parse(source.metadata_json)).toMatchObject({ segments: [{
+      segmentOrdinal: 0,
+      speakerName: '说话人 1',
+      startMs: 0,
+      endMs: 1,
+      text: '第一行：候选 Context 必须由 Ivy 审核。\n第二行：批准后才能成为正式 Context。'
+    }] });
+    expect(loop.database.client.prepare('SELECT excerpt FROM context_evidence').get())
+      .toEqual({ excerpt: '第二行：批准后才能成为正式 Context。' });
+  });
 });

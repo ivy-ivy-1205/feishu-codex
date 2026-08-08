@@ -1,7 +1,8 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { Readable } from 'node:stream';
 import type { FeishuApiClient, FeishuApiRequestOptions } from './feishu.js';
-import { parseMinuteTranscriptStream } from './minute-transcript-parser.js';
+import { matchFeishuHeaderlessSingleSpeakerExport } from './minute-transcript-classifier.js';
+import { parseMinuteTranscriptText } from './minute-transcript-parser.js';
 import type {
   FeishuContextClient,
   FeishuContextFile,
@@ -52,6 +53,7 @@ export interface FeishuSdkClientLike {
       minuteTranscript: {
         get(payload: {
           path: { minute_token: string };
+          params?: { need_speaker: boolean };
         }, options?: unknown): Promise<unknown>;
       };
     };
@@ -152,14 +154,19 @@ export class FeishuSdkApiClient implements FeishuApiClient {
     options?: FeishuApiRequestOptions
   ): Promise<unknown[]> {
     const payload = {
-      path: { minute_token: minuteId.trim() }
+      path: { minute_token: minuteId.trim() },
+      params: { need_speaker: true }
     };
     const requestOptions = this.#requestOptions(options);
     const response = requestOptions
       ? await this.#sdkClient.minutes.v1.minuteTranscript.get(payload, requestOptions)
       : await this.#sdkClient.minutes.v1.minuteTranscript.get(payload);
     if (isReadableStreamResponse(response)) {
-      return parseMinuteTranscriptStream(response.getReadableStream());
+      const raw = await readUtf8(response.getReadableStream());
+      const verifiedSingleSpeaker = matchFeishuHeaderlessSingleSpeakerExport(raw) !== null;
+      return parseMinuteTranscriptText(raw, verifiedSingleSpeaker
+        ? { speakerBoundaryMode: 'verified_single_speaker_without_header' }
+        : {});
     }
     const data = responseData(response);
     return Array.isArray(data) ? data : [];
@@ -204,6 +211,14 @@ export class FeishuSdkApiClient implements FeishuApiClient {
     const userAccessToken = options?.userAccessToken?.trim();
     return userAccessToken ? this.#withUserAccessToken(userAccessToken) : undefined;
   }
+}
+
+async function readUtf8(stream: Readable): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8'));
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 function responseData(response: unknown): unknown {

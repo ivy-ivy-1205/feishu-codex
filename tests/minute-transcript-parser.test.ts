@@ -4,6 +4,7 @@ import {
   MinuteTranscriptParseError,
   parseMinuteTranscriptStream
 } from '../src/adapters/minute-transcript-parser.js';
+import { matchFeishuHeaderlessSingleSpeakerExport } from '../src/adapters/minute-transcript-classifier.js';
 
 describe('parseMinuteTranscriptStream', () => {
   it('parses a JSON array stream into internal TranscriptSegment records', async () => {
@@ -207,6 +208,62 @@ describe('parseMinuteTranscriptStream', () => {
 
     await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
       .rejects.toMatchObject({ code: 'MINUTE_TRANSCRIPT_INVALID' });
+  });
+
+  it('parses the verified Feishu self-speaker export only with an explicit boundary mode', async () => {
+    const plainText = [
+      '2026-08-07 21:52:47 CST|29秒',
+      '',
+      '关键词:',
+      'Context、审核、来源',
+      '',
+      '我',
+      '第一行：候选 Context 必须由 Ivy 审核。',
+      '第二行：批准后才能成为正式 Context。'
+    ].join('\n');
+
+    await expect(parseMinuteTranscriptStream(Readable.from([plainText]), {
+      speakerBoundaryMode: 'verified_single_speaker_without_header'
+    })).resolves.toEqual([{
+      speakerName: '说话人 1',
+      startMs: 0,
+      endMs: 1,
+      text: '第一行：候选 Context 必须由 Ivy 审核。\n第二行：批准后才能成为正式 Context。'
+    }]);
+
+    await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
+      .rejects.toMatchObject({ code: 'MINUTE_TRANSCRIPT_INVALID' });
+
+    const matched = matchFeishuHeaderlessSingleSpeakerExport(plainText);
+    expect(matched).not.toBeNull();
+    expect(plainText.slice(matched!.contentStart, matched!.contentEnd)).toBe(
+      '第一行：候选 Context 必须由 Ivy 审核。\n第二行：批准后才能成为正式 Context。'
+    );
+  });
+
+  it.each([
+    ['a second unknown content block', [
+      '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核', '', '我',
+      '第一段正文。', '', '第二个未知内容块。'
+    ].join('\n')],
+    ['a second suspected speaker boundary', [
+      '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核', '', '我',
+      '第一段正文。', '说话人 2', '第二位发言。'
+    ].join('\n')],
+    ['an unnumbered suspected speaker boundary', [
+      '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核', '', '我',
+      '第一段正文。', 'James', '第二位发言。'
+    ].join('\n')],
+    ['generic headerless prose', [
+      '2026-08-07 21:52:47 CST|29秒', '关键词:', 'Context、审核', '普通无标题正文。'
+    ].join('\n')],
+    ['an empty body', [
+      '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核', '', '我'
+    ].join('\n')]
+  ])('rejects %s even when the caller requests the verified mode', async (_label, plainText) => {
+    await expect(parseMinuteTranscriptStream(Readable.from([plainText]), {
+      speakerBoundaryMode: 'verified_single_speaker_without_header'
+    })).rejects.toMatchObject({ code: 'MINUTE_TRANSCRIPT_INVALID' });
   });
 
   it('infers speakers from repeated plain text heading lines when no speaker list exists', async () => {

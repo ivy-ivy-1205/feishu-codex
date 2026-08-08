@@ -106,7 +106,10 @@ describe('FeishuSdkApiClient', () => {
       },
       {
         method: 'minutes.v1.minuteTranscript.get',
-        payload: { path: { minute_token: 'min_token_1' } }
+        payload: {
+          path: { minute_token: 'min_token_1' },
+          params: { need_speaker: true }
+        }
       }
     ]);
   });
@@ -137,7 +140,10 @@ describe('FeishuSdkApiClient', () => {
       },
       {
         method: 'minutes.v1.minuteTranscript.get',
-        payload: { path: { minute_token: 'min_token_user' } },
+        payload: {
+          path: { minute_token: 'min_token_user' },
+          params: { need_speaker: true }
+        },
         options: { userAccessToken: 'u-ivy-token' }
       }
     ]);
@@ -217,6 +223,64 @@ describe('FeishuSdkApiClient', () => {
         text: '第一行\n第二行'
       }]
     });
+  });
+
+  it('classifies the narrow Feishu self-speaker export at the production reader boundary', async () => {
+    const calls: unknown[] = [];
+    const apiClient = new FeishuSdkApiClient({
+      sdkClient: createFakeSdkClient({
+        minute: {
+          minute: {
+            title: '去标识化测试会议',
+            create_time: '1786095047000',
+            duration: '29000'
+          }
+        },
+        transcriptStream: Readable.from([[
+          '2026-08-07 21:52:47 CST|29秒', '', '关键词:', 'Context、审核、来源', '', '我',
+          '第一行：候选 Context 必须由 Ivy 审核。',
+          '第二行：批准后才能成为正式 Context。'
+        ].join('\n')]),
+        calls
+      })
+    });
+    const reader = new FeishuMinutesReaderAdapter(apiClient);
+
+    await expect(reader.getMinute('min_headerless_single')).resolves.toMatchObject({
+      minuteId: 'min_headerless_single',
+      transcript: [{
+        speakerName: '说话人 1',
+        startMs: 0,
+        endMs: 1,
+        text: '第一行：候选 Context 必须由 Ivy 审核。\n第二行：批准后才能成为正式 Context。'
+      }]
+    });
+    expect(calls).toContainEqual({
+      method: 'minutes.v1.minuteTranscript.get',
+      payload: {
+        path: { minute_token: 'min_headerless_single' },
+        params: { need_speaker: true }
+      }
+    });
+  });
+
+  it.each([
+    ['an Ivy meeting title', 'Ivy的视频会议'],
+    ['a one-participant-looking title', '1人测试会议']
+  ])('does not use %s to classify generic headerless prose', async (_label, title) => {
+    const apiClient = new FeishuSdkApiClient({
+      sdkClient: createFakeSdkClient({
+        minute: {
+          minute: { title, create_time: '1786095047000', duration: '29000' }
+        },
+        transcriptStream: Readable.from([[
+          '2026-08-07 21:52:47 CST|29秒', '关键词:', 'Context、审核', '普通无标题正文。'
+        ].join('\n')])
+      })
+    });
+
+    await expect(new FeishuMinutesReaderAdapter(apiClient).getMinute('min_unverified'))
+      .rejects.toMatchObject({ code: 'MINUTE_TRANSCRIPT_INVALID' });
   });
 
   it('requires a real message ID when sending text', async () => {

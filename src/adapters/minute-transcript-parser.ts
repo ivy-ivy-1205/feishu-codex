@@ -1,5 +1,13 @@
 import type { Readable } from 'node:stream';
 import { TranscriptSegment, type TranscriptSegment as TranscriptSegmentRecord } from '../domain/meeting.js';
+import { matchFeishuHeaderlessSingleSpeakerExport } from './minute-transcript-classifier.js';
+
+export type MinuteTranscriptSpeakerBoundaryMode =
+  | 'verified_single_speaker_without_header';
+
+export interface MinuteTranscriptParseOptions {
+  speakerBoundaryMode?: MinuteTranscriptSpeakerBoundaryMode;
+}
 
 export class MinuteTranscriptParseError extends Error {
   readonly code = 'MINUTE_TRANSCRIPT_INVALID';
@@ -11,19 +19,47 @@ export class MinuteTranscriptParseError extends Error {
 }
 
 export async function parseMinuteTranscriptStream(
-  stream: Readable
+  stream: Readable,
+  options: MinuteTranscriptParseOptions = {}
 ): Promise<TranscriptSegmentRecord[]> {
   const raw = await readUtf8(stream);
+  return parseMinuteTranscriptText(raw, options);
+}
+
+export function parseMinuteTranscriptText(
+  raw: string,
+  options: MinuteTranscriptParseOptions = {}
+): TranscriptSegmentRecord[] {
   let payload: unknown;
   try {
     payload = JSON.parse(raw);
   } catch {
+    if (options.speakerBoundaryMode === 'verified_single_speaker_without_header') {
+      return parseVerifiedHeaderlessSingleSpeaker(raw);
+    }
     return parsePlainTextTranscript(raw);
   }
 
   const segments = extractSegments(payload);
   try {
     return segments.map(normalizeSegment);
+  } catch {
+    throw new MinuteTranscriptParseError();
+  }
+}
+
+function parseVerifiedHeaderlessSingleSpeaker(raw: string): TranscriptSegmentRecord[] {
+  const matched = matchFeishuHeaderlessSingleSpeakerExport(raw);
+  if (!matched) {
+    throw new MinuteTranscriptParseError();
+  }
+  try {
+    return [TranscriptSegment.parse({
+      speakerName: '说话人 1',
+      startMs: 0,
+      endMs: 1,
+      text: matched.text
+    })];
   } catch {
     throw new MinuteTranscriptParseError();
   }
