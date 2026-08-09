@@ -104,7 +104,7 @@ describe('Phase 1E local context loop', () => {
 
   it('persists evidence from a verified single-speaker SRT continuation line', async () => {
     const transcript = await parseMinuteTranscriptStream(Readable.from([[
-      '1', '00:00:00,000 --> 00:00:04,250',
+      '', '1', '00:00:00,000 --> 00:00:04,250',
       'Ivy: 第一行：候选 Context 必须由 Ivy 审核。',
       '第二行：批准后才能成为正式 Context。', ''
     ].join('\n')]), { speakerBoundaryMode: 'verified_single_speaker_srt' });

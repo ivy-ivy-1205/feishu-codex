@@ -28,6 +28,11 @@ export function matchFeishuSingleSpeakerSrtExport(
     return null;
   }
   const texts = normalized.split('\n');
+  let offset = 0;
+  if (texts[0] === '' && texts[1] === '1') {
+    texts.shift();
+    offset = 1;
+  }
   while (texts.at(-1) === '') {
     texts.pop();
   }
@@ -35,7 +40,6 @@ export function matchFeishuSingleSpeakerSrtExport(
     return null;
   }
   const starts: number[] = [];
-  let offset = 0;
   for (const line of texts) {
     starts.push(offset);
     offset += line.length + 1;

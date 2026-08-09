@@ -251,6 +251,64 @@ describe('parseMinuteTranscriptStream', () => {
     ]);
   });
 
+  it('accepts the byte-shaped locked Feishu SRT structure with exactly one leading empty line', async () => {
+    const srt = [
+      '',
+      '1',
+      '00:00:03,476 --> 00:00:08,226',
+      'Ivy: 候选上下文必须经过审核后才能成为正式内容',
+      '',
+      '2',
+      '00:00:08,546 --> 00:00:18,306',
+      'Ivy: 批准后的上下文必须保留来源和审核动作记录系统只接受已经独立确认过的单一说话人边界不得被猜测',
+      '',
+      '3',
+      '00:00:18,946 --> 00:00:22,346',
+      'Ivy: 系统只接受已经独立确认过的单一说话人边界',
+      '',
+      '4',
+      '00:00:22,866 --> 00:00:25,706',
+      'Ivy: 后续任务只读取一次已批准的上下文',
+      ''
+    ].join('\n');
+
+    expect(Buffer.byteLength(srt, 'utf8')).toBe(459);
+    expect(srt.split('\n')).toHaveLength(17);
+    await expect(parseMinuteTranscriptStream(Readable.from([srt]), {
+      speakerBoundaryMode: 'verified_single_speaker_srt'
+    })).resolves.toEqual([
+      { speakerName: '说话人 1', startMs: 3_476, endMs: 8_226,
+        text: '候选上下文必须经过审核后才能成为正式内容' },
+      { speakerName: '说话人 1', startMs: 8_546, endMs: 18_306,
+        text: '批准后的上下文必须保留来源和审核动作记录系统只接受已经独立确认过的单一说话人边界不得被猜测' },
+      { speakerName: '说话人 1', startMs: 18_946, endMs: 22_346,
+        text: '系统只接受已经独立确认过的单一说话人边界' },
+      { speakerName: '说话人 1', startMs: 22_866, endMs: 25_706,
+        text: '后续任务只读取一次已批准的上下文' }
+    ]);
+    expect(matchFeishuSingleSpeakerSrtExport(srt)?.segments.map((segment) =>
+      srt.slice(segment.contentStart, segment.contentEnd))).toEqual([
+      '候选上下文必须经过审核后才能成为正式内容',
+      '批准后的上下文必须保留来源和审核动作记录系统只接受已经独立确认过的单一说话人边界不得被猜测',
+      '系统只接受已经独立确认过的单一说话人边界',
+      '后续任务只读取一次已批准的上下文'
+    ]);
+  });
+
+  it('still rejects ordinary headerless TXT when it starts with an empty line', async () => {
+    const plainText = [
+      '',
+      '2026-08-07 17:30:41 CST|测试会议',
+      '关键词:',
+      '飞书、企业',
+      '这段正文没有任何合法 speaker 标题。'
+    ].join('\n');
+
+    expect(matchFeishuSingleSpeakerSrtExport(plainText)).toBeNull();
+    await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
+      .rejects.toMatchObject({ code: 'MINUTE_TRANSCRIPT_INVALID' });
+  });
+
   it.each([
     ['two distinct speaker prefixes', [
       '1', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', '',
@@ -262,11 +320,37 @@ describe('parseMinuteTranscriptStream', () => {
     ['a non-sequential cue ordinal', [
       '2', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', ''
     ].join('\n')],
+    ['two leading empty lines', [
+      '', '', '1', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', ''
+    ].join('\n')],
+    ['a leading space-only line', [
+      ' ', '1', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', ''
+    ].join('\n')],
+    ['a leading tab-only line', [
+      '\t', '1', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', ''
+    ].join('\n')],
+    ['a missing middle cue ordinal', [
+      '1', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', '',
+      '3', '00:00:04,250 --> 00:00:09,000', 'Ivy: 第三段正文。', ''
+    ].join('\n')],
+    ['a repeated cue ordinal', [
+      '1', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', '',
+      '1', '00:00:04,250 --> 00:00:09,000', 'Ivy: 重复编号正文。', ''
+    ].join('\n')],
+    ['out-of-order cue ordinals', [
+      '1', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', '',
+      '3', '00:00:04,250 --> 00:00:09,000', 'Ivy: 第三段正文。', '',
+      '2', '00:00:09,000 --> 00:00:12,000', 'Ivy: 第二段正文。', ''
+    ].join('\n')],
     ['an inverted cue time range', [
       '1', '00:00:04,250 --> 00:00:00,000', 'Ivy: 第一段正文。', ''
     ].join('\n')],
     ['an invalid minute component', [
       '1', '00:61:00,000 --> 00:61:04,250', 'Ivy: 第一段正文。', ''
+    ].join('\n')],
+    ['overlapping cue time ranges', [
+      '1', '00:00:00,000 --> 00:00:05,000', 'Ivy: 第一段正文。', '',
+      '2', '00:00:04,999 --> 00:00:09,000', 'Ivy: 第二段正文。', ''
     ].join('\n')],
     ['an empty cue body', [
       '1', '00:00:00,000 --> 00:00:04,250', ''

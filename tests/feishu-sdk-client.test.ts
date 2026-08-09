@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import {
   createFeishuSdkClient,
@@ -7,6 +8,8 @@ import {
   type FeishuSdkClientLike
 } from '../src/adapters/feishu-sdk.js';
 import { FeishuMinutesReaderAdapter } from '../src/adapters/feishu.js';
+import { captureMinuteTranscriptSource } from '../src/services/context-source-capture.js';
+import { validateTranscriptEvidenceLocator } from '../src/services/context-evidence-locator.js';
 
 describe('FeishuSdkApiClient', () => {
   it('creates an official SDK client for a self-built Feishu app without exposing secrets', () => {
@@ -236,7 +239,7 @@ describe('FeishuSdkApiClient', () => {
             '0:00', '第一行：候选 Context 必须由 Ivy 审核。'
           ].join('\n')]),
           Readable.from([[
-            '1', '00:00:00,000 --> 00:00:04,250',
+            '', '1', '00:00:00,000 --> 00:00:04,250',
             'Ivy: 第一行：候选 Context 必须由 Ivy 审核。',
             '第二行：批准后才能成为正式 Context。', '',
             '2', '00:00:04,250 --> 00:00:09,000', 'Ivy: 后续决定。', ''
@@ -247,7 +250,8 @@ describe('FeishuSdkApiClient', () => {
     });
     const reader = new FeishuMinutesReaderAdapter(apiClient);
 
-    await expect(reader.getMinute('min_headerless_single')).resolves.toMatchObject({
+    const minute = await reader.getMinute('min_headerless_single');
+    expect(minute).toMatchObject({
       minuteId: 'min_headerless_single',
       transcript: [
         {
@@ -257,6 +261,21 @@ describe('FeishuSdkApiClient', () => {
         { speakerName: '说话人 1', startMs: 4_250, endMs: 9_000, text: '后续决定。' }
       ]
     });
+    const captured = captureMinuteTranscriptSource(minute, new Date('2030-01-01T00:00:00.000Z'));
+    const contentHash = createHash('sha256').update(captured.source.contentText).digest('hex');
+    expect(() => validateTranscriptEvidenceLocator({
+      sourceVersion: 1,
+      contentHash,
+      contentText: captured.source.contentText,
+      metadata: captured.source.metadata
+    }, '第二行：批准后才能成为正式 Context。', {
+      segmentOrdinal: 0,
+      sourceVersion: 1,
+      contentHash,
+      speakerName: '说话人 1',
+      startMs: 0,
+      endMs: 4_250
+    })).not.toThrow();
     expect(calls.filter((call) => (call as { method?: string }).method ===
       'minutes.v1.minuteTranscript.get')).toEqual([
       {
@@ -284,7 +303,7 @@ describe('FeishuSdkApiClient', () => {
         },
         transcriptStreams: [
           Readable.from([[
-            '2026-08-07 21:52:47 CST|29秒', '关键词:', 'Context、审核', '普通无标题正文。'
+            '', '2026-08-07 21:52:47 CST|29秒', '关键词:', 'Context、审核', '普通无标题正文。'
           ].join('\n')]),
           Readable.from([[
             '1', '00:00:00,000 --> 00:00:04,250', 'Ivy: 第一段正文。', '',
