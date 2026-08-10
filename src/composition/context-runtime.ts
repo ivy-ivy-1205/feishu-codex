@@ -12,7 +12,7 @@ import type { ProjectRepository } from '../repositories/project-repository.js';
 import type { ContextCandidateWorkerDependencies } from '../services/context-candidate-worker.js';
 import { renderContextReviewCard } from '../services/context-review-renderer.js';
 
-export const contextExtractorVersion = 'phase1e-v1';
+export const contextExtractorVersion = 'phase1e-v2';
 export const contextPromptVersion = 'context-v1';
 const reviewCardLifetimeMs = 7 * 24 * 60 * 60 * 1_000;
 
