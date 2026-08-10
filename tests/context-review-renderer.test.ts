@@ -14,6 +14,15 @@ const candidate = {
 };
 
 describe('renderContextReviewCard', () => {
+  it('uses the legacy interactive-card envelope required by action buttons', () => {
+    const card = renderContextReviewCard({ meetingTitle: 'Phase 1E 周会', extractionRunId: 'run1',
+      candidates: [candidate], cardNonce: 'nonce-1' });
+    expect(card).not.toHaveProperty('schema');
+    expect(card).not.toHaveProperty('body');
+    expect(card).toHaveProperty('elements');
+    expect((card.elements as Array<Record<string, unknown>>).some((element) => element.tag === 'action')).toBe(true);
+  });
+
   it('shows independent statuses, provenance and allowlisted action payloads', () => {
     const card = renderContextReviewCard({ meetingTitle: 'Phase 1E 周会', extractionRunId: 'run1',
       candidates: [candidate], cardNonce: 'nonce-1' });

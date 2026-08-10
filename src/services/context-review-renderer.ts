@@ -29,11 +29,10 @@ export function renderContextReviewCard(input: {
 }): Record<string, unknown> {
   if (input.candidates.length > 12) throw new Error('one Context review card supports at most 12 candidates');
   return {
-    schema: '2.0',
     config: { wide_screen_mode: true },
     header: { template: 'blue', title: { tag: 'plain_text', content: `${input.meetingTitle} · Context 审核（${input.candidates.length}）` } },
-    body: { elements: input.candidates.flatMap((candidate, index) => renderCandidate(candidate, index + 1,
-      input.cardNonce, input.promotionIntents ?? [])) }
+    elements: input.candidates.flatMap((candidate, index) => renderCandidate(candidate, index + 1,
+      input.cardNonce, input.promotionIntents ?? []))
   };
 }
 
