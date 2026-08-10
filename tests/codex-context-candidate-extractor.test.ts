@@ -26,7 +26,22 @@ const validCandidate = {
   suggestedRelations: [], externalRefs: []
 };
 
+function findNonStrictObjectSchemas(schema: unknown, path = '$'): string[] {
+  if (Array.isArray(schema)) {
+    return schema.flatMap((value, index) => findNonStrictObjectSchemas(value, `${path}[${index}]`));
+  }
+  if (!schema || typeof schema !== 'object') return [];
+  const record = schema as Record<string, unknown>;
+  const current = record.type === 'object' && record.additionalProperties !== false ? [path] : [];
+  return current.concat(Object.entries(record).flatMap(([key, value]) =>
+    findNonStrictObjectSchemas(value, `${path}.${key}`)));
+}
+
 describe('CodexContextCandidateExtractor', () => {
+  it('emits only strict object schemas accepted by Codex structured output', () => {
+    expect(findNonStrictObjectSchemas(contextCandidateOutputJsonSchema)).toEqual([]);
+  });
+
   it('requests atomic candidates and keeps decision separate from completion status', async () => {
     const calls: Parameters<CodexJsonExecutor['executeJson']>[0][] = [];
     const extractor = new CodexContextCandidateExtractor({ codex: { async executeJson(input) {

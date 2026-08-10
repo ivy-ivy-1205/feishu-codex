@@ -14,7 +14,8 @@ export const contextCandidateOutputJsonSchema = {
     properties: {
       candidateType: { enum: ['proposal', 'decision', 'reported_progress', 'claim', 'risk', 'blocker', 'requirement', 'status_update', 'action_item'] },
       scope: { enum: ['company', 'project'] }, summary: { type: 'string', minLength: 1 },
-      subjectKey: { type: ['string', 'null'] }, structuredPayload: { type: 'object', additionalProperties: true },
+      subjectKey: { type: ['string', 'null'] },
+      structuredPayload: { type: 'object', properties: {}, additionalProperties: false },
       extractionConfidence: { type: 'number', minimum: 0, maximum: 1 },
       factualStatus: { enum: ['source_attested', 'reported'] },
       projectMappings: { type: 'array', items: { type: 'object', additionalProperties: false,
@@ -42,7 +43,7 @@ export const contextCandidateOutputJsonSchema = {
           relationType: { enum: ['supplements', 'confirms', 'corrects', 'supersedes', 'conflicts_with', 'duplicates'] },
           rationale: { type: 'string', minLength: 1 }
         } } },
-      externalRefs: { type: 'array', items: { type: 'object', additionalProperties: true } }
+      externalRefs: { type: 'array', items: { type: 'object', properties: {}, additionalProperties: false } }
     }
   } } }
 } as const satisfies Record<string, unknown>;
