@@ -27,6 +27,8 @@ export function routeFounderFeedback(raw: unknown, dependencies: FounderFeedback
     if (!issue || issue.status !== 'asked' || issue.deliveredMessageId !== input.replyTo || issue.evidenceSetHash !== binding.evidenceSetHash) return staleFeedback();
     const ref = { id: issue.id, expectedStatus: 'asked' as const, expectedUpdatedAt: issue.updatedAt };
     if (/^(?:这个问题)?(?:不用提醒|不需要提醒|停止提醒|忽略这个分歧)$/u.test(text)) correction = { kind: 'dismiss_alignment', issue: ref };
+    else if (isExplicitSupportWithdrawal(text)) correction = { kind: 'resolve_alignment', issue: ref,
+      statement: input.text, speechAct: 'explicit_disagreement' };
     else if (/^(?:(?:我)?同意[，,\s]*)?(?:按.+(?:推进|执行|实施|处理|做)|(?:采用|执行|选择).+)$/u.test(text) &&
       !/(?:如果|除非|但是|不过|不同意|不要|不应|取消|撤回|[“”"‘’]|说|表示|\?)/u.test(text)) {
       correction = { kind: 'resolve_alignment', issue: ref, statement: input.text,
@@ -35,6 +37,13 @@ export function routeFounderFeedback(raw: unknown, dependencies: FounderFeedback
   }
   if (!correction || !topicCorrectionSchema.safeParse(correction).success) return { kind: 'clarify', reason: 'ambiguous_feedback', text: '请说明条目编号和要如何调整；对齐问题请写出明确方案，例如“按 A 方案推进”。' };
   return applyTopicCorrection(input, correction, dependencies);
+}
+
+function isExplicitSupportWithdrawal(text: string): boolean {
+  if (/(?:如果|假如|除非|前提|[“”"‘’]|说|表示|转述|\?|？)/u.test(text)) return false;
+  return /^(?:我)?(?:撤回|取消)(?:(?:我)?(?:刚才|之前|原先)?(?:的)?[^，,;；]{0,80}(?:方案|提案|决定|观点|同意|支持))?(?:[，,]先?不要.+)?$/u.test(text) ||
+    /^(?:我)?(?:不同意|不赞成|不再支持|不再同意)$/u.test(text) ||
+    /^(?:我)?(?:不同意|不赞成|不再支持|不再同意|不要|不能|不应)(?:按.+(?:推进|执行|实施|处理|做)|[^，,;；]{0,80}(?:方案|提案|决定|观点))$/u.test(text);
 }
 
 function parseTopicCorrection(text: string, binding: FounderWorkMapMessage): TopicCorrection | null {

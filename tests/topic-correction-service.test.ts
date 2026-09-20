@@ -143,4 +143,89 @@ describe('immutable founder corrections', () => {
     expect(h.issues.get(h.candidate.id)?.status).toBe('asked');
     expect(h.alignment.getCurrentPerspective(h.created[0]!.id, 'shared_decision')).toBeNull(); h.db.client.close();
   });
+
+  it('audits an out-of-order older reply without replacing the newer founder view or resolving from it', () => {
+    const h = alignmentHarness();
+    const reply = (messageId: string, openId: string, time: string, text: string) => routeFounderFeedback({
+      ...h.input, messageId, openId, text, occurredAt: `2026-09-21T10:${time}:00.000Z`
+    }, h.dependencies);
+    reply('om_ivy_newer', 'ou_ivy', '03', '按 B 方案推进');
+    expect(reply('om_ivy_older', 'ou_ivy', '02', '按 A 方案推进')).toMatchObject({ kind: 'corrected', status: 'historical_only' });
+    reply('om_james_later', 'ou_james', '04', '同意，按 A 方案推进');
+    expect(h.issues.get(h.candidate.id)?.status).toBe('asked');
+    expect(h.alignment.getCurrentPerspective(h.created[0]!.id, 'ivy_view')?.statement).toBe('按 B 方案推进');
+    expect(h.alignment.listPerspectiveVersions(h.created[0]!.id, 'ivy_view')).toHaveLength(1);
+    expect(h.db.client.prepare('SELECT count(*) AS n FROM founder_feedback_corrections').get()).toEqual({ n: 3 });
+    expect(h.db.client.prepare('SELECT count(*) AS n FROM context_sources WHERE external_id = ?').get('om_ivy_older')).toEqual({ n: 1 });
+    h.db.client.close();
+  });
+
+  it('keeps the first ingested same-time view and blocks ambiguous tied support until a newer statement', () => {
+    const h = alignmentHarness();
+    const send = (messageId: string, openId: string, minute: string, text: string) => routeFounderFeedback({ ...h.input,
+      messageId, openId, text, occurredAt: `2026-09-21T10:${minute}:00.000Z` }, h.dependencies);
+    send('om_z_first', 'ou_ivy', '02', '按 A 方案推进');
+    expect(send('om_a_second', 'ou_ivy', '02', '按 B 方案推进')).toMatchObject({ status: 'historical_only' });
+    send('om_j_matching_first', 'ou_james', '03', '同意，按 A 方案推进');
+    expect(h.alignment.getCurrentPerspective(h.created[0]!.id, 'ivy_view')?.statement).toBe('按 A 方案推进');
+    expect(h.issues.get(h.candidate.id)?.status).toBe('asked');
+    expect(h.alignment.getCurrentPerspective(h.created[0]!.id, 'shared_decision')).toBeNull();
+    send('om_ivy_new', 'ou_ivy', '04', '按 A 方案推进');
+    expect(send('om_james_new', 'ou_james', '05', '同意，按 A 方案推进')).toMatchObject({ status: 'resolved' });
+    h.db.client.close();
+  });
+
+  it.each(['我撤回刚才的方案', '我撤回之前的 A 方案，先不要按 A 推进', '撤回', '不同意', '我不同意',
+    '不同意按 A 方案推进', '不要按 A 方案推进', '我不再支持刚才的方案'])
+  ('invalidates old support through an immutable withdrawal: %s', (withdrawal) => {
+    const h = alignmentHarness();
+    routeFounderFeedback({ ...h.input, occurredAt: '2026-09-21T10:01:00.000Z' }, h.dependencies);
+    const withdrawn = routeFounderFeedback({ ...h.input, messageId: 'om_withdrawal', text: withdrawal,
+      occurredAt: '2026-09-21T10:02:00.000Z' }, h.dependencies);
+    expect(withdrawn).toMatchObject({ kind: 'corrected', status: 'support_withdrawn' });
+    const versions = h.alignment.listPerspectiveVersions(h.created[0]!.id, 'ivy_view');
+    expect(versions).toHaveLength(2);
+    expect(versions[0]?.statement).toBe('按 A 方案推进');
+    expect(versions[1]).toMatchObject({ statement: withdrawal, speechAct: 'explicit_disagreement' });
+    routeFounderFeedback({ ...h.input, messageId: 'om_j_after_withdrawal', openId: 'ou_james',
+      text: '同意，按 A 方案推进', occurredAt: '2026-09-21T10:03:00.000Z' }, h.dependencies);
+    expect(h.issues.get(h.candidate.id)?.status).toBe('asked');
+    expect(h.alignment.getCurrentPerspective(h.created[0]!.id, 'shared_decision')).toBeNull();
+    routeFounderFeedback({ ...h.input, messageId: 'om_ivy_reproposes', text: '按 A 方案推进', occurredAt: '2026-09-21T10:04:00.000Z' }, h.dependencies);
+    expect(routeFounderFeedback({ ...h.input, messageId: 'om_j_reconfirms', openId: 'ou_james',
+      text: '同意，按 A 方案推进', occurredAt: '2026-09-21T10:05:00.000Z' }, h.dependencies)).toMatchObject({ status: 'resolved' });
+    expect(h.db.client.prepare('SELECT count(*) AS n FROM founder_feedback_corrections').get()).toEqual({ n: 5 });
+    h.db.client.close();
+  });
+
+  it('does not reinterpret a conditional or quoted withdrawal as the founder changing their view', () => {
+    const h = alignmentHarness();
+    routeFounderFeedback(h.input, h.dependencies);
+    for (const text of ['如果客户反对，我撤回刚才的方案', 'James说“撤回”']) {
+      expect(routeFounderFeedback({ ...h.input, messageId: `om_${text}`, text,
+        occurredAt: '2026-09-21T10:02:00.000Z' }, h.dependencies).kind).toBe('clarify');
+    }
+    expect(h.alignment.getCurrentPerspective(h.created[0]!.id, 'ivy_view')?.statement).toBe('按 A 方案推进');
+    h.db.client.close();
+  });
+
+  it('does not let a late older withdrawal invalidate a newer explicit proposal', () => {
+    const h = alignmentHarness();
+    routeFounderFeedback({ ...h.input, occurredAt: '2026-09-21T10:03:00.000Z' }, h.dependencies);
+    expect(routeFounderFeedback({ ...h.input, messageId: 'om_late_old_withdrawal', text: '撤回',
+      occurredAt: '2026-09-21T10:02:00.000Z' }, h.dependencies)).toMatchObject({ status: 'historical_only' });
+    expect(h.alignment.getCurrentPerspective(h.created[0]!.id, 'ivy_view')?.statement).toBe('按 A 方案推进');
+    expect(routeFounderFeedback({ ...h.input, messageId: 'om_later_agreement', openId: 'ou_james', text: '同意，按 A 方案推进',
+      occurredAt: '2026-09-21T10:04:00.000Z' }, h.dependencies)).toMatchObject({ status: 'resolved' });
+    h.db.client.close();
+  });
+  it('does not pair an earlier agreement with a proposal that happened later in source time', () => {
+    const h = alignmentHarness();
+    routeFounderFeedback({ ...h.input, occurredAt: '2026-09-21T10:03:00.000Z' }, h.dependencies);
+    routeFounderFeedback({ ...h.input, messageId: 'om_earlier_agreement', openId: 'ou_james', text: '同意，按 A 方案推进',
+      occurredAt: '2026-09-21T10:02:00.000Z' }, h.dependencies);
+    expect(h.issues.get(h.candidate.id)?.status).toBe('asked');
+    expect(h.alignment.getCurrentPerspective(h.created[0]!.id, 'shared_decision')).toBeNull();
+    h.db.client.close();
+  });
 });
