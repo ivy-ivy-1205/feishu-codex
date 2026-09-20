@@ -8,7 +8,7 @@ import { TopicRepository } from '../src/repositories/topic-repository.js';
 import { createFounderStreamRuntime } from '../src/services/founder-stream-worker.js';
 import type { FounderStreamInput } from '../src/ports/founder-stream-analyzer.js';
 import { captureGroupMessageSource } from '../src/services/group-message-source-capture.js';
-import { saveFounderEvidence } from '../src/services/founder-stream-worker.js';
+import { buildFounderStreamInput, saveFounderEvidence } from '../src/services/founder-stream-worker.js';
 import { AlignmentRepository } from '../src/repositories/alignment-repository.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { renderFounderWorkMap } from '../src/services/founder-work-map-renderer.js';
@@ -42,6 +42,60 @@ function event(id = 'om_1', eventId = `evt_${id}`, thread = '', sender = 'user',
       content: JSON.stringify({ text: `知识库 ${id}` }), create_time: String(start.getTime()) } } };
 }
 describe('founder stream durable wiring', () => {
+  it('keeps a trusted founder rename in the next model current-topic window', async () => {
+    const h=harness();new AlignmentRepository(h.db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:start});
+    const topic=h.topics.createTopic({displayName:'旧名称',stage:'idea',createdAt:start});
+    const map=renderFounderWorkMap({since:'2026-09-01T00:00:00Z',until:start.toISOString(),topics:[{...topic,evidence:[]}],uncertainGrouping:[],coverageGaps:[]})[0]!;
+    const outbox=new OutboxRepository(h.db.client);outbox.enqueueFounderWorkMap({...map,mapId:'rename',targetChatId:chat},start);
+    outbox.acknowledgeFounderWorkMapDelivery({mapId:'rename',page:1,messageId:'om_map',deliveredAt:start});
+    const correction=event('om_rename');Object.assign(correction.event.message,{parent_id:'om_map',content:JSON.stringify({text:'这个改名为新名称'})});
+    await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload:correction});
+    await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload:event()});await h.runtime.runOnce();
+    h.setNow(new Date(start.getTime()+300_000));await h.runtime.runOnce();
+    expect(h.inputs[0]?.currentTopics).toEqual(expect.arrayContaining([expect.objectContaining({id:topic.id,displayName:'新名称'})]));
+    const source=h.sources.listSources().find(s=>s.externalId==='om_rename');expect(source?.metadata.senderType).toBe('user');
+    await h.app.close();h.db.close();
+  });
+  it('reserves name and latest outcome anchors before filling the remaining window with recent trusted evidence', async () => {
+    const h=harness();const ids:string[]=[];let latestSourceId='';
+    for(let i=0;i<26;i++){
+      const text=i===25?'交付销售演示稿':`知识库 ${i}`;
+      const at=new Date(start.getTime()+i*1000);
+      const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:`om_anchor_${i}`,threadId:null,rootId:null,
+        author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text,occurredAt:at.toISOString()},at).source).source;
+      ids.push(saveFounderEvidence(h.sources,source.id,text,at));latestSourceId=source.id;
+    }
+    const topic=h.topics.createTopic({displayName:'知识库',stage:'exploring',outcome:'交付销售演示稿',evidenceIds:ids,createdAt:start});
+    const input=buildFounderStreamInput(h.sources,h.topics,[latestSourceId],chat);
+    expect(input.currentTopics).toHaveLength(1);
+    const excerpts=input.currentTopics[0]!.evidenceExcerpts.map(e=>e.excerpt);
+    expect(excerpts).toContain('交付销售演示稿');expect(excerpts).toContain('知识库 24');expect(excerpts).not.toContain('知识库 0');expect(excerpts).toHaveLength(20);
+    expect(h.topics.listCurrentTopics().find(t=>t.id===topic.id)?.evidenceIds).toEqual(ids);
+    await h.app.close();h.db.close();
+  });
+  it('filters untrusted evidence without hiding a topic that still has trusted name evidence', async () => {
+    const h=harness();const ids:string[]=[];let trustedSourceId='';
+    for(const senderType of ['user','unknown'] as const){
+      const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:`om_${senderType}`,threadId:null,rootId:null,
+        author:{openId:'ou_ivy',displayName:null},senderType,messageType:'text',text:`知识库 ${senderType}`,occurredAt:start.toISOString()},start).source).source;
+      ids.push(saveFounderEvidence(h.sources,source.id,'知识库',start));if(senderType==='user')trustedSourceId=source.id;
+    }
+    h.topics.createTopic({displayName:'知识库',stage:'idea',evidenceIds:ids,createdAt:start});
+    const input=buildFounderStreamInput(h.sources,h.topics,[trustedSourceId],chat);
+    expect(input.currentTopics).toHaveLength(1);expect(input.currentTopics[0]!.evidenceExcerpts).toEqual([{sourceId:trustedSourceId,excerpt:'知识库'}]);
+    expect(input.sources).toHaveLength(1);expect(h.topics.listCurrentTopics()[0]?.evidenceIds).toEqual(ids);
+    await h.app.close();h.db.close();
+  });
+  it('extends a pending analysis deadline immediately when a later webhook arrives', async () => {
+    const h=harness();await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload:event()});await h.runtime.runOnce();
+    h.setNow(new Date(start.getTime()+299_000));await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload:event('om_2')});
+    expect(h.db.client.prepare("SELECT updated_at FROM batch_jobs WHERE type='analyze_founder_stream_batch'").get())
+      .toEqual({updated_at:'2026-09-21T00:09:59.000Z'});
+    h.setNow(new Date(start.getTime()+300_000));await h.runtime.runOnce();expect(h.calls()).toBe(0);
+    h.setNow(new Date(start.getTime()+598_999));await h.runtime.runOnce();expect(h.calls()).toBe(0);
+    h.setNow(new Date(start.getTime()+600_000));await h.runtime.runOnce();expect(h.calls()).toBe(1);
+    expect(h.inputs[0]?.sources).toHaveLength(2);await h.app.close();h.db.close();
+  });
   it.each(['app',undefined])('does not analyze historical sender type %s, even with an Ivy-like author ID', async senderType => {
     const h=harness();
     const captured=captureGroupMessageSource({chatId:chat,messageId:'om_history',threadId:null,rootId:null,

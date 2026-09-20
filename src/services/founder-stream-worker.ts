@@ -153,13 +153,18 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
 
 export function buildFounderStreamInput(sources: ContextSourceRepository, topics: TopicRepository, sourceIds: readonly string[], chatId: string): FounderStreamInput {
   const selected = new Map<string, ContextSourceRecord>();
-  const include = (id: string) => {
+  const trustedSource = (id: string) => {
     const source = sources.getSource(id);
     if (!source || source.availabilityStatus !== 'available' || !['group_message','minute_transcript'].includes(source.sourceType) ||
       (source.sourceType === 'group_message' && source.metadata.chatId !== chatId)) return null;
     if (source.sourceType === 'group_message' && (source.metadata.senderType !== 'user' ||
       sources.client.prepare("SELECT 1 FROM outbox WHERE delivered_message_id=? AND status='delivered'").get(source.externalId))) return null;
-    selected.set(id, source); return source;
+    return source;
+  };
+  const include = (id: string) => {
+    const source = trustedSource(id);
+    if (source) selected.set(id, source);
+    return source;
   };
   for (const id of sourceIds) {
     const source=sources.getSource(id);if(!source)throw new Error('FOUNDER_SOURCE_UNAVAILABLE');
@@ -170,15 +175,22 @@ export function buildFounderStreamInput(sources: ContextSourceRepository, topics
   if(selected.size===0)return {sources:[],currentTopics:[]};
   const currentTopics: FounderStreamCurrentTopic[] = [];
   for (const topic of topics.listCurrentTopics().slice(-200)) {
-    const full = topic.evidenceIds.map(id => sources.getEvidence(id)).filter(e => e !== null);
-    const anchors = full.filter(e => e.excerpt.includes(topic.displayName) || (topic.outcome !== null && e.excerpt.includes(topic.outcome)));
-    const bounded = [...new Map([...anchors, ...full.slice(-20)].map(e => [e.id,e])).values()].slice(0,20);
-    if (!bounded.length || !bounded.some(e => e.excerpt.includes(topic.displayName)) ||
-      (topic.outcome !== null && !bounded.some(e => e.excerpt.includes(topic.outcome!)))) continue;
-    if (selected.size + bounded.length > 500) break;
-    if (bounded.some(e => !include(e.sourceId))) continue;
+    // Filter first: a legacy/unknown author on one evidence item must not hide
+    // independently trusted evidence attached to the same topic.
+    const full = topic.evidenceIds.map(id => sources.getEvidence(id)).filter(e => e !== null)
+      .filter(e => trustedSource(e.sourceId) !== null)
+      .sort((a,b) => trustedSource(b.sourceId)!.occurredAt.localeCompare(trustedSource(a.sourceId)!.occurredAt) ||
+        b.capturedAt.localeCompare(a.capturedAt) || b.id.localeCompare(a.id));
+    const nameAnchor = full.find(e => e.excerpt.includes(topic.displayName));
+    if (!nameAnchor) continue;
+    const outcomeAnchor = topic.outcome === null ? undefined : full.find(e => e.excerpt.includes(topic.outcome!));
+    const anchors = outcomeAnchor ? [nameAnchor, outcomeAnchor] : [nameAnchor];
+    const bounded = [...new Map([...anchors, ...full].map(e => [e.id,e])).values()].slice(0,20);
+    const addedSourceIds = new Set(bounded.filter(e => !selected.has(e.sourceId)).map(e => e.sourceId));
+    if (selected.size + addedSourceIds.size > 500) continue;
+    for (const evidence of bounded) include(evidence.sourceId);
     currentTopics.push({ id: topic.id, currentVersion: topic.currentVersion, displayName: topic.displayName,
-      stage: topic.stage, outcome: topic.outcome, evidenceExcerpts: bounded.map(e => ({ sourceId:e.sourceId,excerpt:e.excerpt })) });
+      stage: topic.stage, outcome: outcomeAnchor ? topic.outcome : null, evidenceExcerpts: bounded.map(e => ({ sourceId:e.sourceId,excerpt:e.excerpt })) });
   }
   return validateFounderStreamInput({ sources: [...selected.values()], currentTopics });
 }

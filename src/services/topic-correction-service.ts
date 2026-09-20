@@ -82,7 +82,7 @@ export function applyTopicCorrection(rawInput: FounderFeedbackInput, rawCorrecti
       const now = dependencies.now();
       const captured = captureGroupMessageSource({ chatId: input.chatId, messageId: input.messageId,
         threadId: input.threadId ?? null, rootId: input.rootId ?? null, author: { openId: input.openId, displayName: null },
-        messageType: 'text', text: input.text, occurredAt: input.occurredAt }, now);
+        messageType: 'text', senderType: 'user', text: input.text, occurredAt: input.occurredAt }, now);
       const sources = new ContextSourceRepository(client), source = sources.saveSource(captured.source).source;
       if (source.authors.length !== 1 || source.authors[0]?.openId !== input.openId || source.occurredAt !== input.occurredAt) {
         return { kind: 'reject', reason: 'message_conflict' } as const;

@@ -152,9 +152,20 @@ export class JobRepository {
     const key = `capture_group_message:${input.messageId}`;
     const payload = { chatId: input.chatId, sourceIds: input.sourceIds, threadId: input.threadId,
       windowKey: '', attempt: 0 };
-    this.client.prepare(`INSERT INTO batch_jobs (id,type,stable_key,payload,status,created_at,updated_at)
-      VALUES (?, 'capture_group_message', ?, ?, 'queued', ?, ?) ON CONFLICT(stable_key) DO NOTHING`)
-      .run(key, key, JSON.stringify(payload), input.capturedAt.toISOString(), input.capturedAt.toISOString());
+    this.client.transaction(() => {
+      const result = this.client.prepare(`INSERT INTO batch_jobs (id,type,stable_key,payload,status,created_at,updated_at)
+        VALUES (?, 'capture_group_message', ?, ?, 'queued', ?, ?) ON CONFLICT(stable_key) DO NOTHING`)
+        .run(key, key, JSON.stringify(payload), input.capturedAt.toISOString(), input.capturedAt.toISOString());
+      if (result.changes === 1) {
+        // Arrival intent, not eventual worker processing time, establishes the quiet period.
+        // This updates only pending deadlines, never an active worker's lease or model payload.
+        this.client.prepare(`UPDATE batch_jobs SET updated_at = MAX(updated_at, ?)
+          WHERE type='analyze_founder_stream_batch' AND status IN ('queued','retry') AND json_valid(payload)
+            AND json_extract(payload,'$.chatId')=? AND json_extract(payload,'$.threadId') IS ?
+            AND json_extract(payload,'$.windowKey') LIKE 'live:%'`)
+          .run(new Date(input.capturedAt.getTime() + 300_000).toISOString(), input.chatId, input.threadId);
+      }
+    }).immediate();
   }
 
   debounceFounderStream(input: { chatId: string; sourceIds: string[]; threadId: string | null; now: Date }): string {
@@ -218,7 +229,7 @@ export class JobRepository {
         WHERE type IN (${placeholders})
           AND status IN ('queued', 'retry', 'processing')
           AND updated_at <= ?
-        ORDER BY created_at ASC
+        ORDER BY CASE WHEN type='capture_group_message' THEN 0 ELSE 1 END, created_at ASC
         LIMIT 1
       `).get(...kinds, availableAt.toISOString()) as JobRow | undefined;
       if (!row) {
