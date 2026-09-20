@@ -218,3 +218,4 @@
 - 2026-09-21 Task 4 并发复核发现 SQLite DEFERRED 事务会让两个连接先读到同一 topic version，失败方可能泄露 `SQLITE_BUSY`；`appendVersion` 改用 IMMEDIATE 写序列化后再读版本，并将残余 `SQLITE_BUSY*` 统一映射为 `TOPIC_VERSION_CONFLICT`，双进程 WAL 回归锁定该领域契约。
 - 2026-09-21 Founder Stream Alignment Task 5 的分析边界只接收不可变群/妙记来源与有来源支撑的当前话题，不读取旧项目种子、规则或源 metadata；保留 occurredAt 防止历史承诺与后续撤回失去时间关系。名称、成果目标与当前行动要求逐字原文引用；自动归并仅允许同名、明确延续、双高置信且新旧共享证据，其余延续/拆分输出 needs_confirmation。归并器是纯决策层，不改 topic 数据库；后续 worker 负责把决定映射为版本追加与确认流程。当前仅 fake executor 验证，语义阶段判断尚未经过真实 Codex 质量验收。
 - 2026-09-21 Founder Stream Alignment Task 6 将创始人身份与显示名分离：只有 `founder_identities` 中配置的 Feishu author ID 才能归因到 Ivy/James，未知发送者保持 unknown。话题观点按 `ivy_view/james_view/shared_decision/unresolved` 分开做不可变版本与 CAS；MVP 不配置单方决策权，`shared_decision` 必须由两位已配置创始人的证据共同支持，且“收到/已读/晚点看”等消息即使被错误标成同意也不能生成共同决策。
+- 2026-09-21 Task 6 审查修正：共同决策升级必须回到完整、不可变的源证据，并同时验证一方的直接实质提案与另一方对同一决策的明确同意；否定、条件、引用/转述、截断或非实质回执即使被上游误标也必须 fail closed。

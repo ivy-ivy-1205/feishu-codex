@@ -202,6 +202,121 @@ describe('PerspectiveReconciler', () => {
     expect(repository.getCurrentPerspective(topic.id, 'shared_decision')).toBeNull();
   });
 
+  it.each([
+    ['Chinese negation', '我不同意按 A 方案推进', '同意按 A 方案推进'],
+    ['Chinese rejection', '我不赞成按 A 方案推进', '赞成按 A 方案推进'],
+    ['English negation', 'I do not agree to proceed with A', 'agree to proceed with A'],
+    ['conditional support', '如果客户确认，我同意按 A 方案推进', '同意按 A 方案推进'],
+    ['English conditional support', 'I agree to proceed with A subject to customer approval',
+      'agree to proceed with A'],
+    ['quoted support', 'James 说“同意按 A 方案推进”', '同意按 A 方案推进'],
+    ['truncated support', '同意按 A 方案推进……', '同意按 A 方案推进']
+  ])('rejects mislabeled %s after checking the complete source message',
+    (_label, sourceText, modelStatement) => {
+      const { repository, sources, topic, reconciler } = createHarness();
+      const ivyEvidenceId = saveGroupEvidence(sources, {
+        messageId: 'om_ivy_safe_proposal', openId: 'ou_ivy', displayName: 'Ivy',
+        text: '按 A 方案推进', occurredAt: '2026-09-01T01:00:00.000Z'
+      });
+      const jamesEvidenceId = saveGroupEvidence(sources, {
+        messageId: 'om_james_unsafe_agreement', openId: 'ou_james', displayName: 'James',
+        text: sourceText, occurredAt: '2026-09-01T01:05:00.000Z'
+      });
+      reconciler.reconcile({
+        topicId: topic.id, evidenceId: ivyEvidenceId, statement: '按 A 方案推进',
+        speechAct: 'decision_proposal', decisionKey: 'sales-kb-direction', confidence: 0.95,
+        observedAt: new Date('2026-09-01T01:00:00.000Z')
+      });
+      reconciler.reconcile({
+        topicId: topic.id, evidenceId: jamesEvidenceId, statement: modelStatement,
+        speechAct: 'explicit_agreement', decisionKey: 'sales-kb-direction', confidence: 0.99,
+        observedAt: new Date('2026-09-01T01:05:00.000Z')
+      });
+
+      expect(repository.getCurrentPerspective(topic.id, 'shared_decision')).toBeNull();
+    });
+
+  it.each([
+    ['an acknowledgement', '收到，晚点看'],
+    ['a conditional proposal', '如果客户确认，就按 A 方案推进'],
+    ['a quoted proposal', 'Ivy 说“按 A 方案推进”'],
+    ['a truncated proposal', '按 A 方案推进...']
+  ])('rejects a mislabeled proposal that is only %s', (_label, proposalText) => {
+    const { repository, sources, topic, reconciler } = createHarness();
+    const jamesEvidenceId = saveGroupEvidence(sources, {
+      messageId: 'om_james_unsafe_proposal', openId: 'ou_james', displayName: 'James',
+      text: proposalText, occurredAt: '2026-09-01T01:00:00.000Z'
+    });
+    const ivyEvidenceId = saveGroupEvidence(sources, {
+      messageId: 'om_ivy_agreement_after_unsafe_proposal', openId: 'ou_ivy', displayName: 'Ivy',
+      text: '同意按 A 方案推进', occurredAt: '2026-09-01T01:05:00.000Z'
+    });
+    reconciler.reconcile({
+      topicId: topic.id, evidenceId: jamesEvidenceId, statement: proposalText,
+      speechAct: 'decision_proposal', decisionKey: 'sales-kb-direction', confidence: 0.99,
+      observedAt: new Date('2026-09-01T01:00:00.000Z')
+    });
+    reconciler.reconcile({
+      topicId: topic.id, evidenceId: ivyEvidenceId, statement: '同意按 A 方案推进',
+      speechAct: 'explicit_agreement', decisionKey: 'sales-kb-direction', confidence: 0.99,
+      observedAt: new Date('2026-09-01T01:05:00.000Z')
+    });
+
+    expect(repository.getCurrentPerspective(topic.id, 'shared_decision')).toBeNull();
+  });
+
+  it('does not use a matching decision key to reconcile different substantive decisions', () => {
+    const { repository, sources, topic, reconciler } = createHarness();
+    const jamesEvidenceId = saveGroupEvidence(sources, {
+      messageId: 'om_james_b_proposal', openId: 'ou_james', displayName: 'James',
+      text: '按 B 方案推进', occurredAt: '2026-09-01T01:00:00.000Z'
+    });
+    const ivyEvidenceId = saveGroupEvidence(sources, {
+      messageId: 'om_ivy_agrees_a', openId: 'ou_ivy', displayName: 'Ivy',
+      text: '同意按 A 方案推进', occurredAt: '2026-09-01T01:05:00.000Z'
+    });
+    reconciler.reconcile({
+      topicId: topic.id, evidenceId: jamesEvidenceId, statement: '按 B 方案推进',
+      speechAct: 'decision_proposal', decisionKey: 'sales-kb-direction', confidence: 0.99,
+      observedAt: new Date('2026-09-01T01:00:00.000Z')
+    });
+    reconciler.reconcile({
+      topicId: topic.id, evidenceId: ivyEvidenceId, statement: '同意按 A 方案推进',
+      speechAct: 'explicit_agreement', decisionKey: 'sales-kb-direction', confidence: 0.99,
+      observedAt: new Date('2026-09-01T01:05:00.000Z')
+    });
+
+    expect(repository.getCurrentPerspective(topic.id, 'shared_decision')).toBeNull();
+  });
+
+  it('accepts matching direct English proposal and agreement evidence', () => {
+    const { repository, sources, topic, reconciler } = createHarness();
+    const ivyEvidenceId = saveGroupEvidence(sources, {
+      messageId: 'om_ivy_english_proposal', openId: 'ou_ivy', displayName: 'Ivy',
+      text: 'Proceed with plan A', occurredAt: '2026-09-01T01:00:00.000Z'
+    });
+    const jamesEvidenceId = saveGroupEvidence(sources, {
+      messageId: 'om_james_english_agreement', openId: 'ou_james', displayName: 'James',
+      text: 'I agree to proceed with plan A', occurredAt: '2026-09-01T01:05:00.000Z'
+    });
+    reconciler.reconcile({
+      topicId: topic.id, evidenceId: ivyEvidenceId, statement: 'Proceed with plan A',
+      speechAct: 'decision_proposal', decisionKey: 'sales-kb-direction', confidence: 0.99,
+      observedAt: new Date('2026-09-01T01:00:00.000Z')
+    });
+    reconciler.reconcile({
+      topicId: topic.id, evidenceId: jamesEvidenceId,
+      statement: 'I agree to proceed with plan A', speechAct: 'explicit_agreement',
+      decisionKey: 'sales-kb-direction', confidence: 0.99,
+      observedAt: new Date('2026-09-01T01:05:00.000Z')
+    });
+
+    expect(repository.getCurrentPerspective(topic.id, 'shared_decision')).toMatchObject({
+      statement: 'Proceed with plan A',
+      evidenceIds: [ivyEvidenceId, jamesEvidenceId]
+    });
+  });
+
   it('never reuses a read-or-later message as the other founders supporting evidence', () => {
     const { repository, sources, topic, reconciler } = createHarness();
     const jamesProposal = saveGroupEvidence(sources, {

@@ -31,6 +31,13 @@ export interface SavePerspectiveInput {
   observedAt: Date;
 }
 
+export interface AttributedFounderEvidence {
+  evidenceId: string;
+  founder: FounderRole;
+  excerpt: string;
+  sourceText: string;
+}
+
 export class PerspectiveVersionConflictError extends Error {
   readonly code = 'PERSPECTIVE_VERSION_CONFLICT';
 
@@ -83,16 +90,28 @@ export class AlignmentRepository {
   }
 
   resolveFounderForEvidence(evidenceId: string): FounderRole | null {
+    return this.getAttributedFounderEvidence(evidenceId)?.founder ?? null;
+  }
+
+  getAttributedFounderEvidence(evidenceId: string): AttributedFounderEvidence | null {
     const row = this.client.prepare(`
-      SELECT s.source_system, s.source_type, s.authors_json
+      SELECT e.id AS evidence_id, e.excerpt, s.content_text,
+             s.source_system, s.source_type, s.authors_json
       FROM context_evidence e
       INNER JOIN context_sources s ON s.id = e.source_id
       WHERE e.id = ?
-    `).get(evidenceId) as EvidenceAuthorRow | undefined;
+    `).get(evidenceId) as AttributedEvidenceRow | undefined;
     if (!row || row.source_type !== 'group_message') return null;
     const externalAuthorId = singleAuthorOpenId(row.authors_json);
     if (!externalAuthorId) return null;
-    return this.findFounderIdentity(row.source_system, externalAuthorId)?.founder ?? null;
+    const founder = this.findFounderIdentity(row.source_system, externalAuthorId)?.founder;
+    if (!founder) return null;
+    return {
+      evidenceId: row.evidence_id,
+      founder,
+      excerpt: row.excerpt,
+      sourceText: row.content_text
+    };
   }
 
   savePerspective(input: SavePerspectiveInput): PerspectiveVersion {
@@ -244,7 +263,14 @@ interface FounderIdentityRow {
   external_author_id: string;
   configured_at: string;
 }
-interface EvidenceAuthorRow { source_system: string; source_type: string; authors_json: string }
+interface AttributedEvidenceRow {
+  evidence_id: string;
+  excerpt: string;
+  content_text: string;
+  source_system: string;
+  source_type: string;
+  authors_json: string;
+}
 interface PerspectiveVersionRow {
   id: string;
   perspective_id: string;
