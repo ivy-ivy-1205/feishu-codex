@@ -44,7 +44,7 @@ const envSchema = z.object({
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
   PROJECT_CONTEXT_SYNC_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
   PROJECT_CONTEXT_CHAT_IDS: projectContextChatIds.default([]),
-  PROJECT_CONTEXT_SYNC_SINCE_DAYS: z.coerce.number().int().positive().default(30),
+  PROJECT_CONTEXT_SYNC_SINCE_DAYS: z.coerce.number().int().positive().optional(),
   CONTEXT_CANDIDATES_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
   CONTEXT_REVIEW_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
   CONTEXT_SOURCE_MAX_BYTES: z.coerce.number().int().positive().default(2_000_000),
@@ -144,7 +144,7 @@ export interface AppConfig {
   projectContext: {
     syncEnabled: boolean;
     approvedChatIds: string[];
-    syncSinceDays: number;
+    syncSinceDays: number | null;
   };
   context: {
     candidatesEnabled: boolean;
@@ -216,7 +216,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     projectContext: {
       syncEnabled: parsed.PROJECT_CONTEXT_SYNC_ENABLED,
       approvedChatIds: parsed.PROJECT_CONTEXT_CHAT_IDS,
-      syncSinceDays: parsed.PROJECT_CONTEXT_SYNC_SINCE_DAYS
+      syncSinceDays: parsed.PROJECT_CONTEXT_SYNC_SINCE_DAYS ?? null
     },
     context: {
       candidatesEnabled: parsed.CONTEXT_CANDIDATES_ENABLED,

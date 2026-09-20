@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { canonicalJson, sha256 } from '../services/canonical-json.js';
 
 export interface ProcessMinuteJob {
   kind: 'process_minute';
@@ -135,6 +136,23 @@ export class JobRepository {
       const job = normalizeJobRow(row);
       return job ? [job] : [];
     });
+  }
+
+  /** Queued for the founder-stream consumer only; existing workers do not lease this kind. */
+  enqueueFounderStreamBatch(input: {
+    chatId: string; since: string; until: string; sourceIds: readonly string[]; capturedAt: Date;
+  }): { created: boolean; key: string } {
+    const sourceIds = [...new Set(input.sourceIds)].sort();
+    if (sourceIds.length === 0) throw new Error('founder stream batch requires sources');
+    const payload = { chatId: input.chatId, since: input.since, until: input.until, sourceIds };
+    const key = `founder-stream-batch:${sha256(canonicalJson({ chatId: input.chatId, sourceIds }))}`;
+    const timestamp = input.capturedAt.toISOString();
+    const result = this.client.prepare(`
+      INSERT INTO batch_jobs (id, type, stable_key, payload, status, created_at, updated_at)
+      VALUES (?, 'analyze_founder_stream_batch', ?, ?, 'queued', ?, ?)
+      ON CONFLICT(stable_key) DO NOTHING
+    `).run(key, key, JSON.stringify(payload), timestamp, timestamp);
+    return { created: result.changes === 1, key };
   }
 
   leaseNextProcessMinute(availableAt: Date): ProcessMinuteJob | null {

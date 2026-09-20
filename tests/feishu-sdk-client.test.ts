@@ -330,6 +330,63 @@ describe('FeishuSdkApiClient', () => {
     })).rejects.toThrow(/message id/i);
   });
 
+  it('paginates a discovered thread and preserves sender, relation and edit/delete metadata', async () => {
+    const calls: unknown[] = [];
+    const sdk = createFakeSdkClient({ calls, contextMessages: [{
+      message_id: 'om_reply', msg_type: 'text', create_time: '1783425868000',
+      sender: { id: 'ou_ivy', id_type: 'open_id' }, thread_id: 'omt_1', root_id: 'om_root', parent_id: 'om_parent',
+      updated: true, deleted: false, body: { content: JSON.stringify({ text: 'reply' }) }
+    }] });
+    const context = new FeishuSdkContextClient(sdk);
+    await context.listMessages({ chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', cursor: null, since: new Date('2026-07-01T00:00:00.000Z') });
+    const page = await context.listThreadMessages({ threadId: 'omt_1', cursor: 'page2', since: new Date('2026-07-01T00:00:00.000Z') });
+    expect(page.messages[0]).toMatchObject({ senderId: 'ou_ivy', threadId: 'omt_1', rootId: 'om_root', parentId: 'om_parent', edited: true, deleted: false });
+    expect(calls).toContainEqual({ method: 'im.v1.message.list', payload: { params: {
+      container_id_type: 'thread', container_id: 'omt_1', page_size: 50, page_token: 'page2', start_time: '1782864000'
+    } } });
+    await expect(context.listThreadMessages({ threadId: 'unknown-thread', cursor: null, since: new Date() })).rejects.toThrow();
+  });
+
+  it('rejects SDK error codes and inconsistent pagination instead of returning an empty successful page', async () => {
+    for (const response of [{ code: 999, msg: 'sensitive error' }, { code: 0, data: { items: [], has_more: true } }]) {
+      const sdk = createFakeSdkClient({});
+      sdk.im.v1!.message.list = async () => response;
+      await expect(new FeishuSdkContextClient(sdk).listMessages({ chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', cursor: null, since: new Date() })).rejects.toThrow();
+    }
+  });
+
+  it('rejects an unapproved group before SDK access and does not discover foreign-chat threads', async () => {
+    const calls: unknown[] = [];
+    const context = new FeishuSdkContextClient(createFakeSdkClient({ calls, contextMessages: [{
+      message_id: 'foreign', chat_id: 'oc_private', msg_type: 'text', thread_id: 'foreign-thread', create_time: '1783425868000',
+      body: { content: JSON.stringify({ text: 'must not capture' }) }
+    }] }));
+    await expect(context.listMessages({ chatId: 'oc_private', cursor: null, since: new Date() })).rejects.toMatchObject({ code: 'FEISHU_CHAT_NOT_APPROVED' });
+    expect(calls).toHaveLength(0);
+    const page = await context.listMessages({ chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', cursor: null, since: new Date() });
+    expect(page.messages).toEqual([]);
+    expect(page.gaps).toEqual([expect.objectContaining({ code: 'MESSAGE_INVALID' })]);
+    await expect(context.listThreadMessages({ threadId: 'foreign-thread', cursor: null, since: new Date() })).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('distinguishes native voice from audio attachments and records document references without downloading', async () => {
+    const context = new FeishuSdkContextClient(createFakeSdkClient({ contextMessages: [
+      { message_id: 'voice', msg_type: 'audio', create_time: '1783425868000', body: { content: JSON.stringify({ file_key: 'voice-key', duration: 1000 }) } },
+      { message_id: 'video', msg_type: 'media', create_time: '1783425868000', body: { content: JSON.stringify({ file_key: 'video-key' }) } },
+      { message_id: 'audio-file', msg_type: 'file', create_time: '1783425868000', body: { content: JSON.stringify({ file_key: 'audio-key', file_name: 'recording.mp3' }) } },
+      { message_id: 'document', msg_type: 'text', create_time: '1783425868000', body: { content: JSON.stringify({ text: 'see https://example.feishu.cn/docx/DocToken1' }) } }
+    ] }));
+    const page = await context.listMessages({ chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', cursor: null, since: new Date() });
+    expect(page.messages.map((message) => message.messageType)).toEqual(['voice', 'video', 'file', 'text']);
+    const files = await context.listReferencedFiles({ chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', messageIds: ['voice', 'video', 'audio-file', 'document'] });
+    expect(files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ fileToken: 'audio-key', mimeType: 'audio/unknown', text: null }),
+      expect.objectContaining({ fileToken: 'DocToken1', mimeType: 'application/vnd.feishu.docx', text: null })
+    ]));
+    expect(files.some((file) => file.fileToken === 'voice-key')).toBe(false);
+  });
+
   it('lists group context through the official SDK without reading file bodies', async () => {
     const calls: unknown[] = [];
     const context = new FeishuSdkContextClient(createFakeSdkClient({

@@ -2,6 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { syncFeishuProjectContext } from '../src/services/feishu-context-sync.js';
 
 describe('syncFeishuProjectContext', () => {
+  it('stores approved voice transcript text and records missing file reference metadata', async () => {
+    const snapshots: string[] = [];
+    const report = await syncFeishuProjectContext({
+      chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', approvedChatIds: ['oc_a84d5b6ca478220d0a37964b50776edb'],
+      since: new Date('2026-08-31T00:00:00.000Z'), now: () => new Date('2026-09-20T00:00:00.000Z'),
+      feishu: {
+        async listMessages() { return { messages: [
+          { messageId: 'voice', messageType: 'voice', text: 'approved transcript', createdAt: '2026-09-01T00:00:00.000Z' },
+          { messageId: 'file', messageType: 'file', text: null, createdAt: '2026-09-01T00:00:00.000Z' }
+        ], nextCursor: null }; },
+        async listReferencedFiles() { return []; }
+      }, saveSnapshot: async (snapshot) => { snapshots.push(snapshot.content); }
+    });
+    expect(snapshots).toContain('approved transcript');
+    expect(report.gaps.map((gap) => gap.code)).toContain('FILE_REFERENCE_UNAVAILABLE');
+  });
+
   it('stores text and document snippets from the approved group and skips video/audio', async () => {
     const snapshots: Array<{ sourceKind: string; sourceRef: string; content: string }> = [];
 

@@ -1,0 +1,62 @@
+import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
+import { createFeishuSdkClient, FeishuSdkContextClient } from '../adapters/feishu-sdk.js';
+import { createSqliteDatabase } from '../db/client.js';
+import { migrateDatabase } from '../db/migrate.js';
+import { ContextSourceRepository } from '../repositories/context-source-repository.js';
+import { JobRepository } from '../repositories/job-repository.js';
+import { runFounderStreamBackfill, validateFounderStreamWindow,
+  type FounderStreamBackfillInput } from '../services/founder-stream-backfill.js';
+
+export function parseBackfillArguments(args: string[]): { chatId: string; since: string; dryRun: boolean } {
+  const { values } = parseArgs({ args: args[0] === '--' ? args.slice(1) : args, strict: true,
+    options: { 'chat-id': { type: 'string' }, since: { type: 'string' }, 'dry-run': { type: 'boolean' }, persist: { type: 'boolean' } } });
+  if (!values['chat-id'] || !values.since || Boolean(values['dry-run']) === Boolean(values.persist)) {
+    throw new Error('require --chat-id <approved-id> --since <ISO> and exactly one of --dry-run or --persist');
+  }
+  return { chatId: values['chat-id'], since: values.since, dryRun: values['dry-run'] === true };
+}
+
+type CliDependencies = Omit<FounderStreamBackfillInput, 'chatId' | 'since' | 'dryRun'> & { write: (line: string) => void };
+
+export async function runBackfillCli(args: string[], dependencies: CliDependencies): Promise<void> {
+  const options = parseBackfillArguments(args);
+  const report = await runFounderStreamBackfill({ ...dependencies, ...options });
+  const gapsByCode: Record<string, number> = {};
+  for (const gap of report.gaps) gapsByCode[gap.code] = (gapsByCode[gap.code] ?? 0) + 1;
+  // Explicit whitelist: never serialize raw report, messages, IDs, cursors, errors or sources.
+  dependencies.write(JSON.stringify({ dryRun: report.dryRun, requestedRange: report.requestedRange,
+    coverageStatus: report.coverageStatus, coverage: report.coverage,
+    messagesRead: report.messagesRead, sourcesCaptured: report.sourcesCaptured,
+    sourcesCreated: report.sourcesCreated, jobsEnqueued: report.jobsEnqueued,
+    filesRead: report.filesRead, filesUnreadable: report.filesUnreadable,
+    mediaSkipped: report.mediaSkipped, voiceTextMissing: report.voiceTextMissing, gapsByCode }));
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const options = parseBackfillArguments(args);
+  const now = new Date();
+  validateFounderStreamWindow(options.chatId, options.since, now);
+  const appId = process.env.FEISHU_APP_ID?.trim();
+  const appSecret = process.env.FEISHU_APP_SECRET?.trim();
+  if (!appId || !appSecret) throw new Error('Feishu app configuration required');
+  const databasePath = process.env.DATABASE_URL?.trim();
+  if (!options.dryRun && (!databasePath || /^postgres(?:ql)?:/u.test(databasePath))) throw new Error('SQLite database path required for persist');
+  // Dry-run never opens or migrates a database and never starts a worker.
+  const database = options.dryRun ? undefined : createSqliteDatabase(databasePath!);
+  try {
+    if (database) migrateDatabase(database.client);
+    await runBackfillCli(args, { now,
+      feishu: new FeishuSdkContextClient(createFeishuSdkClient({ appId, appSecret })),
+      ...(database ? { sourceRepository: new ContextSourceRepository(database.client), jobRepository: new JobRepository(database.client) } : {}),
+      write: (line) => process.stdout.write(`${line}\n`) });
+  } finally { database?.close(); }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void main().catch(() => {
+    process.stderr.write('Founder stream backfill failed. Check explicit chat, ISO range, mode and runtime configuration. No message content logged.\n');
+    process.exitCode = 1;
+  });
+}

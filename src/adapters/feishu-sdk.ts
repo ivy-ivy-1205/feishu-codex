@@ -11,6 +11,7 @@ import type {
   FeishuContextFile,
   FeishuContextMessage
 } from '../services/feishu-context-sync.js';
+import { approvedFeishuProjectContextChatId, FeishuContextSyncError } from '../services/feishu-context-sync.js';
 
 export interface FeishuSdkClientOptions {
   appId: string;
@@ -33,11 +34,12 @@ export interface FeishuSdkClientLike {
       message: {
         list(payload: {
           params: {
-            container_id_type: 'chat';
+            container_id_type: 'chat' | 'thread';
             container_id: string;
             page_size: number;
             page_token?: string;
             start_time: string;
+            end_time?: string;
           };
         }): Promise<unknown>;
       };
@@ -75,45 +77,66 @@ export interface FeishuSdkClientLike {
 export class FeishuSdkContextClient implements FeishuContextClient {
   readonly #sdkClient: FeishuSdkClientLike;
   readonly #filesByMessageId = new Map<string, FeishuContextFile[]>();
+  readonly #discoveredThreadIds = new Set<string>();
 
   constructor(sdkClient: FeishuSdkClientLike) {
     this.#sdkClient = sdkClient;
   }
 
-  async listMessages(input: { chatId: string; cursor: string | null; since: Date }): Promise<{
-    messages: FeishuContextMessage[];
-    nextCursor: string | null;
-  }> {
+  async listMessages(input: { chatId: string; cursor: string | null; since: Date; until?: Date }) {
+    if (input.chatId !== approvedFeishuProjectContextChatId) throw new FeishuContextSyncError(input.chatId);
+    return this.#listPage('chat', input.chatId, input);
+  }
+
+  async listThreadMessages(input: { threadId: string; cursor: string | null; since: Date; until?: Date }) {
+    // A thread is authorized only by discovery within this approved group client.
+    if (!this.#discoveredThreadIds.has(input.threadId)) throw new Error('FEISHU_THREAD_NOT_DISCOVERED');
+    return this.#listPage('thread', input.threadId, input);
+  }
+
+  async #listPage(containerType: 'chat' | 'thread', containerId: string, input: { cursor: string | null; since: Date; until?: Date }) {
     if (!this.#sdkClient.im.v1) {
       throw new Error('Feishu SDK context message API is unavailable');
     }
     const response = await this.#sdkClient.im.v1.message.list({
       params: {
-        container_id_type: 'chat',
-        container_id: input.chatId,
+        container_id_type: containerType,
+        container_id: containerId,
         page_size: 50,
         ...(input.cursor ? { page_token: input.cursor } : {}),
-        start_time: String(Math.floor(input.since.getTime() / 1_000))
+        start_time: String(Math.floor(input.since.getTime() / 1_000)),
+        ...(input.until ? { end_time: String(Math.ceil(input.until.getTime() / 1_000)) } : {})
       }
     });
+    if (isRecord(response) && response.code !== undefined && response.code !== 0) throw new Error('FEISHU_HISTORY_API_ERROR');
     const data = responseData(response);
-    const record = isRecord(data) ? data : {};
-    const items = Array.isArray(record.items) ? record.items : [];
+    if (!isRecord(data) || !Array.isArray(data.items)) throw new Error('FEISHU_HISTORY_PAGE_INVALID');
+    const record = data;
+    const items = data.items as unknown[];
+    const nextCursor = record.has_more === false ? null
+      : typeof record.page_token === 'string' && record.page_token.trim() ? record.page_token : null;
+    if (record.has_more === true && !nextCursor) throw new Error('FEISHU_HISTORY_CURSOR_MISSING');
     const messages = items.map(toContextMessage).filter((message): message is FeishuContextMessage => message !== null);
     for (const item of items) {
       const parsed = toContextMessage(item);
       if (parsed) {
         this.#filesByMessageId.set(parsed.messageId, extractReferencedFiles(item));
+        if (parsed.threadId) this.#discoveredThreadIds.add(parsed.threadId);
       }
     }
     return {
       messages,
-      nextCursor: typeof record.page_token === 'string' && record.page_token.trim() ? record.page_token : null
+      nextCursor,
+      gaps: items.flatMap((item, index) => toContextMessage(item) ? [] : [{
+        code: 'MESSAGE_INVALID' as const,
+        sourceRef: `feishu:${containerType}:${containerId}:page:${input.cursor ?? 'first'}:item:${index}`,
+        reason: 'message metadata unavailable or invalid'
+      }])
     };
   }
 
   async listReferencedFiles(input: { chatId: string; messageIds: readonly string[] }): Promise<FeishuContextFile[]> {
-    void input.chatId;
+    if (input.chatId !== approvedFeishuProjectContextChatId) throw new FeishuContextSyncError(input.chatId);
     return input.messageIds.flatMap((messageId) => this.#filesByMessageId.get(messageId) ?? []);
   }
 }
@@ -308,7 +331,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function toContextMessage(value: unknown): FeishuContextMessage | null {
-  if (!isRecord(value) || typeof value.message_id !== 'string' || typeof value.msg_type !== 'string') {
+  if (!isRecord(value) || typeof value.message_id !== 'string' || !value.message_id.trim() || typeof value.msg_type !== 'string'
+    || (value.chat_id !== undefined && value.chat_id !== approvedFeishuProjectContextChatId)) {
     return null;
   }
   const messageType = normalizeContextMessageType(value.msg_type);
@@ -317,16 +341,25 @@ function toContextMessage(value: unknown): FeishuContextMessage | null {
   const createdAtMs = typeof value.create_time === 'string'
     ? parseFeishuTimestampMs(value.create_time)
     : null;
-  const createdAt = new Date(createdAtMs ?? 0).toISOString();
+  const createdAt = createdAtMs !== null && Number.isFinite(new Date(createdAtMs).getTime()) ? new Date(createdAtMs).toISOString() : '';
   return {
     messageId: value.message_id,
     messageType,
     text: content,
-    createdAt
+    createdAt,
+    senderId: isRecord(value.sender) && value.sender.id_type === 'open_id' && typeof value.sender.id === 'string' ? value.sender.id : null,
+    threadId: optionalId(value.thread_id), rootId: optionalId(value.root_id), parentId: optionalId(value.parent_id),
+    edited: value.updated === true, deleted: value.deleted === true
   };
 }
 
+function optionalId(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 function normalizeContextMessageType(value: string): FeishuContextMessage['messageType'] {
+  if (value === 'audio') return 'voice';
+  if (value === 'media') return 'video';
   return ['text', 'post', 'file', 'image', 'video', 'audio', 'voice'].includes(value)
     ? value as FeishuContextMessage['messageType']
     : 'unknown';
@@ -384,20 +417,42 @@ function extractReferencedFiles(value: unknown): FeishuContextFile[] {
   if (!isRecord(value) || !isRecord(value.body) || typeof value.body.content !== 'string') {
     return [];
   }
+  // Native voice/media are handled by message policy; do not reinterpret their resources as files.
+  if (['audio', 'voice', 'media', 'video'].includes(String(value.msg_type))) return [];
   try {
     const content = JSON.parse(value.body.content);
-    if (!isRecord(content) || typeof content.file_key !== 'string') {
-      return [];
+    if (!isRecord(content)) return [];
+    const files: FeishuContextFile[] = [];
+    const messageId = typeof value.message_id === 'string' ? value.message_id : undefined;
+    if (typeof content.file_key === 'string' && content.file_key.trim()) {
+      const title = typeof content.file_name === 'string' ? content.file_name : content.file_key;
+      files.push({ messageId, fileToken: content.file_key, title,
+        mimeType: typeof content.mime_type === 'string' ? content.mime_type : inferFileMime(title), text: null });
     }
-    return [{
-      fileToken: content.file_key,
-      title: typeof content.file_name === 'string' ? content.file_name : content.file_key,
-      mimeType: typeof content.mime_type === 'string' ? content.mime_type : 'application/octet-stream',
-      text: null
-    }];
+    const links = collectStringValues(content).flatMap((text) => [...text.matchAll(/https:\/\/[a-z\d.-]+\/(docx|docs|wiki|sheets|file|base)\/([a-z\d_-]+)/giu)]);
+    for (const [url, type, token] of links) {
+      const host = new URL(url).hostname;
+      if (!host.endsWith('.feishu.cn') && !host.endsWith('.larksuite.com')) continue;
+      if (!files.some((file) => file.fileToken === token)) files.push({ messageId, fileToken: token,
+        title: `${type} reference`, mimeType: `application/vnd.feishu.${type}`, text: null });
+    }
+    return files;
   } catch {
     return [];
   }
+}
+
+function inferFileMime(title: string): string {
+  if (/\.(mp3|wav|m4a|aac|ogg|flac|opus)$/iu.test(title)) return 'audio/unknown';
+  if (/\.(mp4|mov|webm|avi|mkv)$/iu.test(title)) return 'video/unknown';
+  return 'application/octet-stream';
+}
+
+function collectStringValues(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(collectStringValues);
+  if (isRecord(value)) return Object.values(value).flatMap(collectStringValues);
+  return [];
 }
 
 function isReadableStreamResponse(value: unknown): value is {

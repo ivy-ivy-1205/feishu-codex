@@ -105,7 +105,7 @@ describe('loadConfig', () => {
     expect(loadConfig(baseEnv).projectContext).toMatchObject({
       syncEnabled: false,
       approvedChatIds: [],
-      syncSinceDays: 30
+      syncSinceDays: null
     });
     expect(loadConfig({
       ...baseEnv,
