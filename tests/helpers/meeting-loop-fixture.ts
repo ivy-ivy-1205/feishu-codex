@@ -9,6 +9,7 @@ import { JobRepository } from '../../src/repositories/job-repository.js';
 import { MeetingRepository, type MeetingTodoRecord } from '../../src/repositories/meeting-repository.js';
 import { OutboxRepository } from '../../src/repositories/outbox-repository.js';
 import { processMinuteJob } from '../../src/services/meeting-worker.js';
+import { seedLegacyProjectRegistryFixture } from './project-registry-fixtures.js';
 
 const fixtureMinuteId = 'min_project_aware_followups';
 const workerNow = new Date('2030-08-01T03:00:00.000Z');
@@ -18,6 +19,7 @@ export function createMeetingLoopFixture(prefix = 'aijia-meeting-loop-') {
   const databaseFilename = join(temporaryDirectory, 'bridge.sqlite');
   const database = createSqliteDatabase(databaseFilename);
   migrateDatabase(database.client);
+  seedLegacyProjectRegistryFixture(database.client);
   return {
     temporaryDirectory,
     databaseFilename,

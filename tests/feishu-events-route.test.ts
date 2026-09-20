@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { buildApp, type AppDependencies } from '../src/app.js';
 import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
+import { seedLegacyProjectRegistryFixture } from './helpers/project-registry-fixtures.js';
 import { JobRepository } from '../src/repositories/job-repository.js';
 import { MeetingRepository } from '../src/repositories/meeting-repository.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
@@ -567,6 +568,7 @@ function createHarness(
 ) {
   const database = createSqliteDatabase(':memory:');
   migrateDatabase(database.client);
+  seedLegacyProjectRegistryFixture(database.client);
   const meetingRepository = new MeetingRepository(database.client);
   const jobRepository = new JobRepository(database.client);
   const app = buildApp({

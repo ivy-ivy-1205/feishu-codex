@@ -2,10 +2,6 @@ import type Database from 'better-sqlite3';
 import {
   normalizeProcessMinuteJobPayload
 } from '../repositories/job-repository.js';
-import {
-  initialProjectDefinitions,
-  initialProjectMappingRules
-} from '../services/project-registry-seed.js';
 
 const migrationSql = `
   CREATE TABLE IF NOT EXISTS feishu_events (
@@ -87,6 +83,12 @@ const migrationSql = `
     repo_url TEXT,
     default_branch TEXT,
     status TEXT NOT NULL CONSTRAINT projects_status_allowed CHECK(status IN ('active', 'archived')),
+    origin TEXT NOT NULL DEFAULT 'legacy_seed'
+      CONSTRAINT projects_origin_allowed
+      CHECK(origin IN ('discovered', 'human_confirmed', 'legacy_seed')),
+    stage TEXT NOT NULL DEFAULT 'active_project'
+      CONSTRAINT projects_stage_allowed
+      CHECK(stage IN ('idea', 'exploring', 'project_candidate', 'active_project', 'paused', 'closed')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -323,7 +325,7 @@ export function migrateDatabase(client: Database.Database): void {
   `);
   migrateTodoCapabilityColumn(client);
   migrateTodoProjectColumns(client);
-  seedProjectRegistry(client);
+  migrateProjectAuthorityColumns(client);
 }
 
 function migrateProcessMinuteRetryPayloads(client: Database.Database): void {
@@ -383,43 +385,22 @@ function migrateTodoProjectColumns(client: Database.Database): void {
   }
 }
 
-function seedProjectRegistry(client: Database.Database): void {
-  const now = new Date().toISOString();
-  const insertProject = client.prepare(`
-    INSERT INTO projects (
-      project_key, display_name, aliases, local_path_hint, repo_url, default_branch, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(project_key) DO UPDATE SET
-      display_name = excluded.display_name,
-      aliases = excluded.aliases,
-      local_path_hint = excluded.local_path_hint,
-      repo_url = excluded.repo_url,
-      default_branch = excluded.default_branch,
-      updated_at = excluded.updated_at
-  `);
-  const insertRule = client.prepare(`
-    INSERT INTO project_mapping_rules (
-      id, pattern, pattern_kind, project_key, subproject_key, confidence_hint, priority, source, active, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      pattern = excluded.pattern,
-      pattern_kind = excluded.pattern_kind,
-      project_key = excluded.project_key,
-      subproject_key = excluded.subproject_key,
-      confidence_hint = excluded.confidence_hint,
-      priority = excluded.priority,
-      source = excluded.source,
-      updated_at = excluded.updated_at
-  `);
-
-  client.transaction(() => {
-    for (const project of initialProjectDefinitions) {
-      insertProject.run(project.projectKey, project.displayName, JSON.stringify(project.aliases), project.localPathHint, project.repoUrl, project.defaultBranch, project.status, now, now);
-    }
-    for (const rule of initialProjectMappingRules) {
-      insertRule.run(rule.id, rule.pattern, rule.patternKind, rule.projectKey, rule.subprojectKey, rule.confidenceHint, rule.priority, rule.source, Number(rule.active), now, now);
-    }
-  })();
+function migrateProjectAuthorityColumns(client: Database.Database): void {
+  const columns = client.prepare('PRAGMA table_info(projects)').all() as TableColumn[];
+  if (!columns.some((column) => column.name === 'origin')) {
+    client.exec(`
+      ALTER TABLE projects ADD COLUMN origin TEXT NOT NULL DEFAULT 'legacy_seed'
+        CONSTRAINT projects_origin_allowed
+        CHECK(origin IN ('discovered', 'human_confirmed', 'legacy_seed'))
+    `);
+  }
+  if (!columns.some((column) => column.name === 'stage')) {
+    client.exec(`
+      ALTER TABLE projects ADD COLUMN stage TEXT NOT NULL DEFAULT 'active_project'
+        CONSTRAINT projects_stage_allowed
+        CHECK(stage IN ('idea', 'exploring', 'project_candidate', 'active_project', 'paused', 'closed'))
+    `);
+  }
 }
 
 function migrateOutboxDeliveryColumn(client: Database.Database): void {

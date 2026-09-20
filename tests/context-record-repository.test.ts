@@ -4,10 +4,12 @@ import { migrateDatabase } from '../src/db/migrate.js';
 import { ContextCandidateRepository } from '../src/repositories/context-candidate-repository.js';
 import { ContextRecordRepository } from '../src/repositories/context-record-repository.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
+import { seedLegacyProjectRegistryFixture } from './helpers/project-registry-fixtures.js';
 
 function createCandidate(evidenceLevel: 'primary_statement' | 'direct_observation' = 'primary_statement') {
   const database = createSqliteDatabase(':memory:');
   migrateDatabase(database.client);
+  seedLegacyProjectRegistryFixture(database.client);
   const sources = new ContextSourceRepository(database.client);
   const source = sources.saveSource({ sourceSystem: 'fixture', sourceType: 'transcript', externalId: 'm1', logicalKey: 'm1', occurredAt: '2026-08-03T00:00:00.000Z', authors: [], locatorUri: null, contentFormat: 'text/plain', contentText: 'Ivy [0-1000]: 已完成 60%', metadata: { segments: [{ segmentOrdinal: 0, speakerName: 'Ivy', startMs: 0, endMs: 1000, text: '已完成 60%' }] }, availabilityStatus: 'available', capturedAt: new Date('2026-08-03T00:00:00.000Z') }).source;
   const run = sources.beginExtractionRun({ sources: [{ id: source.id, contentHash: source.contentHash }], extractorName: 'fixture', extractorVersion: 'v1', promptVersion: 'v1', startedAt: new Date('2026-08-03T00:00:00.000Z') }).run;

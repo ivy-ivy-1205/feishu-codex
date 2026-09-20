@@ -77,10 +77,21 @@ export const projects = sqliteTable('projects', {
   repoUrl: text('repo_url'),
   defaultBranch: text('default_branch'),
   status: text('status', { enum: ['active', 'archived'] }).notNull(),
+  origin: text('origin', {
+    enum: ['discovered', 'human_confirmed', 'legacy_seed']
+  }).notNull().default('legacy_seed'),
+  stage: text('stage', {
+    enum: ['idea', 'exploring', 'project_candidate', 'active_project', 'paused', 'closed']
+  }).notNull().default('active_project'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull()
 }, (table) => [
-  check('projects_status_allowed', sql`${table.status} IN ('active', 'archived')`)
+  check('projects_status_allowed', sql`${table.status} IN ('active', 'archived')`),
+  check('projects_origin_allowed', sql`${table.origin} IN ('discovered', 'human_confirmed', 'legacy_seed')`),
+  check(
+    'projects_stage_allowed',
+    sql`${table.stage} IN ('idea', 'exploring', 'project_candidate', 'active_project', 'paused', 'closed')`
+  )
 ]);
 
 export const projectMappingRules = sqliteTable('project_mapping_rules', {

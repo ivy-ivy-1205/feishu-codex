@@ -8,6 +8,7 @@ import { ContextSourceRepository } from '../src/repositories/context-source-repo
 import { JobRepository } from '../src/repositories/job-repository.js';
 import { ProjectRepository } from '../src/repositories/project-repository.js';
 import { processContextCandidateJob } from '../src/services/context-candidate-worker.js';
+import { seedLegacyProjectRegistryFixture } from './helpers/project-registry-fixtures.js';
 
 const output: ContextCandidateExtractorOutput = { candidates: [
   {
@@ -38,6 +39,7 @@ function createHarness(extractorOutput: ContextCandidateExtractorOutput = output
 }, leaseDurationMs = 180_000) {
   const database = createSqliteDatabase(':memory:');
   migrateDatabase(database.client);
+  seedLegacyProjectRegistryFixture(database.client);
   const sources = new ContextSourceRepository(database.client);
   const source = sources.saveSource({ sourceSystem: 'fixture', sourceType: 'transcript', externalId: 'm1',
     logicalKey: 'fixture:m1', occurredAt: '2026-08-03T00:00:00.000Z', authors: [], locatorUri: null,

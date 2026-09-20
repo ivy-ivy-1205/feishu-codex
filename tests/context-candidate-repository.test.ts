@@ -3,10 +3,12 @@ import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
 import { ContextCandidateRepository } from '../src/repositories/context-candidate-repository.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
+import { seedLegacyProjectRegistryFixture } from './helpers/project-registry-fixtures.js';
 
 function fixture() {
   const database = createSqliteDatabase(':memory:');
   migrateDatabase(database.client);
+  seedLegacyProjectRegistryFixture(database.client);
   const sources = new ContextSourceRepository(database.client);
   const source = sources.saveSource({
     sourceSystem: 'fixture', sourceType: 'transcript', externalId: 'm1', logicalKey: 'fixture:m1',

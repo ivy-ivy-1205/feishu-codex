@@ -4,44 +4,45 @@ import {
   ProjectMappingDraft,
   ProjectMappingRule
 } from '../src/domain/project.js';
-import {
-  initialProjectDefinitions,
-  initialProjectMappingRules
-} from '../src/services/project-registry-seed.js';
 
 describe('Project Registry domain', () => {
-  it('validates Ivy approved initial projects', () => {
-    expect(initialProjectDefinitions.map((project) => project.projectKey)).toEqual([
-      'feishu-adaptor',
-      'openmontage',
-      'aijia-landingpage',
-      'realagent-ai-cc',
-      'ljhooker-audiobooks',
-      'ivy-xhs',
-      'james-wechat',
-      'family-first-ai-os',
-      'aijia-compass-work'
-    ]);
-    for (const project of initialProjectDefinitions) {
-      expect(ProjectDefinition.safeParse(project).success).toBe(true);
-    }
+  it('validates evidence-backed project origin and lifecycle stage', () => {
+    expect(ProjectDefinition.safeParse({
+      projectKey: 'source-backed-project',
+      displayName: 'Source-backed project',
+      aliases: [],
+      localPathHint: null,
+      repoUrl: null,
+      defaultBranch: null,
+      status: 'active',
+      origin: 'discovered',
+      stage: 'exploring'
+    }).success).toBe(true);
+    expect(ProjectDefinition.safeParse({
+      projectKey: 'invalid-project',
+      displayName: 'Invalid project',
+      aliases: [],
+      localPathHint: null,
+      repoUrl: null,
+      defaultBranch: null,
+      status: 'active',
+      origin: 'preset',
+      stage: 'active_project'
+    }).success).toBe(false);
   });
 
-  it('validates deterministic keyword and correction rules', () => {
-    expect(initialProjectMappingRules).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        pattern: 'Amy Live',
-        projectKey: 'realagent-ai-cc',
-        subprojectKey: 'amy-voice'
-      }),
-      expect.objectContaining({
-        pattern: 'compass',
-        projectKey: 'aijia-compass-work'
-      })
-    ]));
-    for (const rule of initialProjectMappingRules) {
-      expect(ProjectMappingRule.safeParse(rule).success).toBe(true);
-    }
+  it('validates persisted founder correction rules', () => {
+    expect(ProjectMappingRule.safeParse({
+      id: 'ivy:landing-page',
+      pattern: 'landing page',
+      patternKind: 'keyword',
+      projectKey: 'aijia-landingpage',
+      subprojectKey: null,
+      confidenceHint: 'high',
+      priority: 1000,
+      source: 'ivy_correction',
+      active: true
+    }).success).toBe(true);
   });
 
   it('rejects invalid project mapping confidence and status values', () => {

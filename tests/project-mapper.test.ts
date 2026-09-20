@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { mapTodoToProject } from '../src/services/project-mapper.js';
 import {
-  initialProjectDefinitions,
-  initialProjectMappingRules
-} from '../src/services/project-registry-seed.js';
+  legacyProjectDefinitions,
+  legacyProjectMappingRules
+} from './helpers/project-registry-fixtures.js';
 
 const registry = {
-  projects: [...initialProjectDefinitions],
-  rules: [...initialProjectMappingRules],
+  projects: [...legacyProjectDefinitions],
+  rules: [...legacyProjectMappingRules],
   contextSnapshots: []
 };
 
@@ -154,7 +154,7 @@ describe('mapTodoToProject', () => {
       proposedEvidence: 'Codex saw compass in transcript.',
       proposedProjectPrompt: '请处理 compass。'
     }, {
-      projects: [...initialProjectDefinitions],
+      projects: [...legacyProjectDefinitions],
       rules: [{
         id: 'ivy:hero-landing',
         pattern: 'Hero 区',

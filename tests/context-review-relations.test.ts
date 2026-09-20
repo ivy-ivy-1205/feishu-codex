@@ -8,6 +8,7 @@ import { ContextSourceRepository } from '../src/repositories/context-source-repo
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { registerContextReviewActionRoutes } from '../src/routes/context-review-actions.js';
 import { initialFactualStatusFor, type ContextCandidateType } from '../src/domain/context.js';
+import { seedLegacyProjectRegistryFixture } from './helpers/project-registry-fixtures.js';
 
 const at = new Date('2026-08-03T00:00:00.000Z');
 
@@ -42,6 +43,7 @@ function addCandidate(client: ReturnType<typeof createSqliteDatabase>['client'],
 function relationHarness(options: { archived?: boolean; scopeMismatch?: boolean; multiple?: boolean;
   missingTargetIntent?: boolean } = {}) {
   const database = createSqliteDatabase(':memory:'); migrateDatabase(database.client);
+  seedLegacyProjectRegistryFixture(database.client);
   const records = new ContextRecordRepository(database.client);
   const original = addCandidate(database.client, { key: 'source-a', text: '原始 Context 正文。' });
   const target = records.promoteCandidate({ candidateId: original.candidate.id, expectedReviewStatus: 'pending',
@@ -120,6 +122,7 @@ describe('Context relation review intents', () => {
 
   it('builds a complete supplements projection with old and new provenance', () => {
     const database = createSqliteDatabase(':memory:'); migrateDatabase(database.client);
+    seedLegacyProjectRegistryFixture(database.client);
     const records = new ContextRecordRepository(database.client);
     const original = addCandidate(database.client, { key: 'supplement-a', text: '公司审核策略要求 Ivy 人工确认。' });
     const v1 = records.promoteCandidate({ candidateId: original.candidate.id, expectedReviewStatus: 'pending',
@@ -144,6 +147,7 @@ describe('Context relation review intents', () => {
 
   it('uses distinct sources and candidates for confirms, corrects, supersedes and duplicates', () => {
     const database = createSqliteDatabase(':memory:'); migrateDatabase(database.client);
+    seedLegacyProjectRegistryFixture(database.client);
     const records = new ContextRecordRepository(database.client);
     const original = addCandidate(database.client, { key: 'relation-v1', text: '策略版本一。' });
     const v1 = records.promoteCandidate({ candidateId: original.candidate.id, expectedReviewStatus: 'pending',
@@ -170,6 +174,7 @@ describe('Context relation review intents', () => {
 
   it('rolls back the whole promotion when relation insertion fails after version writes', () => {
     const database = createSqliteDatabase(':memory:'); migrateDatabase(database.client);
+    seedLegacyProjectRegistryFixture(database.client);
     const records = new ContextRecordRepository(database.client);
     const original = addCandidate(database.client, { key: 'rollback-a', text: '回滚前正文。' });
     const v1 = records.promoteCandidate({ candidateId: original.candidate.id, expectedReviewStatus: 'pending',
@@ -194,6 +199,7 @@ describe('Context relation review intents', () => {
     'requirement', 'status_update', 'action_item'
   ] as const)('preserves the locked initial factual status when promoting %s', (candidateType) => {
     const database = createSqliteDatabase(':memory:'); migrateDatabase(database.client);
+    seedLegacyProjectRegistryFixture(database.client);
     const candidate = addCandidate(database.client, { key: `promote-${candidateType}`,
       text: `${candidateType} fixture`, candidateType }).candidate;
     expect(new ContextRecordRepository(database.client).promoteCandidate({ candidateId: candidate.id,

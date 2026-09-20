@@ -15,6 +15,7 @@ import { MeetingRepository } from '../src/repositories/meeting-repository.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { processMinuteJob } from '../src/services/meeting-worker.js';
 import { MinuteTranscriptParseError } from '../src/adapters/minute-transcript-parser.js';
+import { seedLegacyProjectRegistryFixture } from './helpers/project-registry-fixtures.js';
 
 const ivyChatId = 'oc_d851c3e986007dc0f97ab582bcb2e7c8';
 const now = new Date('2030-07-18T03:00:00.000Z');
@@ -674,6 +675,7 @@ function createHarness(options: {
 } = {}) {
   const database = createSqliteDatabase(':memory:');
   migrateDatabase(database.client);
+  seedLegacyProjectRegistryFixture(database.client);
   const meetingRepository = new MeetingRepository(database.client);
   const jobRepository = new JobRepository(database.client);
   const outboxRepository = new OutboxRepository(database.client);

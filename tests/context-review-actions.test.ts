@@ -9,9 +9,11 @@ import { ContextRecordRepository } from '../src/repositories/context-record-repo
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { registerContextReviewActionRoutes } from '../src/routes/context-review-actions.js';
+import { seedLegacyProjectRegistryFixture } from './helpers/project-registry-fixtures.js';
 
 function harness(expiresAt = '2030-01-02T00:00:00.000Z') {
   const database = createSqliteDatabase(':memory:'); migrateDatabase(database.client);
+  seedLegacyProjectRegistryFixture(database.client);
   const sources = new ContextSourceRepository(database.client);
   const source = sources.saveSource({ sourceSystem: 'fixture', sourceType: 'transcript', externalId: 'm1', logicalKey: 'm1', occurredAt: '2026-08-03T00:00:00.000Z', authors: [], locatorUri: null, contentFormat: 'text/plain', contentText: 'Ivy [0-1000]: 进展 60%', metadata: { segments: [{ segmentOrdinal: 0, speakerName: 'Ivy', startMs: 0, endMs: 1000, text: '进展 60%' }] }, availabilityStatus: 'available', capturedAt: new Date('2026-08-03') }).source;
   const run = sources.beginExtractionRun({ sources: [{ id: source.id, contentHash: source.contentHash }], extractorName: 'fixture', extractorVersion: 'v1', promptVersion: 'p1', startedAt: new Date('2026-08-03') }).run;

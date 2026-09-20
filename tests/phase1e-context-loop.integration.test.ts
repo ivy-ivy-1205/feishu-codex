@@ -11,12 +11,14 @@ import { JobRepository } from '../src/repositories/job-repository.js';
 import { MeetingRepository } from '../src/repositories/meeting-repository.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { ProjectRepository } from '../src/repositories/project-repository.js';
+import { seedLegacyProjectRegistryFixture } from './helpers/project-registry-fixtures.js';
 
 const clock = new Date('2030-01-01T00:00:00.000Z');
 
 function createLoop(extractor: ContextCandidateExtractor, transcript = [{ speakerName: 'Ivy', startMs: 0, endMs: 1000,
   text: '决定把 Context 与 Todo 分开；Todo：整理验收报告。' }]) {
   const database = createSqliteDatabase(':memory:'); migrateDatabase(database.client);
+  seedLegacyProjectRegistryFixture(database.client);
   const meetings = new MeetingRepository(database.client);
   const jobs = new JobRepository(database.client);
   const outbox = new OutboxRepository(database.client);
