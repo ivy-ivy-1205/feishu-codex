@@ -224,6 +224,69 @@ export const contextEvidence = sqliteTable('context_evidence', {
     .on(table.sourceId, table.excerptHash, table.locatorJson)
 ]);
 
+export const contextTopics = sqliteTable('context_topics', {
+  id: text('id').primaryKey(),
+  currentVersion: integer('current_version').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull()
+}, (table) => [
+  check('context_topics_current_version_positive', sql`${table.currentVersion} > 0`)
+]);
+
+export const contextTopicVersions = sqliteTable('context_topic_versions', {
+  id: text('id').primaryKey(),
+  topicId: text('topic_id').notNull().references(() => contextTopics.id),
+  versionNumber: integer('version_number').notNull(),
+  displayName: text('display_name').notNull(),
+  stage: text('stage', {
+    enum: ['idea', 'exploring', 'project_candidate', 'active_project', 'paused', 'closed']
+  }).notNull(),
+  outcome: text('outcome'),
+  rationale: text('rationale').notNull(),
+  evidenceIdsJson: text('evidence_ids_json').notNull(),
+  changedAt: text('changed_at').notNull()
+}, (table) => [
+  check('context_topic_versions_number_positive', sql`${table.versionNumber} > 0`),
+  check(
+    'context_topic_versions_stage_allowed',
+    sql`${table.stage} IN ('idea', 'exploring', 'project_candidate', 'active_project', 'paused', 'closed')`
+  ),
+  uniqueIndex('context_topic_versions_topic_version_unique')
+    .on(table.topicId, table.versionNumber)
+]);
+
+export const contextTopicSources = sqliteTable('context_topic_sources', {
+  id: text('id').primaryKey(),
+  topicVersionId: text('topic_version_id').notNull().references(() => contextTopicVersions.id),
+  sourceId: text('source_id').notNull().references(() => contextSources.id),
+  evidenceId: text('evidence_id').references(() => contextEvidence.id),
+  addedAt: text('added_at').notNull()
+}, (table) => [
+  uniqueIndex('context_topic_sources_stable_unique')
+    .on(table.topicVersionId, table.sourceId, table.evidenceId)
+]);
+
+export const contextTopicRelations = sqliteTable('context_topic_relations', {
+  id: text('id').primaryKey(),
+  fromTopicId: text('from_topic_id').notNull().references(() => contextTopics.id),
+  fromTopicVersionId: text('from_topic_version_id').notNull().references(() => contextTopicVersions.id),
+  toTopicId: text('to_topic_id').notNull().references(() => contextTopics.id),
+  toTopicVersionId: text('to_topic_version_id').notNull().references(() => contextTopicVersions.id),
+  relationType: text('relation_type', {
+    enum: ['same_as', 'split_from', 'part_of', 'related_to', 'supersedes']
+  }).notNull(),
+  rationale: text('rationale').notNull(),
+  createdAt: text('created_at').notNull()
+}, (table) => [
+  check('context_topic_relations_distinct_topics', sql`${table.fromTopicId} <> ${table.toTopicId}`),
+  check(
+    'context_topic_relations_type_allowed',
+    sql`${table.relationType} IN ('same_as', 'split_from', 'part_of', 'related_to', 'supersedes')`
+  ),
+  uniqueIndex('context_topic_relations_stable_unique')
+    .on(table.fromTopicId, table.toTopicId, table.relationType)
+]);
+
 export const contextExtractionRuns = sqliteTable('context_extraction_runs', {
   id: text('id').primaryKey(),
   sourceSetHash: text('source_set_hash').notNull(),

@@ -330,4 +330,31 @@ describe('migrateDatabase', () => {
     ]);
     expect(projectRepository.listDiscoveryEligibleProjects()).toEqual([]);
   });
+
+  it('creates constrained emergent topic history tables additively', () => {
+    const database = createSqliteDatabase(':memory:');
+    migrateDatabase(database.client);
+    migrateDatabase(database.client);
+
+    expect(database.client.prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'context_topic%'
+      ORDER BY name
+    `).all()).toEqual([
+      { name: 'context_topic_relations' },
+      { name: 'context_topic_sources' },
+      { name: 'context_topic_versions' },
+      { name: 'context_topics' }
+    ]);
+    expect(() => database.client.prepare(`
+      INSERT INTO context_topics (id, current_version, created_at, updated_at)
+      VALUES ('topic_invalid', 1, '2026-09-01', '2026-09-01')
+    `).run()).not.toThrow();
+    expect(() => database.client.prepare(`
+      INSERT INTO context_topic_versions (
+        id, topic_id, version_number, display_name, stage, outcome, rationale,
+        evidence_ids_json, changed_at
+      ) VALUES ('topicver_invalid', 'topic_invalid', 1, 'Invalid', 'invented_stage',
+        NULL, '', '[]', '2026-09-01')
+    `).run()).toThrow(/CHECK constraint failed/);
+  });
 });

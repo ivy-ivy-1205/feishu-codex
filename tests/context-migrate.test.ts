@@ -17,7 +17,11 @@ const contextTables = [
   'context_records',
   'context_reviews',
   'context_source_relations',
-  'context_sources'
+  'context_sources',
+  'context_topic_relations',
+  'context_topic_sources',
+  'context_topic_versions',
+  'context_topics'
 ] as const;
 
 describe('Phase 1E migration', () => {

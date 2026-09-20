@@ -214,3 +214,4 @@
 - 2026-09-20 Founder Stream Alignment Task 2 将 Context evidence locator 升级为 `minute_segment | group_message` 可判别 union；群消息与妙记共用不可变 Source/Evidence 管线。旧妙记 locator 在边界自动归一为 `minute_segment`，且仓库在重放时会识别旧 locator JSON，避免因升级格式重复生成 evidence。
 - 2026-09-20 Founder Stream Alignment Task 3 本地回填采用调用者显式 ISO 起点与固定截止时间；dry-run 不打开数据库、只打印聚合，persist 才保存不可变消息与覆盖/缺口审计并入队。根消息和已发现话题分别分页，游标循环、权限/读取失败、已删除消息和缺转写都保留缺口；飞书原生 `audio` 归为语音，普通音频附件仍跳过。批次按消息 source ID 集合幂等，重复读取时间变化不重复入队；现有会议 worker 不消费新批次，后续分析 consumer 另行接入。仅本地 fixture 验证，未读取真实飞书、未部署。
 - 2026-09-21 Task 3 复核确认两类真实接口兼容风险：历史 post 正文既可能直接提供 title/content，也可能多语言包装；历史分页不能把缺失或异常 has_more 当成结束。修复后保留异常分页当前页的可读消息，同时保存 typed gap 与 incomplete 覆盖状态；只有明确且合法的结束标记才认定可见分页穷尽。
+- 2026-09-21 Founder Stream Alignment Task 4 新增 topic-first 不可变历史层：阶段固定为 `idea/exploring/project_candidate/active_project/paused/closed`，改名与阶段变化只追加版本并以 `expectedVersion` CAS 更新当前指针；来源/证据链接和 merge/split 等关系均为追加式记录，不删除原 topic 或证据，版本竞争统一返回 `TOPIC_VERSION_CONFLICT`。

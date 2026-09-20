@@ -183,6 +183,54 @@ const migrationSql = `
     UNIQUE(source_id, excerpt_hash, locator_json)
   );
 
+  CREATE TABLE IF NOT EXISTS context_topics (
+    id TEXT PRIMARY KEY,
+    current_version INTEGER NOT NULL
+      CONSTRAINT context_topics_current_version_positive CHECK(current_version > 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS context_topic_versions (
+    id TEXT PRIMARY KEY,
+    topic_id TEXT NOT NULL REFERENCES context_topics(id),
+    version_number INTEGER NOT NULL
+      CONSTRAINT context_topic_versions_number_positive CHECK(version_number > 0),
+    display_name TEXT NOT NULL,
+    stage TEXT NOT NULL
+      CONSTRAINT context_topic_versions_stage_allowed
+      CHECK(stage IN ('idea', 'exploring', 'project_candidate', 'active_project', 'paused', 'closed')),
+    outcome TEXT,
+    rationale TEXT NOT NULL,
+    evidence_ids_json TEXT NOT NULL,
+    changed_at TEXT NOT NULL,
+    UNIQUE(topic_id, version_number)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_topic_sources (
+    id TEXT PRIMARY KEY,
+    topic_version_id TEXT NOT NULL REFERENCES context_topic_versions(id),
+    source_id TEXT NOT NULL REFERENCES context_sources(id),
+    evidence_id TEXT REFERENCES context_evidence(id),
+    added_at TEXT NOT NULL,
+    UNIQUE(topic_version_id, source_id, evidence_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS context_topic_relations (
+    id TEXT PRIMARY KEY,
+    from_topic_id TEXT NOT NULL REFERENCES context_topics(id),
+    from_topic_version_id TEXT NOT NULL REFERENCES context_topic_versions(id),
+    to_topic_id TEXT NOT NULL REFERENCES context_topics(id),
+    to_topic_version_id TEXT NOT NULL REFERENCES context_topic_versions(id),
+    relation_type TEXT NOT NULL
+      CONSTRAINT context_topic_relations_type_allowed
+      CHECK(relation_type IN ('same_as', 'split_from', 'part_of', 'related_to', 'supersedes')),
+    rationale TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CONSTRAINT context_topic_relations_distinct_topics CHECK(from_topic_id <> to_topic_id),
+    UNIQUE(from_topic_id, to_topic_id, relation_type)
+  );
+
   CREATE TABLE IF NOT EXISTS context_extraction_runs (
     id TEXT PRIMARY KEY,
     source_set_hash TEXT NOT NULL,
