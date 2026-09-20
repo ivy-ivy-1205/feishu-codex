@@ -42,6 +42,14 @@ const migrationSql = `
     received_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS founder_stream_events (
+    event_id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    disposition TEXT NOT NULL CONSTRAINT founder_stream_events_disposition CHECK(disposition IN ('captured','bot_audit','feedback','skipped_media')),
+    received_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS meeting_minutes (
     minute_id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL REFERENCES feishu_events(event_id),

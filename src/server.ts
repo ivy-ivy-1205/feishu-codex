@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { buildApp } from './app.js';
-import { CodexAuthProbe, NodeCodexProcessRunner } from './adapters/codex-cli.js';
+import { CodexAuthProbe, CodexCliAdapter, NodeCodexProcessRunner } from './adapters/codex-cli.js';
+import { CodexFounderStreamAnalyzer } from './adapters/codex-founder-stream-analyzer.js';
+import { createFounderStreamRuntime } from './services/founder-stream-worker.js';
 import { FeishuOAuthHttpClient, type FeishuOAuthSdkClientLike } from './adapters/feishu-oauth-client.js';
 import { createFeishuSdkClient } from './adapters/feishu-sdk.js';
 import { createFeishuIntegration } from './composition/feishu.js';
@@ -108,6 +110,15 @@ const codexAuthProbe = new CodexAuthProbe({
   baseEnv: process.env,
   runner: new NodeCodexProcessRunner()
 });
+const founderRuntime = createFounderStreamRuntime({
+  client: database.client, jobRepository, flags: config.founderStream,
+  approvedChatIds: config.projectContext.approvedChatIds, ivyPrivateChatId: config.feishu.ivyPrivateChatId,
+  intervalMs: config.worker.pollIntervalMs, delivery: feishuIntegration.delivery,
+  ...(config.founderStream.analysisEnabled ? { analyzer: new CodexFounderStreamAnalyzer({
+    codex: new CodexCliAdapter({ command: config.codex.command, workdir: config.codex.workdir,
+      timeoutMs: config.codex.timeoutSeconds * 1000, baseEnv: process.env, runner: new NodeCodexProcessRunner() })
+  }) } : {})
+});
 const workerRuntime = createWorkerRuntime(
   config.worker.enabled
     ? {
@@ -120,6 +131,7 @@ const workerRuntime = createWorkerRuntime(
       delivery: feishuIntegration.delivery,
       targetChatId: config.feishu.ivyPrivateChatId,
       intervalMs: config.worker.pollIntervalMs,
+      founder: founderRuntime,
       ...(contextRuntime
         ? { context: { capture: contextRuntime.capture, worker: contextRuntime.worker } }
         : {})
@@ -129,6 +141,7 @@ const workerRuntime = createWorkerRuntime(
     }
 );
 workerRuntime.start();
+if (!config.worker.enabled) founderRuntime.start();
 
 const app = buildApp({
   readiness: createServiceReadiness({
@@ -137,7 +150,7 @@ const app = buildApp({
     isFeishuDeliveryAvailable: () => config.worker.enabled,
     isWorkerConsumptionAvailable: () => workerRuntime.isConsumptionAvailable(),
     isCodexAuthAvailable: async () =>
-      (config.codex.summarizerMode === 'codex' || config.context.candidatesEnabled) &&
+      (config.codex.summarizerMode === 'codex' || config.context.candidatesEnabled || config.founderStream.analysisEnabled) &&
       await codexAuthProbe.isAvailable()
   }),
   projectRepository,
@@ -155,6 +168,7 @@ const app = buildApp({
     }
   } : {}),
   verificationToken: config.feishu.verificationToken,
+  founderStream: founderRuntime.route,
   encryptKey: config.feishu.encryptKey,
   ingestMinute: (event) => ingestMinuteGenerated(event, {
     meetingRepository,
@@ -176,6 +190,7 @@ async function shutdown(): Promise<void> {
   }
   shuttingDown = true;
   await workerRuntime.stop();
+  await founderRuntime.stop();
   await app.close();
   database.close();
 }

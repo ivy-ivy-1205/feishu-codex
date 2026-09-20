@@ -23,6 +23,7 @@ import { registerContextDiagnosticsRoute } from './routes/context-diagnostics.js
 import { registerContextReviewActionRoutes } from './routes/context-review-actions.js';
 import type { OutboxRepository } from './repositories/outbox-repository.js';
 import type { ContextRecordRepository } from './repositories/context-record-repository.js';
+import type { FounderStreamRoute } from './services/founder-stream-worker.js';
 
 type LoggerOption = FastifyServerOptions['logger'];
 
@@ -33,6 +34,7 @@ export interface AppDependencies {
   ingestMinute(event: unknown): IngestionResult;
   routeReply(input: unknown): ReplyDecision;
   founderFeedback?: FounderFeedbackRouteDependencies;
+  founderStream?: FounderStreamRoute;
   sendTextMessage?(input: { chatId: string; text: string }): Promise<{ messageId: string }>;
   oauth?: FeishuOAuthService;
   projectRepository?: ProjectRepository;
@@ -60,6 +62,7 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
     ingestMinute: dependencies.ingestMinute,
     routeReply: dependencies.routeReply,
     founderFeedback: dependencies.founderFeedback,
+    founderStream: dependencies.founderStream,
     sendTextMessage: dependencies.sendTextMessage,
     recordOAuthRevocation: dependencies.oauth
       ? (openId) => dependencies.oauth!.recordRevocation(openId)

@@ -1,5 +1,7 @@
 # MEMORY.md
 
+- 2026-09-21 Founder Stream Task 10 的实时群入口只做本地原子留存/入队；capture、analysis、group delivery 三层默认关闭，会议与群分析共用单串行消费者。重复事件/消息不重复处理，按群/话题静默 300 秒后分析；大历史批次拆为持久子批次，模型只见有界证据窗口，当前版本仍累计保留全部旧 evidence。群纠错回执走 durable outbox，不在 webhook 内发送。历史 source 必须明确 senderType=user 才可进入话题分析，app/unknown 和已知 Bot 投递只保留审计，不按显示名猜创始人；旧缺失 senderType 的来源保守跳过。观点/分歧的语义输出尚未接入，本任务不伪造双方共识；生产开关/真实语料/群发送仍未获本轮授权。
+
 ## 项目概况
 
 - 项目：Project 6 / FeishuAdaptor，是 AiJia Context OS 的飞书 × Codex Bridge MVP。

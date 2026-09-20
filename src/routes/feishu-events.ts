@@ -4,6 +4,7 @@ import { z, ZodError } from 'zod';
 import type { ReplyDecision } from '../domain/authorization.js';
 import type { IngestionResult } from '../services/minute-ingestion.js';
 import type { FounderFeedbackDecision } from '../services/founder-feedback-router.js';
+import type { FounderStreamRoute } from '../services/founder-stream-worker.js';
 
 const verificationRequestSchema = z.object({
   type: z.literal('url_verification'),
@@ -69,6 +70,7 @@ export interface FeishuEventRouteDependencies {
   recordOAuthRevocation?(openId: string): Promise<void>;
   recordMinuteEvent?(event: unknown): void;
   founderFeedback?: FounderFeedbackRouteDependencies;
+  founderStream?: FounderStreamRoute;
 }
 
 export function registerFeishuEventRoutes(
@@ -99,6 +101,14 @@ export function registerFeishuEventRoutes(
     }
 
     if (envelope.data.header.event_type === replyEventType) {
+      if (dependencies.founderStream) {
+        try {
+          const result = dependencies.founderStream.ingest(envelope.data);
+          if (result !== null) return result;
+        } catch {
+          return reply.code(500).send({ error: 'founder_stream_ingestion_failed' });
+        }
+      }
       const replyInput = parseReplyInput(envelope.data.event);
       if (replyInput === null) {
         logRejectedFeishuEvent(request.log, 'invalid_reply_event', body);

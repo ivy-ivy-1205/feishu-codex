@@ -7,6 +7,11 @@ export const feishuEvents = sqliteTable('feishu_events', {
   receivedAt: text('received_at').notNull()
 });
 
+export const founderStreamEvents = sqliteTable('founder_stream_events', {
+  eventId: text('event_id').primaryKey(), messageId: text('message_id').notNull(),
+  chatId: text('chat_id').notNull(), disposition: text('disposition').notNull(), receivedAt: text('received_at').notNull()
+}, (table) => [check('founder_stream_events_disposition', sql`${table.disposition} IN ('captured','bot_audit','feedback','skipped_media')`)]);
+
 export const meetingMinutes = sqliteTable('meeting_minutes', {
   minuteId: text('minute_id').primaryKey(),
   eventId: text('event_id').notNull().references(() => feishuEvents.eventId),

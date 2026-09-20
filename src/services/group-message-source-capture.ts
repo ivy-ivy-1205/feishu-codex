@@ -20,6 +20,7 @@ export interface GroupMessageSourceMessage {
     displayName: string | null;
   };
   messageType: string;
+  senderType?: 'user' | 'app' | 'unknown';
   text: string;
   occurredAt: string;
   locatorUrl?: string | null;
@@ -62,6 +63,7 @@ export function captureGroupMessageSource(
     messageType
   };
   if (locatorUrl) metadata.locatorUrl = locatorUrl;
+  if (message.senderType) metadata.senderType = message.senderType;
 
   return {
     source: {

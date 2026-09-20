@@ -1,4 +1,5 @@
 import * as lark from '@larksuiteoapi/node-sdk';
+import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import type { FeishuApiClient, FeishuApiRequestOptions } from './feishu.js';
 import { matchFeishuSingleSpeakerSrtExport } from './minute-transcript-srt.js';
@@ -233,13 +234,14 @@ export class FeishuSdkApiClient implements FeishuApiClient {
     return Array.isArray(data) ? data : [];
   }
 
-  async sendTextMessage(input: { chatId: string; text: string }): Promise<{ messageId: string }> {
+  async sendTextMessage(input: { chatId: string; text: string; idempotencyKey?: string }): Promise<{ messageId: string }> {
     const response = await this.#sdkClient.im.message.create({
       params: { receive_id_type: 'chat_id' },
       data: {
         receive_id: input.chatId,
         msg_type: 'text',
-        content: JSON.stringify({ text: input.text })
+        content: JSON.stringify({ text: input.text }),
+        ...(input.idempotencyKey ? { uuid: createHash('sha256').update(input.idempotencyKey).digest('hex').slice(0,32) } : {})
       }
     });
     const messageId = extractMessageId(response);
@@ -252,13 +254,15 @@ export class FeishuSdkApiClient implements FeishuApiClient {
   async sendInteractiveMessage(input: {
     chatId: string;
     card: Record<string, unknown>;
+    idempotencyKey?: string;
   }): Promise<{ messageId: string }> {
     const response = await this.#sdkClient.im.message.create({
       params: { receive_id_type: 'chat_id' },
       data: {
         receive_id: input.chatId,
         msg_type: 'interactive',
-        content: JSON.stringify(input.card)
+        content: JSON.stringify(input.card),
+        ...(input.idempotencyKey ? { uuid: createHash('sha256').update(input.idempotencyKey).digest('hex').slice(0,32) } : {})
       }
     });
     const messageId = extractMessageId(response);
@@ -356,6 +360,7 @@ function toContextMessage(value: unknown): FeishuContextMessage | null {
     text: content,
     createdAt,
     senderId: isRecord(value.sender) && value.sender.id_type === 'open_id' && typeof value.sender.id === 'string' ? value.sender.id : null,
+    senderType: isRecord(value.sender) && (value.sender.sender_type === 'user' || value.sender.sender_type === 'app') ? value.sender.sender_type : 'unknown',
     threadId: optionalId(value.thread_id), rootId: optionalId(value.root_id), parentId: optionalId(value.parent_id),
     edited: value.updated === true, deleted: value.deleted === true
   };

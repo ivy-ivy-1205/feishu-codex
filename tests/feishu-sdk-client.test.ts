@@ -12,6 +12,14 @@ import { captureMinuteTranscriptSource } from '../src/services/context-source-ca
 import { validateTranscriptEvidenceLocator } from '../src/services/context-evidence-locator.js';
 
 describe('FeishuSdkApiClient', () => {
+  it('forwards stable bounded UUIDs for retryable founder deliveries', async () => {
+    const calls:unknown[]=[];const client=new FeishuSdkApiClient({sdkClient:createFakeSdkClient({messageId:'om_retry',calls})});
+    await client.sendTextMessage({chatId:'oc_group',text:'receipt',idempotencyKey:'founder-feedback:message-1'});
+    await client.sendTextMessage({chatId:'oc_group',text:'receipt',idempotencyKey:'founder-feedback:message-1'});
+    const values=calls as {payload:{data:{uuid?:string}}}[];
+    expect(values[0]!.payload.data.uuid).toMatch(/^[a-f0-9]{32}$/);
+    expect(values[1]!.payload.data.uuid).toBe(values[0]!.payload.data.uuid);
+  });
   it('creates an official SDK client for a self-built Feishu app without exposing secrets', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     const created = createFeishuSdkClient({

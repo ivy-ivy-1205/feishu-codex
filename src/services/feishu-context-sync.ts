@@ -8,6 +8,7 @@ export interface FeishuContextMessage {
   text: string | null;
   createdAt: string;
   senderId?: string | null;
+  senderType?: 'user' | 'app' | 'unknown';
   threadId?: string | null;
   rootId?: string | null;
   parentId?: string | null;

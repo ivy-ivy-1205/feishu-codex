@@ -32,10 +32,10 @@ const transcriptLineSchema = z.object({
 export interface FeishuApiClient {
   getMinuteBasicInfo(minuteId: string, options?: FeishuApiRequestOptions): Promise<unknown>;
   exportMinuteTranscript(minuteId: string, options?: FeishuApiRequestOptions): Promise<unknown[]>;
-  sendTextMessage(input: { chatId: string; text: string }): Promise<{
+  sendTextMessage(input: { chatId: string; text: string; idempotencyKey?: string }): Promise<{
     messageId: string;
   }>;
-  sendInteractiveMessage?(input: { chatId: string; card: Record<string, unknown> }): Promise<{
+  sendInteractiveMessage?(input: { chatId: string; card: Record<string, unknown>; idempotencyKey?: string }): Promise<{
     messageId: string;
   }>;
 }
@@ -118,7 +118,7 @@ function normalizeOpenIds(openIds: readonly string[] | undefined): string[] {
 export class FeishuMessageDeliveryAdapter {
   constructor(private readonly client: FeishuApiClient) {}
 
-  async sendTextMessage(input: { chatId: string; text: string }): Promise<{
+  async sendTextMessage(input: { chatId: string; text: string; idempotencyKey?: string }): Promise<{
     messageId: string;
   }> {
     const sent = await this.client.sendTextMessage(input);
@@ -128,7 +128,7 @@ export class FeishuMessageDeliveryAdapter {
     return { messageId: sent.messageId.trim() };
   }
 
-  async sendInteractiveCard(input: { chatId: string; card: Record<string, unknown> }): Promise<{
+  async sendInteractiveCard(input: { chatId: string; card: Record<string, unknown>; idempotencyKey?: string }): Promise<{
     messageId: string;
   }> {
     if (!this.client.sendInteractiveMessage) {

@@ -45,7 +45,8 @@ export async function runFounderStreamBackfill(input: FounderStreamBackfillInput
       const captured = captureGroupMessageSource({
         chatId: input.chatId, messageId: message.messageId, threadId: message.threadId ?? null,
         rootId: message.rootId ?? null, author: { openId: message.senderId ?? null, displayName: null },
-        messageType: message.messageType, text: message.text!, occurredAt: message.createdAt
+        messageType: message.messageType, text: message.text!, occurredAt: message.createdAt,
+        senderType: message.senderType ?? 'unknown'
       }, input.now);
       captured.source.metadata = { ...captured.source.metadata, parentId: message.parentId ?? null,
         edited: message.edited ?? false, deleted: message.deleted ?? false };
