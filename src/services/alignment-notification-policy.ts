@@ -74,7 +74,7 @@ export class AlignmentNotificationPolicy {
           issue.actionHorizon?.endsAt === candidate.actionHorizon?.endsAt)))) {
       return reject('unchanged_evidence');
     }
-    if (previous.some((issue) => issue.decisionKey === candidate.decisionKey && ['ready', 'asked'].includes(issue.status))) return reject('open_issue_exists');
+    if (previous.some((issue) => ['ready', 'asked'].includes(issue.status))) return reject('open_issue_exists');
     return { send: true, reason: 'action_divergence' };
   }
 
@@ -94,6 +94,9 @@ export class AlignmentNotificationPolicy {
 
   prepare(candidate: AlignmentCandidate, message: { targetChatId: string; card: Record<string, unknown> }, now: Date): AlignmentNotificationDecision {
     return this.issues.client.transaction(() => {
+      // The IMMEDIATE outer transaction serializes slot retirement, occupancy checks and enqueue.
+      // Distinct decision keys on a topic share one outstanding question slot.
+      this.reconcilePending(now);
       const decision = this.evaluate(candidate, now);
       if (!decision.send) return decision;
       this.issues.saveCandidate(candidate, now);

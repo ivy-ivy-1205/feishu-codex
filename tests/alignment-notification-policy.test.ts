@@ -1,3 +1,8 @@
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
@@ -13,8 +18,8 @@ import { PerspectiveReconciler } from '../src/services/perspective-reconciler.js
 
 const now = new Date('2026-09-21T10:00:00.000Z');
 const chatId = 'oc_a84d5b6ca478220d0a37964b50776edb';
-function setup(dimension: 'direction' | 'next_action' | 'owner' | 'deadline' | 'completion_standard' = 'direction') {
-  const db = createSqliteDatabase(':memory:'); migrateDatabase(db.client);
+function setup(dimension: 'direction' | 'next_action' | 'owner' | 'deadline' | 'completion_standard' = 'direction', filename = ':memory:') {
+  const db = createSqliteDatabase(filename); migrateDatabase(db.client);
   const alignment = new AlignmentRepository(db.client);
   for (const founder of ['ivy', 'james'] as const) alignment.configureFounderIdentity({ founder,
     sourceSystem: 'feishu', externalAuthorId: `ou_${founder}`, configuredAt: now });
@@ -47,11 +52,146 @@ function setup(dimension: 'direction' | 'next_action' | 'owner' | 'deadline' | '
   const issues = new AlignmentIssueRepository(db.client);
   const outbox = new OutboxRepository(db.client);
   const policy = new AlignmentNotificationPolicy(issues, alignment, outbox);
-  return { db, alignment, topic, evidence, proposal, candidate: detector.propose(proposal), detector,
+  return { db, alignment, topic, topics, evidence, proposal, candidate: detector.propose(proposal), detector,
     issues, outbox, policy, message: { targetChatId: chatId, card: { schema: '2.0' } } };
 }
 
+function secondCandidate(h: ReturnType<typeof setup>, topicId = h.topic.id) {
+  const i = h.evidence('om_second_i', 'ou_ivy', 'Ivy 负责交付，今天开始实施');
+  const j = h.evidence('om_second_j', 'ou_james', 'James 负责交付，今天开始实施');
+  return h.detector.propose({ ...h.proposal, topicId, decisionKey: 'delivery-owner', dimension: 'owner',
+    ivy: { evidenceId: i, statement: 'Ivy 负责交付' }, james: { evidenceId: j, statement: 'James 负责交付' },
+    actionConsequence: { evidenceId: i, excerpt: '今天开始实施' },
+    actionHorizon: { ...h.proposal.actionHorizon, evidenceId: i }
+  });
+}
+
+function concurrentPrepare(filename: string, candidate: ReturnType<AlignmentDetector['propose']>) {
+  const moduleUrl = (path: string) => JSON.stringify(pathToFileURL(resolve(path)).href);
+  const script = `
+    import { createSqliteDatabase } from ${moduleUrl('src/db/client.ts')};
+    import { AlignmentRepository } from ${moduleUrl('src/repositories/alignment-repository.ts')};
+    import { AlignmentIssueRepository } from ${moduleUrl('src/repositories/alignment-issue-repository.ts')};
+    import { OutboxRepository } from ${moduleUrl('src/repositories/outbox-repository.ts')};
+    import { AlignmentNotificationPolicy } from ${moduleUrl('src/services/alignment-notification-policy.ts')};
+    const db = createSqliteDatabase(${JSON.stringify(filename)});
+    db.client.pragma('busy_timeout = 3000');
+    db.client.function('alignment_test_pause', () => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); return 0;
+    });
+    process.send('ready');
+    process.once('message', () => {
+      try {
+        const policy = new AlignmentNotificationPolicy(new AlignmentIssueRepository(db.client),
+          new AlignmentRepository(db.client), new OutboxRepository(db.client));
+        const result = policy.prepare(${JSON.stringify(candidate)},
+          { targetChatId: ${JSON.stringify(chatId)}, card: { schema: '2.0' } }, new Date(${JSON.stringify(now.toISOString())}));
+        process.send({ result }, () => { db.close(); process.disconnect(); });
+      } catch (error) {
+        process.send({ error: String(error) }, () => { db.close(); process.disconnect(); });
+      }
+    });
+  `;
+  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', script],
+    { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+  let readyResolve!: () => void;
+  let readyReject!: (error: Error) => void;
+  let resultResolve!: (value: { send: boolean; reason: string }) => void;
+  let resultReject!: (error: Error) => void;
+  let settled = false;
+  let stderr = '';
+  const ready = new Promise<void>((resolveReady, rejectReady) => { readyResolve = resolveReady; readyReject = rejectReady; });
+  const result = new Promise<{ send: boolean; reason: string }>((resolveResult, rejectResult) => {
+    resultResolve = resolveResult; resultReject = rejectResult;
+  });
+  child.stderr?.on('data', (chunk) => { stderr += String(chunk); });
+  const fail = (error: Error) => { readyReject(error); resultReject(error); };
+  child.on('error', fail);
+  child.on('exit', (code) => { if (!settled) fail(new Error(`prepare exited ${code}: ${stderr}`)); });
+  child.on('message', (message: unknown) => {
+    if (message === 'ready') readyResolve();
+    else if (message && typeof message === 'object' && 'result' in message) {
+      settled = true; resultResolve(message.result as { send: boolean; reason: string });
+    } else if (message && typeof message === 'object' && 'error' in message) {
+      settled = true; fail(new Error(String(message.error)));
+    }
+  });
+  return { ready, result, start: () => child.send('start') };
+}
+
 describe('AlignmentNotificationPolicy', () => {
+  it.each(['ready', 'asked'] as const)('holds a different decision on the same topic while its first question is %s', (status) => {
+    const h = setup(); h.policy.prepare(h.candidate, h.message, now);
+    if (status === 'asked') h.outbox.acknowledgeAlignmentQuestionDelivery({ issueId: h.candidate.id,
+      evidenceSetHash: h.candidate.evidenceSetHash, messageId: 'om_asked_slot', deliveredAt: now });
+    const second = secondCandidate(h); h.issues.saveCandidate(second, now);
+    expect(h.policy.prepare(second, h.message, now)).toEqual({ send: false, reason: 'open_issue_exists' });
+    expect(h.issues.get(second.id)?.status).toBe('candidate');
+    expect(h.outbox.listAll()).toHaveLength(1);
+    expect(h.policy.prepare(h.candidate, h.message, now)).toEqual({ send: false, reason: 'unchanged_evidence' });
+  });
+
+  it.each(['resolved', 'dismissed', 'stale'] as const)('releases the topic question slot after %s', (status) => {
+    const h = setup(); h.policy.prepare(h.candidate, h.message, now);
+    const second = secondCandidate(h); h.issues.saveCandidate(second, now);
+    expect(h.policy.prepare(second, h.message, now).send).toBe(false);
+    h.issues.close({ issueId: h.candidate.id, expectedStatus: 'ready', status, changedAt: now });
+    expect(h.policy.prepare(second, h.message, now)).toEqual({ send: true, reason: 'action_divergence' });
+    expect(h.issues.get(second.id)?.status).toBe('ready');
+    expect(h.outbox.listAll()).toHaveLength(2);
+  });
+
+  it('does not serialize independent topics', () => {
+    const h = setup(); h.policy.prepare(h.candidate, h.message, now);
+    const other = h.topics.createTopic({ displayName: '另一个项目', stage: 'active_project', createdAt: now });
+    expect(h.policy.prepare(secondCandidate(h, other.id), h.message, now).send).toBe(true);
+    expect(h.issues.listOpen()).toHaveLength(2);
+  });
+
+  it('retires stale questions inside prepare before deciding whether the topic slot is occupied', () => {
+    const h = setup();
+    const first = h.detector.propose({ ...h.proposal,
+      actionHorizon: { ...h.proposal.actionHorizon, endsAt: '2026-09-21T09:30:00.000Z' } });
+    h.policy.prepare(first, h.message, new Date('2026-09-21T09:15:00.000Z'));
+    expect(h.policy.prepare(secondCandidate(h), h.message, now).send).toBe(true);
+    expect(h.issues.get(first.id)?.status).toBe('stale');
+    expect(h.issues.listOpen()).toHaveLength(1);
+  });
+
+  it('retires a naturally resolved question inside prepare before granting the next decision its slot', () => {
+    const h = setup(); h.policy.prepare(h.candidate, h.message, now);
+    const reconciler = new PerspectiveReconciler(h.alignment);
+    const i = h.evidence('om_slot_resolution_i', 'ou_ivy', '按 A 方案推进', '2026-09-21T09:30:00.000Z');
+    const j = h.evidence('om_slot_resolution_j', 'ou_james', '同意按 A 方案推进', '2026-09-21T09:31:00.000Z');
+    reconciler.reconcile({ topicId: h.topic.id, evidenceId: i, statement: '按 A 方案推进', speechAct: 'decision_proposal',
+      decisionKey: h.proposal.decisionKey, confidence: 1, observedAt: now });
+    reconciler.reconcile({ topicId: h.topic.id, evidenceId: j, statement: '同意按 A 方案推进', speechAct: 'explicit_agreement',
+      decisionKey: h.proposal.decisionKey, confidence: 1, observedAt: now });
+    const second = secondCandidate(h);
+    expect(h.policy.prepare(second, h.message, now).send).toBe(true);
+    expect(h.issues.get(h.candidate.id)?.status).toBe('resolved');
+    expect(h.issues.listOpen().map((issue) => issue.id)).toEqual([second.id]);
+  });
+
+  it('allows only one topic question when separate processes prepare different decisions concurrently', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'alignment-slot-race-'));
+    const filename = join(directory, 'bridge.sqlite');
+    const h = setup('direction', filename);
+    try {
+      h.db.client.pragma('journal_mode = WAL');
+      const second = secondCandidate(h);
+      h.db.client.exec(`CREATE TRIGGER pause_ready_issue BEFORE UPDATE ON alignment_issues
+        WHEN NEW.status = 'ready' BEGIN SELECT alignment_test_pause(); END`);
+      const one = concurrentPrepare(filename, h.candidate);
+      const two = concurrentPrepare(filename, second);
+      await Promise.all([one.ready, two.ready]); one.start(); two.start();
+      const results = await Promise.all([one.result, two.result]);
+      expect(results.filter((result) => result.send)).toEqual([{ send: true, reason: 'action_divergence' }]);
+      expect(results.filter((result) => !result.send)).toEqual([{ send: false, reason: 'open_issue_exists' }]);
+      expect(h.issues.listOpen()).toHaveLength(1);
+      expect(h.outbox.listAll()).toHaveLength(1);
+    } finally { h.db.close(); rmSync(directory, { recursive: true, force: true }); }
+  }, 10_000);
   it('does not treat historical consensus as a natural resolution after late tied opposition invalidates its support',()=>{
     const h=setup(),reconciler=new PerspectiveReconciler(h.alignment);
     const send=(id:string,who:string,text:string,time:string,speechAct:'decision_proposal'|'explicit_agreement'|'explicit_disagreement')=>{
