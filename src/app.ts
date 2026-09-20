@@ -5,7 +5,8 @@ import fastify, {
 import type Database from 'better-sqlite3';
 import type { ReplyDecision } from './domain/authorization.js';
 import {
-  registerFeishuEventRoutes
+  registerFeishuEventRoutes,
+  type FounderFeedbackRouteDependencies
 } from './routes/feishu-events.js';
 import {
   registerFeishuOAuthRoutes
@@ -31,6 +32,7 @@ export interface AppDependencies {
   encryptKey: string;
   ingestMinute(event: unknown): IngestionResult;
   routeReply(input: unknown): ReplyDecision;
+  founderFeedback?: FounderFeedbackRouteDependencies;
   sendTextMessage?(input: { chatId: string; text: string }): Promise<{ messageId: string }>;
   oauth?: FeishuOAuthService;
   projectRepository?: ProjectRepository;
@@ -57,6 +59,7 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
     encryptKey: dependencies.encryptKey,
     ingestMinute: dependencies.ingestMinute,
     routeReply: dependencies.routeReply,
+    founderFeedback: dependencies.founderFeedback,
     sendTextMessage: dependencies.sendTextMessage,
     recordOAuthRevocation: dependencies.oauth
       ? (openId) => dependencies.oauth!.recordRevocation(openId)

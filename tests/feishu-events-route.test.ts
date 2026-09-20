@@ -10,6 +10,8 @@ import { MeetingRepository } from '../src/repositories/meeting-repository.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { ingestMinuteGenerated } from '../src/services/minute-ingestion.js';
 import { routeReply } from '../src/services/reply-router.js';
+import { routeFounderFeedback } from '../src/services/founder-feedback-router.js';
+import { feedbackHarness, feedbackChat, feedbackNow } from './helpers/founder-feedback-fixtures.js';
 
 const verificationToken = 'verify-test-token';
 const encryptKey = 'encrypt-test-key';
@@ -17,6 +19,70 @@ const privateChatId = 'oc_d851c3e986007dc0f97ab582bcb2e7c8';
 const minuteFixture = JSON.parse(
   readFileSync(new URL('../src/fixtures/minute-generated.json', import.meta.url), 'utf8')
 ) as Record<string, unknown>;
+
+describe('founder group dispatch isolation', () => {
+  function groupApp() {
+    const h = feedbackHarness(1);
+    let privateCalls = 0, sends = 0;
+    const app = buildApp({ readiness: () => ({ ready: true }), verificationToken, encryptKey, logger: false,
+      ingestMinute: () => ({ status: 'ignored' }),
+      routeReply: () => { privateCalls++; return { kind: 'clarify', reason: 'missing_reply_context' }; },
+      sendTextMessage: async () => { sends++; return { messageId: 'om_fake_sent' }; },
+      founderFeedback: { ivyPrivateChatId: privateChatId, approvedChatIds: [feedbackChat],
+        routeFeedback: (input) => routeFounderFeedback(input, h.dependencies) }
+    });
+    return { ...h, app, counts: () => ({ privateCalls, sends }) };
+  }
+  function payload(chatId = feedbackChat, replyTo: string | null = 'om_map') {
+    return { schema: '2.0', header: { token: verificationToken, event_id: 'evt_group',
+      event_type: 'im.message.receive_v1', create_time: String(feedbackNow.getTime()) }, event: {
+      sender: { sender_id: { open_id: 'ou_ivy' }, sender_type: 'user' }, message: {
+        message_id: 'om_live_feedback', chat_id: chatId, parent_id: replyTo, root_id: replyTo,
+        message_type: 'text', content: JSON.stringify({ text: '这个只是想法，还不是项目' }),
+        create_time: String(feedbackNow.getTime())
+      } } };
+  }
+  it('uses the group correction transaction without private Todo routing or network sends', async () => {
+    const h = groupApp();
+    const response = await h.app.inject({ method: 'POST', url: '/webhooks/feishu/events', payload: payload() });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: 'founder_feedback_decision', decision: { kind: 'corrected' } });
+    expect(h.topics.listCurrentTopics()[0]?.stage).toBe('idea');
+    expect(h.counts()).toEqual({ privateCalls: 0, sends: 0 });
+    const audit = h.db.client.prepare('SELECT source_message_id FROM founder_feedback_corrections').get();
+    expect(audit).toEqual({ source_message_id: 'om_live_feedback' });
+    await h.app.close(); h.db.client.close();
+  });
+  it('rejects other chats before any private identity discovery and preserves private path', async () => {
+    const h = groupApp();
+    const other = await h.app.inject({ method: 'POST', url: '/webhooks/feishu/events', payload: payload('oc_other') });
+    expect(other.json()).toMatchObject({ decision: { kind: 'reject', reason: 'wrong_chat' } });
+    expect(h.counts()).toEqual({ privateCalls: 0, sends: 0 });
+    const privateResponse = await h.app.inject({ method: 'POST', url: '/webhooks/feishu/events', payload: payload(privateChatId) });
+    expect(privateResponse.json()).toMatchObject({ status: 'reply_decision' });
+    expect(h.counts()).toEqual({ privateCalls: 1, sends: 1 });
+    await h.app.close(); h.db.client.close();
+  });
+  it('returns a short clarification for unthreaded group feedback without sending inline', async () => {
+    const h = groupApp();
+    const response = await h.app.inject({ method: 'POST', url: '/webhooks/feishu/events', payload: payload(feedbackChat, null) });
+    expect(response.json()).toMatchObject({ decision: { kind: 'clarify', reason: 'missing_reply_context' } });
+    expect(h.counts()).toEqual({ privateCalls: 0, sends: 0 });
+    await h.app.close(); h.db.client.close();
+  });
+  it('rejects bot-authored feedback and missing source message identity', async () => {
+    const h = groupApp();
+    const bot = payload(); bot.event.sender.sender_type = 'app';
+    const noId = payload(); noId.event.message.message_id = '';
+    for (const event of [bot, noId]) {
+      const response = await h.app.inject({ method: 'POST', url: '/webhooks/feishu/events', payload: event });
+      expect(response.json()).toMatchObject({ decision: { kind: 'reject', reason: 'invalid_input' } });
+    }
+    expect(h.topics.listCurrentTopics()[0]?.currentVersion).toBe(1);
+    expect(h.counts()).toEqual({ privateCalls: 0, sends: 0 });
+    await h.app.close(); h.db.client.close();
+  });
+});
 
 describe('POST /webhooks/feishu/events', () => {
   it('echoes a verified Feishu URL verification challenge', async () => {

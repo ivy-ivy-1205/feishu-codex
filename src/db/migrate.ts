@@ -4,6 +4,21 @@ import {
 } from '../repositories/job-repository.js';
 
 const migrationSql = `
+  CREATE TABLE IF NOT EXISTS founder_feedback_corrections (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    source_message_id TEXT NOT NULL,
+    author_open_id TEXT NOT NULL,
+    binding_message_id TEXT NOT NULL,
+    evidence_id TEXT NOT NULL REFERENCES context_evidence(id),
+    input_hash TEXT NOT NULL,
+    correction_json TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS founder_feedback_source_unique
+    ON founder_feedback_corrections(chat_id, source_message_id);
+
   CREATE TABLE IF NOT EXISTS alignment_issues (
     id TEXT PRIMARY KEY,
     topic_id TEXT NOT NULL REFERENCES context_topics(id),

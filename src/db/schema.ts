@@ -148,6 +148,19 @@ export const batchJobs = sqliteTable('batch_jobs', {
   uniqueIndex('batch_jobs_stable_key_unique').on(table.stableKey)
 ]);
 
+export const founderFeedbackCorrections = sqliteTable('founder_feedback_corrections', {
+  id: text('id').primaryKey(),
+  chatId: text('chat_id').notNull(),
+  sourceMessageId: text('source_message_id').notNull(),
+  authorOpenId: text('author_open_id').notNull(),
+  bindingMessageId: text('binding_message_id').notNull(),
+  evidenceId: text('evidence_id').notNull().references(() => contextEvidence.id),
+  inputHash: text('input_hash').notNull(),
+  correctionJson: text('correction_json').notNull(),
+  resultJson: text('result_json').notNull(),
+  createdAt: text('created_at').notNull()
+}, (table) => [uniqueIndex('founder_feedback_source_unique').on(table.chatId, table.sourceMessageId)]);
+
 export const alignmentIssues = sqliteTable('alignment_issues', {
   id: text('id').primaryKey(),
   topicId: text('topic_id').notNull().references(() => contextTopics.id),

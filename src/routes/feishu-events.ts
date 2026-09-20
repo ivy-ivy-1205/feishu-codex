@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z, ZodError } from 'zod';
 import type { ReplyDecision } from '../domain/authorization.js';
 import type { IngestionResult } from '../services/minute-ingestion.js';
+import type { FounderFeedbackDecision } from '../services/founder-feedback-router.js';
 
 const verificationRequestSchema = z.object({
   type: z.literal('url_verification'),
@@ -52,6 +53,13 @@ const replyEventType = 'im.message.receive_v1';
 const oauthRevokedEventType = 'auth.user_access_token.revoked_v4';
 const minuteGeneratedEventType = 'minutes.minute.generated_v1';
 
+export interface FounderFeedbackRouteDependencies {
+  ivyPrivateChatId: string;
+  approvedChatIds: readonly string[];
+  /** Synchronous local persistence only; network/model work belongs to the durable worker. */
+  routeFeedback(input: unknown): FounderFeedbackDecision;
+}
+
 export interface FeishuEventRouteDependencies {
   verificationToken: string;
   encryptKey: string;
@@ -60,6 +68,7 @@ export interface FeishuEventRouteDependencies {
   sendTextMessage?(input: { chatId: string; text: string }): Promise<{ messageId: string }>;
   recordOAuthRevocation?(openId: string): Promise<void>;
   recordMinuteEvent?(event: unknown): void;
+  founderFeedback?: FounderFeedbackRouteDependencies;
 }
 
 export function registerFeishuEventRoutes(
@@ -96,6 +105,26 @@ export function registerFeishuEventRoutes(
         return reply.code(400).send({ error: 'invalid_reply_event' });
       }
       try {
+        const group = dependencies.founderFeedback;
+        if (group && replyInput.chatId !== group.ivyPrivateChatId) {
+          if (!group.approvedChatIds.includes(replyInput.chatId)) {
+            return { status: 'founder_feedback_decision', decision: { kind: 'reject', reason: 'wrong_chat' } };
+          }
+          const metadata = z.object({
+            sender: z.object({ sender_type: z.literal('user') }),
+            message: z.object({ message_id: z.string().trim().min(1), create_time: z.string().optional(),
+              thread_id: z.string().nullable().optional(), root_id: z.string().nullable().optional() })
+          }).safeParse(envelope.data.event);
+          const occurredAt = metadata.success
+            ? parseEventTime(metadata.data.message.create_time ?? envelope.data.header.create_time) : null;
+          if (!metadata.success || !occurredAt) {
+            return { status: 'founder_feedback_decision', decision: { kind: 'reject', reason: 'invalid_input' } };
+          }
+          const decision = group.routeFeedback({ ...replyInput, messageId: metadata.data.message.message_id, occurredAt,
+            threadId: normalizeOptionalId(metadata.data.message.thread_id), rootId: normalizeOptionalId(metadata.data.message.root_id) });
+          request.log.info({ founderFeedbackDiagnostics: { decisionKind: decision.kind } }, 'Founder feedback routed');
+          return { status: 'founder_feedback_decision', decision };
+        }
         const decision = dependencies.routeReply(replyInput);
         request.log.info({
           feishuReplyDiagnostics: {
@@ -153,6 +182,11 @@ export function registerFeishuEventRoutes(
       return reply.code(500).send({ error: 'event_ingestion_failed' });
     }
   });
+}
+
+function parseEventTime(value: string): string | null {
+  const timestamp = /^\d+$/u.test(value) ? Number(value) * (value.length <= 10 ? 1000 : 1) : Date.parse(value);
+  return Number.isFinite(timestamp) && !Number.isNaN(new Date(timestamp).getTime()) ? new Date(timestamp).toISOString() : null;
 }
 
 function extractRevokedOpenId(event: unknown): string | null {

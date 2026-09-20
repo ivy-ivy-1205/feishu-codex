@@ -1,6 +1,13 @@
 import type Database from 'better-sqlite3';
 import type { MinuteContext } from '../ports/feishu.js';
 import type { MeetingSummaryDraft } from '../ports/summarizer.js';
+import type { FounderWorkMapCard } from '../services/founder-work-map-renderer.js';
+import { canonicalJson } from '../services/canonical-json.js';
+
+export interface FounderWorkMapMessage extends FounderWorkMapCard {
+  mapId: string;
+  targetChatId: string;
+}
 
 export interface IvyMeetingSummaryMessage extends MeetingSummaryDraft {
   kind: 'ivy_meeting_summary';
@@ -37,7 +44,7 @@ export interface AlignmentQuestionMessage {
   card: Record<string, unknown>;
 }
 
-export type OutboxMessage = IvyMeetingSummaryMessage | IvyContextReviewMessage | AlignmentQuestionMessage;
+export type OutboxMessage = IvyMeetingSummaryMessage | IvyContextReviewMessage | AlignmentQuestionMessage | FounderWorkMapMessage;
 
 export interface MeetingSummaryDeliveryAcknowledgement {
   minuteId: string;
@@ -47,6 +54,47 @@ export interface MeetingSummaryDeliveryAcknowledgement {
 
 export class OutboxRepository {
   constructor(readonly client: Database.Database) {}
+
+  enqueueFounderWorkMap(message: FounderWorkMapMessage, now = new Date()): { created: boolean } {
+    if (parseOutboxMessage(JSON.stringify(message))?.kind !== 'founder_work_map') throw new Error('invalid founder work map');
+    const key = founderWorkMapKey(message);
+    const result = this.client.prepare(`INSERT INTO outbox
+      (id, destination, payload, idempotency_key, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)
+      ON CONFLICT(idempotency_key) DO NOTHING`)
+      .run(key, message.targetChatId, JSON.stringify(message), key, now.toISOString());
+    if (result.changes === 0) {
+      const existing = this.client.prepare('SELECT payload FROM outbox WHERE idempotency_key = ?').get(key) as { payload: string };
+      if (canonicalJson(JSON.parse(existing.payload)) !== canonicalJson(message)) throw new Error('founder work map content conflict');
+    }
+    return { created: result.changes === 1 };
+  }
+
+  acknowledgeFounderWorkMapDelivery(input: { mapId: string; page: number; messageId: string; deliveredAt: Date }): { updated: boolean } {
+    const messageId = input.messageId.trim();
+    if (!messageId || messageId.startsWith('pending:')) throw new Error('delivery acknowledgement requires an actual message ID');
+    return this.client.transaction(() => {
+      const key = founderWorkMapKey(input);
+      const row = this.client.prepare('SELECT payload, status, delivered_message_id FROM outbox WHERE idempotency_key = ?')
+        .get(key) as { payload: string; status: string; delivered_message_id: string | null } | undefined;
+      const message = row ? parseOutboxMessage(row.payload) : null;
+      if (!row || message?.kind !== 'founder_work_map' || message.mapId !== input.mapId || message.page !== input.page) {
+        throw new Error('founder work map delivery correlation mismatch');
+      }
+      if (row.status === 'delivered' && row.delivered_message_id === messageId) return { updated: false };
+      if (row.status !== 'pending') throw new Error('founder work map delivery conflict');
+      const update = this.client.prepare(`UPDATE outbox SET status = 'delivered', delivered_at = ?, delivered_message_id = ?
+        WHERE idempotency_key = ? AND status = 'pending'`).run(input.deliveredAt.toISOString(), messageId, key);
+      if (update.changes !== 1) throw new Error('founder work map delivery conflict');
+      return { updated: true };
+    }).immediate();
+  }
+
+  findDeliveredFounderMessage(chatId: string, messageId: string): FounderWorkMapMessage | AlignmentQuestionMessage | null {
+    const row = this.client.prepare(`SELECT payload FROM outbox WHERE destination = ? AND delivered_message_id = ?
+      AND status = 'delivered' AND delivered_at IS NOT NULL`).get(chatId, messageId) as { payload: string } | undefined;
+    const message = row ? parseOutboxMessage(row.payload) : null;
+    return message?.targetChatId === chatId && (message.kind === 'founder_work_map' || message.kind === 'alignment_question') ? message : null;
+  }
 
   enqueueAlignmentQuestion(message: AlignmentQuestionMessage, now = new Date()): { created: boolean } {
     const issue = this.client.prepare("SELECT status, evidence_set_hash FROM alignment_issues WHERE id = ?")
@@ -301,6 +349,16 @@ function parseOutboxMessage(payload: string): OutboxMessage | null {
   let value: unknown;
   try { value = JSON.parse(payload); } catch { return null; }
   if (!isRecord(value) || typeof value.kind !== 'string') return null;
+  if (value.kind === 'founder_work_map' && typeof value.mapId === 'string' && value.mapId.trim() &&
+    typeof value.targetChatId === 'string' && value.targetChatId.trim() && isRecord(value.card) &&
+    Number.isSafeInteger(value.page) && Number(value.page) > 0 && Number.isSafeInteger(value.totalPages) &&
+    Number(value.totalPages) >= Number(value.page) && Array.isArray(value.itemRefs) && value.itemRefs.length <= 12 &&
+    value.itemRefs.every((ref) => isRecord(ref) && ['topic', 'uncertain_grouping', 'coverage_gap'].includes(String(ref.kind)) &&
+      typeof ref.id === 'string' && ref.id.trim() && Number.isSafeInteger(ref.displayedNumber) && Number(ref.displayedNumber) > 0 &&
+      (ref.kind !== 'topic' || (Number.isSafeInteger(ref.expectedVersion) && Number(ref.expectedVersion) > 0))) &&
+    new Set(value.itemRefs.map((ref) => ref.displayedNumber)).size === value.itemRefs.length) {
+    return value as unknown as FounderWorkMapMessage;
+  }
   if (value.kind === 'alignment_question' && typeof value.issueId === 'string' &&
     typeof value.evidenceSetHash === 'string' && typeof value.targetChatId === 'string' && isRecord(value.card)) {
     return value as unknown as AlignmentQuestionMessage;
@@ -320,6 +378,10 @@ function parseOutboxMessage(payload: string): OutboxMessage | null {
 
 function alignmentQuestionKey(input: { issueId: string; evidenceSetHash: string }): string {
   return `alignment-question:${input.issueId}:${input.evidenceSetHash}`;
+}
+
+function founderWorkMapKey(input: { mapId: string; page: number }): string {
+  return `founder-work-map:${input.mapId}:${input.page}`;
 }
 
 function isStringArray(value: unknown): value is string[] {
