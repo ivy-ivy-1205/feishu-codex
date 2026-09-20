@@ -11,6 +11,7 @@ import {
   type PerspectiveVersion
 } from '../domain/alignment.js';
 import { stableId } from '../services/canonical-json.js';
+import { compareEvidence } from '../services/evidence-order.js';
 
 export interface ConfigureFounderIdentityInput {
   founder: FounderRole;
@@ -195,7 +196,30 @@ export class AlignmentRepository {
         ON v.perspective_id = p.id AND v.version_number = p.current_version
       WHERE p.topic_id = ? AND p.kind = ?
     `).get(topicId, perspectiveKindSchema.parse(kind)) as CurrentPerspectiveRow | undefined;
-    return row ? toCurrentPerspective(row) : null;
+    const current=row?toCurrentPerspective(row):null;
+    return current?.kind==='shared_decision' && !this.isSharedDecisionEffective(current)?null:current;
+  }
+
+  /** History stays immutable; late contradictory observations can invalidate its current authority. */
+  isSharedDecisionEffective(shared:PerspectiveVersion):boolean {
+    return shared.kind==='shared_decision' && shared.evidenceIds.every(id=>!this.hasConflictingObservation(shared.topicId,id,shared.decisionKey));
+  }
+
+  hasConflictingObservation(topicId:string,evidenceId:string,decisionKey:string|null,includeLaterWithdrawal=true):boolean {
+    const founder=this.resolveFounderForEvidence(evidenceId);
+    if(!founder)return true;
+    const rows=this.client.prepare(`SELECT evidence_id,statement,speech_act,decision_key FROM founder_perspective_observations WHERE topic_id=?`)
+      .all(topicId) as {evidence_id:string;statement:string;speech_act:string;decision_key:string|null}[];
+    const original=rows.find(row=>row.evidence_id===evidenceId);
+    return rows.some(row=>{
+      if(row.evidence_id===evidenceId || this.resolveFounderForEvidence(row.evidence_id)!==founder)return false;
+      const order=compareEvidence(this.client,row.evidence_id,evidenceId);
+      const differs=original ? row.statement!==original.statement || row.speech_act!==original.speech_act
+        : this.getAttributedFounderEvidence(row.evidence_id)?.sourceText!==this.getAttributedFounderEvidence(evidenceId)?.sourceText;
+      // An overlap is not proof of a tie, but cannot safely sustain consensus either.
+      if((order===0 || order===null) && differs)return true;
+      return includeLaterWithdrawal && order===1 && row.decision_key===decisionKey && row.speech_act==='explicit_disagreement';
+    });
   }
 
   listCurrentPerspectives(topicId: string): CurrentPerspective[] {
@@ -207,7 +231,8 @@ export class AlignmentRepository {
       INNER JOIN topic_perspective_versions v
         ON v.perspective_id = p.id AND v.version_number = p.current_version
       WHERE p.topic_id = ? ORDER BY p.kind
-    `).all(topicId) as CurrentPerspectiveRow[]).map(toCurrentPerspective);
+    `).all(topicId) as CurrentPerspectiveRow[]).map(toCurrentPerspective)
+      .filter(p=>p.kind!=='shared_decision'||this.isSharedDecisionEffective(p));
   }
 
   listPerspectiveVersions(topicId: string, kind: PerspectiveKind): PerspectiveVersion[] {

@@ -52,6 +52,20 @@ function setup(dimension: 'direction' | 'next_action' | 'owner' | 'deadline' | '
 }
 
 describe('AlignmentNotificationPolicy', () => {
+  it('does not treat historical consensus as a natural resolution after late tied opposition invalidates its support',()=>{
+    const h=setup(),reconciler=new PerspectiveReconciler(h.alignment);
+    const send=(id:string,who:string,text:string,time:string,speechAct:'decision_proposal'|'explicit_agreement'|'explicit_disagreement')=>{
+      const evidenceId=h.evidence(id,`ou_${who}`,text,`2026-09-21T09:${time}:00.000Z`);
+      reconciler.reconcile({topicId:h.topic.id,evidenceId,statement:text,speechAct,decisionKey:'website-release',confidence:1,observedAt:now});
+    };
+    send('confirm_i','ivy','按 A 方案推进','10','decision_proposal');send('confirm_j','james','同意按 A 方案推进','20','explicit_agreement');
+    expect(h.policy.evaluate(h.candidate,now).reason).toBe('naturally_resolved');
+    send('late_tie','ivy','不同意按 A 方案推进','10','explicit_disagreement');
+    expect(h.policy.evaluate(h.candidate,now).reason).not.toBe('naturally_resolved');
+    expect(h.alignment.listCurrentPerspectives(h.topic.id).some(p=>p.kind==='shared_decision')).toBe(false);
+    send('fresh_i','ivy','同意按 A 方案推进','30','explicit_agreement');
+    expect(h.policy.evaluate(h.candidate,now).reason).toBe('naturally_resolved');
+  });
   it.each(['direction', 'next_action', 'owner', 'deadline', 'completion_standard'] as const)
   ('allows evidenced %s action divergence without enqueuing during evaluation', (dimension) => {
     const h = setup(dimension);

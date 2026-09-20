@@ -53,6 +53,21 @@ function saveGroupEvidence(
 }
 
 describe('PerspectiveReconciler', () => {
+  it('invalidates an already shared decision when conflicting tied support arrives late, and restores only with later confirmation',()=>{
+    const h=createHarness();
+    const submit=(id:string,who:string,text:string,day:string,speechAct:'decision_proposal'|'explicit_agreement'|'explicit_disagreement')=>{
+      const evidenceId=saveGroupEvidence(h.sources,{messageId:id,openId:`ou_${who}`,displayName:who,text,occurredAt:`2026-09-0${day}T01:00:00Z`});
+      return h.reconciler.reconcile({topicId:h.topic.id,evidenceId,statement:text,speechAct,decisionKey:'direction',confidence:1,observedAt:new Date('2030-01-01')});
+    };
+    submit('initial','ivy','按 A 方案推进','1','decision_proposal');submit('yes','james','同意按 A 方案推进','2','explicit_agreement');
+    expect(h.repository.getCurrentPerspective(h.topic.id,'shared_decision')).not.toBeNull();
+    submit('late','ivy','不同意按 A 方案推进','1','explicit_disagreement');
+    expect(h.repository.getCurrentPerspective(h.topic.id,'shared_decision')).toBeNull();
+    expect(h.repository.listPerspectiveVersions(h.topic.id,'shared_decision')).toHaveLength(1);
+    submit('later','ivy','同意按 A 方案推进','3','explicit_agreement');
+    expect(h.repository.getCurrentPerspective(h.topic.id,'shared_decision')).not.toBeNull();
+    expect(h.repository.listPerspectiveVersions(h.topic.id,'shared_decision')).toHaveLength(2);
+  });
   it('ignores model order, keeps the latest withdrawal in a reversed batch, and replays evidence idempotently',()=>{
     const h=createHarness();
     const records=[['ivy','按 A 方案推进','decision_proposal','1'],['james','同意按 A 方案推进','explicit_agreement','2'],['ivy','不同意按 A 方案推进','explicit_disagreement','3']] as const;

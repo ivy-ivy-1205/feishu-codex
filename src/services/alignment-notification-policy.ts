@@ -45,10 +45,11 @@ export class AlignmentNotificationPolicy {
       Date.parse(horizon.startsAt) >= Date.parse(horizon.endsAt)) return reject('outside_action_horizon');
 
     if(candidate.evidenceIds.some(id=>!evidenceOrder(this.issues.client,id)))return reject('ungrounded_divergence');
+    if(candidate.evidenceIds.some(id=>evidenceOrder(this.issues.client,id)!.latestAt>now.getTime()))return reject('outside_action_horizon');
     const matchingDecisions = this.perspectives.listPerspectiveVersions(candidate.topicId, 'shared_decision')
-      .filter((shared) => shared.decisionKey === candidate.decisionKey);
+      .filter((shared) => shared.decisionKey === candidate.decisionKey && this.perspectives.isSharedDecisionEffective(shared));
     if (matchingDecisions.some((shared) => {
-      const times = shared.evidenceIds.map((id) => evidenceOrder(this.issues.client,id)?.occurredAt ?? NaN);
+      const times = shared.evidenceIds.map((id) => evidenceOrder(this.issues.client,id)?.latestAt ?? NaN);
       return times.length > 0 && times.every(Number.isFinite) &&
         shared.evidenceIds.some(id=>candidate.evidenceIds.every(previous=>compareEvidence(this.issues.client,id,previous)===1)) &&
         Math.max(...times) <= now.getTime() &&

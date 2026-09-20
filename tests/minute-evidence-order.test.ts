@@ -12,6 +12,7 @@ import {PerspectiveReconciler,type PerspectiveObservation} from '../src/services
 import {AlignmentDetector} from '../src/services/alignment-detector.js';
 import {AlignmentNotificationPolicy} from '../src/services/alignment-notification-policy.js';
 import {evidenceOrder,compareEvidence} from '../src/services/evidence-order.js';
+import {captureGroupMessageSource} from '../src/services/group-message-source-capture.js';
 
 function setup(){
   const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const at=new Date('2030-01-01T12:00:00Z');
@@ -34,6 +35,37 @@ function setup(){
   return{db,at,ids,source,sources,alignment,reconciler,observations,candidate,policy};
 }
 describe('trusted evidence ordering',()=>{
+  it('leaves an untimed meeting with unknown end open instead of inventing an ordering against a later group point',()=>{
+    const h=setup(),old=h.source;
+    const metadata={...old.metadata};delete metadata.endedAt;
+    const source=h.sources.saveSource({...old,externalId:'obcn_open',logicalKey:'open-minute',metadata,capturedAt:h.at}).source;
+    const id=saveFounderEvidence(h.sources,source.id,'按 A 方案推进',h.at);
+    const group=h.sources.saveSource(captureGroupMessageSource({chatId:'oc_test',messageId:'late_group',threadId:null,rootId:null,
+      author:{openId:'ou_james',displayName:'James'},senderType:'user',messageType:'text',text:'同意按 A 方案推进',occurredAt:'2030-01-01T11:30:00Z'},h.at).source).source;
+    expect(compareEvidence(h.db.client,saveFounderEvidence(h.sources,group.id,'同意按 A 方案推进',h.at),id)).toBeNull();
+    const other=saveFounderEvidence(h.sources,source.id,'按 B 方案推进，今天开始实施',h.at);
+    const full=saveFounderEvidence(h.sources,source.id,'按 A 方案推进，今天开始实施',h.at);
+    const candidate=new AlignmentDetector().propose({topicId:h.candidate.topicId,decisionKey:'open',dimension:'direction',
+      ivy:{evidenceId:full,statement:'按 A 方案推进'},james:{evidenceId:other,statement:'按 B 方案推进'},
+      actionConsequence:{evidenceId:full,excerpt:'今天开始实施'},actionHorizon:{evidenceId:full,excerpt:'今天',startsAt:'2030-01-01T00:00:00Z',endsAt:'2030-01-02T00:00:00Z'}});
+    expect(h.policy.evaluate(candidate,h.at).send).toBe(false);h.db.close();
+  });
+  it('cannot order an untimed minute proposal against a group agreement during that meeting, but can after it ends',()=>{
+    const h=setup();h.reconciler.reconcile(h.observations[0]!);
+    const send=(messageId:string,occurredAt:string)=>{
+      const captured=captureGroupMessageSource({chatId:'oc_test',messageId,threadId:null,rootId:null,author:{openId:'ou_james',displayName:'James'},
+        senderType:'user',messageType:'text',text:'同意按 A 方案推进',occurredAt},h.at);
+      const source=h.sources.saveSource(captured.source).source;
+      const id=saveFounderEvidence(h.sources,source.id,'同意按 A 方案推进',h.at);
+      h.reconciler.reconcile({...h.observations[1]!,evidenceId:id});return id;
+    };
+    const overlap=send('inside','2030-01-01T10:30:00Z');
+    expect(compareEvidence(h.db.client,overlap,h.ids[2]!)).toBeNull();
+    expect(h.alignment.getCurrentPerspective(h.candidate.topicId,'shared_decision')).toBeNull();
+    const later=send('after','2030-01-01T11:30:00Z');
+    expect(compareEvidence(h.db.client,later,h.ids[2]!)).toBe(1);
+    expect(h.alignment.getCurrentPerspective(h.candidate.topicId,'shared_decision')).not.toBeNull();h.db.close();
+  });
   it('recognizes a later agreement in the same untimed minute without pretending ordinal is elapsed milliseconds',()=>{
     const h=setup();h.reconciler.reconcileBatch([...h.observations].reverse());
     expect(h.alignment.getCurrentPerspective(h.candidate.topicId,'shared_decision')).not.toBeNull();

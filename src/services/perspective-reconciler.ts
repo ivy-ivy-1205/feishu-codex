@@ -54,12 +54,7 @@ export class PerspectiveReconciler {
   }
 
   private ambiguousSupport(perspective:CurrentPerspective):boolean {
-    const rows=this.repository.client.prepare(`SELECT evidence_id,statement,speech_act FROM founder_perspective_observations
-      WHERE topic_id=?`).all(perspective.topicId) as {evidence_id:string;statement:string;speech_act:string}[];
-    return rows.some(row=>!perspective.evidenceIds.includes(row.evidence_id) &&
-      this.repository.resolveFounderForEvidence(row.evidence_id)===(perspective.kind==='ivy_view'?'ivy':'james') &&
-      perspective.evidenceIds.some(id=>compareEvidence(this.repository.client,row.evidence_id,id)===0) &&
-      (row.statement!==perspective.statement || row.speech_act!==perspective.speechAct));
+    return perspective.evidenceIds.some(id=>this.repository.hasConflictingObservation(perspective.topicId,id,perspective.decisionKey));
   }
 
   private reconcileInTransaction(input: PerspectiveObservation, audited=false): PerspectiveReconciliationResult {
@@ -104,7 +99,7 @@ export class PerspectiveReconciler {
         other.evidenceIds.every(id=>{const order=compareEvidence(this.repository.client,input.evidenceId,id);return order!==null && order>=0;}) &&
         !this.ambiguousSupport(other) && !this.ambiguousSupport({...version,createdAt:'',updatedAt:''}) &&
         this.hasMatchingDirectSupport(other, otherFounder, agreedDecision)) {
-        const shared = this.repository.getCurrentPerspective(input.topicId, 'shared_decision');
+        const shared = this.repository.listPerspectiveVersions(input.topicId, 'shared_decision').at(-1);
         versions.push(this.repository.savePerspective({
           topicId: input.topicId,
           kind: 'shared_decision',
