@@ -10,6 +10,7 @@ import { migrateDatabase } from '../src/db/migrate.js';
 import { MeetingRepository } from '../src/repositories/meeting-repository.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import type { IvyMeetingSummaryMessage } from '../src/repositories/outbox-repository.js';
+import { renderFounderWorkMap } from '../src/services/founder-work-map-renderer.js';
 
 const summaryMessage: IvyMeetingSummaryMessage = {
   kind: 'ivy_meeting_summary',
@@ -30,6 +31,16 @@ const summaryMessage: IvyMeetingSummaryMessage = {
 };
 
 describe('Feishu real adapter boundary', () => {
+  it('delivers founder cards through interactive delivery without exposing routing metadata', async () => {
+    const sentCards: Array<{ chatId: string; card: Record<string, unknown> }> = [];
+    const delivery = new FeishuMessageDeliveryAdapter(createClient({ sentCards, messageId: 'om_founder' }));
+    const rendered = renderFounderWorkMap({ since: '2026-08-31T00:00:00.000Z', until: '2026-09-20T00:00:00.000Z',
+      topics: [], uncertainGrouping: [], coverageGaps: [] })[0]!;
+    await expect(delivery.sendFounderCard({ ...rendered, targetChatId: 'oc_founders' })).resolves.toEqual({ messageId: 'om_founder' });
+    expect(sentCards).toEqual([{ chatId: 'oc_founders', card: rendered.card }]);
+    expect(JSON.stringify(sentCards[0]!.card)).not.toContain('itemRefs');
+  });
+
   it('normalizes Feishu minute basic info and transcript into MinuteContext', async () => {
     const reader = new FeishuMinutesReaderAdapter(createClient({
       minute: {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { randomBytes } from 'node:crypto';
+import type { FounderCard } from '../services/founder-card.js';
 import type {
   FeishuMinuteReadOptions,
   FeishuUserAccessTokenResolver,
@@ -150,6 +151,10 @@ export class FeishuMessageDeliveryAdapter {
   }
 
   async sendContextReview(message: IvyContextReviewMessage): Promise<{ messageId: string }> {
+    return this.sendInteractiveCard({ chatId: message.targetChatId, card: message.card });
+  }
+
+  async sendFounderCard(message: FounderCard & { targetChatId: string }): Promise<{ messageId: string }> {
     return this.sendInteractiveCard({ chatId: message.targetChatId, card: message.card });
   }
 }
