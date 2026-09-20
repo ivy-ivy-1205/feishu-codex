@@ -108,6 +108,29 @@ describe('AlignmentNotificationPolicy', () => {
       .toEqual({ send: false, reason: 'no_action_consequence' });
   });
 
+  it.each([
+    ['今天不开始实施', '开始实施'],
+    ['今天不会开始实施', '开始实施'],
+    ['今天开始实施的承诺已撤回', '今天开始实施'],
+    ['今天开始实施的计划已取消', '今天开始实施'],
+    ['James 说今天开始实施', '今天开始实施'],
+    ['听说今天开始实施', '今天开始实施'],
+    ['We will not start implementation today', 'start implementation today'],
+    ['Starting implementation today was cancelled', 'Starting implementation today'],
+    ['James said start implementation today', 'start implementation today']
+  ])('rejects non-affirmative action in the full immutable message: %s', (sourceAction, excerpt) => {
+    const h = setup();
+    const id = h.evidence('om_action_unsafe', 'ou_ivy', `按 A 方案推进，${sourceAction}`);
+    const candidate = h.detector.propose({ ...h.proposal,
+      ivy: { evidenceId: id, statement: '按 A 方案推进' },
+      actionConsequence: { evidenceId: id, excerpt },
+      actionHorizon: { ...h.proposal.actionHorizon, evidenceId: h.proposal.james.evidenceId }
+    });
+    expect(h.policy.evaluate(candidate, now)).toEqual({ send: false, reason: 'no_action_consequence' });
+    expect(h.policy.prepare(candidate, h.message, now).send).toBe(false);
+    expect(h.outbox.listAll()).toEqual([]);
+  });
+
   it('rejects manipulated candidate hashes or windows at evaluation, not just persistence', () => {
     const h = setup();
     expect(h.policy.evaluate({ ...h.candidate, evidenceSetHash: 'invented' }, now))
@@ -147,6 +170,29 @@ describe('AlignmentNotificationPolicy', () => {
     expect(h.policy.evaluate(h.candidate, now)).toEqual({ send: false, reason: 'naturally_resolved' });
     h.policy.reconcilePending(now);
     expect(h.issues.get(h.candidate.id)?.status).toBe('resolved');
+    expect(h.outbox.listPendingAlignmentQuestions(now)).toEqual([]);
+  });
+
+  it.each([false, true])('keeps decision A resolved when B becomes the latest shared perspective (already queued: %s)', (queued) => {
+    const h = setup();
+    if (queued) h.policy.prepare(h.candidate, h.message, now);
+    const reconciler = new PerspectiveReconciler(h.alignment);
+    for (const [key, plan, hour] of [[h.proposal.decisionKey, 'A', '09:30'], ['website-owner', 'C', '09:40']]) {
+      const statement = `按 ${plan} 方案推进`;
+      const proposalAt = `2026-09-21T${hour}:00.000Z`;
+      const agreementAt = `2026-09-21T${hour}:30.000Z`;
+      const i = h.evidence(`om_${plan}_proposal`, 'ou_ivy', statement, proposalAt);
+      const j = h.evidence(`om_${plan}_agreement`, 'ou_james', `同意${statement}`, agreementAt);
+      reconciler.reconcile({ topicId: h.topic.id, evidenceId: i, statement, speechAct: 'decision_proposal',
+        decisionKey: key!, confidence: 1, observedAt: new Date(proposalAt) });
+      reconciler.reconcile({ topicId: h.topic.id, evidenceId: j, statement: `同意${statement}`, speechAct: 'explicit_agreement',
+        decisionKey: key!, confidence: 1, observedAt: new Date(agreementAt) });
+    }
+    expect(h.alignment.getCurrentPerspective(h.topic.id, 'shared_decision')?.decisionKey).toBe('website-owner');
+    expect(h.policy.evaluate(h.candidate, now)).toEqual({ send: false, reason: 'naturally_resolved' });
+    expect(h.policy.prepare(h.candidate, h.message, now)).toEqual({ send: false, reason: 'naturally_resolved' });
+    h.policy.reconcilePending(now);
+    expect(h.issues.get(h.candidate.id)?.status).toBe(queued ? 'resolved' : undefined);
     expect(h.outbox.listPendingAlignmentQuestions(now)).toEqual([]);
   });
 

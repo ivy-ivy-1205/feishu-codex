@@ -34,19 +34,25 @@ export class AlignmentNotificationPolicy {
     const founderEvidenceIds = [candidate.ivy.evidenceId, candidate.james.evidenceId];
     const consequence = candidate.actionConsequence;
     if (!consequence || !founderEvidenceIds.includes(consequence.evidenceId) ||
-      !this.grounded(consequence) || !hasAction(consequence.excerpt)) return reject('no_action_consequence');
+      !this.grounded(consequence) || !affirmativeAction(
+        this.perspectives.getAttributedFounderEvidence(consequence.evidenceId)!.sourceText,
+        consequence.excerpt
+      )) return reject('no_action_consequence');
     const horizon = candidate.actionHorizon;
     if (!horizon || !founderEvidenceIds.includes(horizon.evidenceId) || !this.grounded(horizon) || !Number.isFinite(now.getTime()) ||
       Date.parse(horizon.startsAt) > now.getTime() || Date.parse(horizon.endsAt) <= now.getTime() ||
       Date.parse(horizon.startsAt) >= Date.parse(horizon.endsAt)) return reject('outside_action_horizon');
 
-    const shared = this.perspectives.getCurrentPerspective(candidate.topicId, 'shared_decision');
     const latestEvidenceAt = Math.max(...candidate.evidenceIds.map((id) => this.evidenceAt(id)));
-    const sharedEvidenceTimes = shared?.evidenceIds.map((id) => this.evidenceAt(id)) ?? [];
-    if (shared?.decisionKey === candidate.decisionKey && sharedEvidenceTimes.every(Number.isFinite) &&
-      Math.max(...sharedEvidenceTimes) > latestEvidenceAt && Math.max(...sharedEvidenceTimes) <= now.getTime() &&
-      shared.evidenceIds.some((id) => this.perspectives.resolveFounderForEvidence(id) === 'ivy') &&
-      shared.evidenceIds.some((id) => this.perspectives.resolveFounderForEvidence(id) === 'james')) {
+    const matchingDecisions = this.perspectives.listPerspectiveVersions(candidate.topicId, 'shared_decision')
+      .filter((shared) => shared.decisionKey === candidate.decisionKey);
+    if (matchingDecisions.some((shared) => {
+      const times = shared.evidenceIds.map((id) => this.evidenceAt(id));
+      return times.length > 0 && times.every(Number.isFinite) &&
+        Math.max(...times) > latestEvidenceAt && Math.max(...times) <= now.getTime() &&
+        shared.evidenceIds.some((id) => this.perspectives.resolveFounderForEvidence(id) === 'ivy') &&
+        shared.evidenceIds.some((id) => this.perspectives.resolveFounderForEvidence(id) === 'james');
+    })) {
       return reject('naturally_resolved');
     }
     const previous = this.issues.listForTopic(candidate.topicId);
@@ -106,6 +112,12 @@ export class AlignmentNotificationPolicy {
 function hasAction(text: string): boolean {
   return /推进|实施|交付|发布|上线|完成|负责|截止|验收|开始|先做|implement|deliver|release|deadline|owner|complete|start/i.test(text) &&
     !/如果|假如|也许|可能|脑暴|设想|if\b|maybe|brainstorm/i.test(text);
+}
+
+/** A selected positive substring cannot override negation, withdrawal or attribution in its source. */
+function affirmativeAction(source: string, excerpt: string): boolean {
+  if (!source.includes(excerpt) || !hasAction(excerpt)) return false;
+  return !/不|没|未|撤回|取消|暂停|停止|搁置|放弃|拒绝|说|表示|据称|提到|转述|[“”"「」『』]|如果|假如|也许|可能|\.\.\.|……|\b(?:not|never|no|cancel\w*|withdraw\w*|withdrawn|retract\w*|abandon\w*|pause\w*|stop\w*|postpone\w*|said|says?|quote\w*|reported|according|if|maybe)\b|n['’]t\b/i.test(source);
 }
 
 function directStatement(source: string, statement: string): boolean {
