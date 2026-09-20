@@ -98,7 +98,12 @@ export class AlignmentNotificationPolicy {
       // Distinct decision keys on a topic share one outstanding question slot.
       this.reconcilePending(now);
       const decision = this.evaluate(candidate, now);
-      if (!decision.send) return decision;
+      if (!decision.send) {
+        // Occupancy is checked only after evidence/action validation. Preserve valid deferred
+        // work in this transaction; other rejection reasons must not create candidate audit rows.
+        if (decision.reason === 'open_issue_exists') this.issues.saveCandidate(candidate, now);
+        return decision;
+      }
       this.issues.saveCandidate(candidate, now);
       const update = this.issues.client.prepare("UPDATE alignment_issues SET status = 'ready', updated_at = ? WHERE id = ? AND status = 'candidate'")
         .run(now.toISOString(), candidate.id);

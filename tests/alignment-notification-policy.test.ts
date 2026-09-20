@@ -124,17 +124,20 @@ describe('AlignmentNotificationPolicy', () => {
     const h = setup(); h.policy.prepare(h.candidate, h.message, now);
     if (status === 'asked') h.outbox.acknowledgeAlignmentQuestionDelivery({ issueId: h.candidate.id,
       evidenceSetHash: h.candidate.evidenceSetHash, messageId: 'om_asked_slot', deliveredAt: now });
-    const second = secondCandidate(h); h.issues.saveCandidate(second, now);
+    const second = secondCandidate(h);
     expect(h.policy.prepare(second, h.message, now)).toEqual({ send: false, reason: 'open_issue_exists' });
     expect(h.issues.get(second.id)?.status).toBe('candidate');
+    expect(h.policy.prepare(second, h.message, now)).toEqual({ send: false, reason: 'open_issue_exists' });
+    expect(h.issues.listForTopic(h.topic.id)).toHaveLength(2);
     expect(h.outbox.listAll()).toHaveLength(1);
     expect(h.policy.prepare(h.candidate, h.message, now)).toEqual({ send: false, reason: 'unchanged_evidence' });
   });
 
   it.each(['resolved', 'dismissed', 'stale'] as const)('releases the topic question slot after %s', (status) => {
     const h = setup(); h.policy.prepare(h.candidate, h.message, now);
-    const second = secondCandidate(h); h.issues.saveCandidate(second, now);
+    const second = secondCandidate(h);
     expect(h.policy.prepare(second, h.message, now).send).toBe(false);
+    expect(h.issues.get(second.id)?.status).toBe('candidate');
     h.issues.close({ issueId: h.candidate.id, expectedStatus: 'ready', status, changedAt: now });
     expect(h.policy.prepare(second, h.message, now)).toEqual({ send: true, reason: 'action_divergence' });
     expect(h.issues.get(second.id)?.status).toBe('ready');
@@ -146,6 +149,27 @@ describe('AlignmentNotificationPolicy', () => {
     const other = h.topics.createTopic({ displayName: '另一个项目', stage: 'active_project', createdAt: now });
     expect(h.policy.prepare(secondCandidate(h, other.id), h.message, now).send).toBe(true);
     expect(h.issues.listOpen()).toHaveLength(2);
+  });
+
+  it('does not store an invalid candidate merely because another issue occupies the topic slot', () => {
+    const h = setup(); h.policy.prepare(h.candidate, h.message, now);
+    const second = secondCandidate(h);
+    const { id, status, evidenceIds, evidenceSetHash, ...proposal } = second;
+    const invalid = h.detector.propose({ ...proposal, actionConsequence: null });
+    expect(h.policy.prepare(invalid, h.message, now)).toEqual({ send: false, reason: 'no_action_consequence' });
+    expect(h.issues.get(invalid.id)).toBeNull();
+    expect(h.issues.listForTopic(h.topic.id)).toHaveLength(1);
+  });
+
+  it('rolls back a deferred candidate write failure without affecting the occupied slot or outbox', () => {
+    const h = setup(); h.policy.prepare(h.candidate, h.message, now);
+    const second = secondCandidate(h);
+    h.db.client.exec(`CREATE TRIGGER reject_deferred_candidate BEFORE INSERT ON alignment_issues
+      BEGIN SELECT RAISE(ABORT, 'deferred candidate failed'); END`);
+    expect(() => h.policy.prepare(second, h.message, now)).toThrow(/deferred candidate failed/);
+    expect(h.issues.get(second.id)).toBeNull();
+    expect(h.issues.get(h.candidate.id)?.status).toBe('ready');
+    expect(h.outbox.listAll()).toHaveLength(1);
   });
 
   it('retires stale questions inside prepare before deciding whether the topic slot is occupied', () => {
@@ -180,6 +204,7 @@ describe('AlignmentNotificationPolicy', () => {
     try {
       h.db.client.pragma('journal_mode = WAL');
       const second = secondCandidate(h);
+      h.db.client.function('alignment_test_pause', () => 0);
       h.db.client.exec(`CREATE TRIGGER pause_ready_issue BEFORE UPDATE ON alignment_issues
         WHEN NEW.status = 'ready' BEGIN SELECT alignment_test_pause(); END`);
       const one = concurrentPrepare(filename, h.candidate);
@@ -190,6 +215,15 @@ describe('AlignmentNotificationPolicy', () => {
       expect(results.filter((result) => !result.send)).toEqual([{ send: false, reason: 'open_issue_exists' }]);
       expect(h.issues.listOpen()).toHaveLength(1);
       expect(h.outbox.listAll()).toHaveLength(1);
+      const saved = h.issues.listForTopic(h.topic.id);
+      expect(saved).toHaveLength(2);
+      const waiting = saved.find((issue) => issue.status === 'candidate')!;
+      const active = saved.find((issue) => issue.status === 'ready')!;
+      expect(h.issues.get(waiting.id)?.status).toBe('candidate');
+      h.issues.close({ issueId: active.id, expectedStatus: 'ready', status: 'resolved', changedAt: now });
+      expect(h.policy.prepare(waiting.id === second.id ? second : h.candidate, h.message, now).send).toBe(true);
+      expect(h.issues.get(waiting.id)?.status).toBe('ready');
+      expect(h.outbox.listAll()).toHaveLength(2);
     } finally { h.db.close(); rmSync(directory, { recursive: true, force: true }); }
   }, 10_000);
   it('does not treat historical consensus as a natural resolution after late tied opposition invalidates its support',()=>{
@@ -293,12 +327,13 @@ describe('AlignmentNotificationPolicy', () => {
       .toEqual({ send: false, reason: 'ungrounded_divergence' });
   });
 
-  it('rolls back policy ready state if outbox insertion fails', () => {
-    const h = setup(); h.issues.saveCandidate(h.candidate, now);
+  it.each([false, true])('rolls back candidate and ready state if outbox insertion fails (preexisting: %s)', (preexisting) => {
+    const h = setup();
+    if (preexisting) h.issues.saveCandidate(h.candidate, now);
     h.db.client.exec(`CREATE TRIGGER reject_alignment_queue BEFORE INSERT ON outbox
       BEGIN SELECT RAISE(ABORT, 'queue failed'); END`);
     expect(() => h.policy.prepare(h.candidate, h.message, now)).toThrow(/queue failed/);
-    expect(h.issues.get(h.candidate.id)?.status).toBe('candidate');
+    expect(h.issues.get(h.candidate.id)?.status).toBe(preexisting ? 'candidate' : undefined);
     expect(h.outbox.listAll()).toEqual([]);
   });
 
