@@ -148,6 +148,23 @@ export const batchJobs = sqliteTable('batch_jobs', {
   uniqueIndex('batch_jobs_stable_key_unique').on(table.stableKey)
 ]);
 
+export const alignmentIssues = sqliteTable('alignment_issues', {
+  id: text('id').primaryKey(),
+  topicId: text('topic_id').notNull().references(() => contextTopics.id),
+  decisionKey: text('decision_key').notNull(),
+  dimension: text('dimension').notNull(),
+  evidenceSetHash: text('evidence_set_hash').notNull(),
+  candidateJson: text('candidate_json').notNull(),
+  status: text('status').notNull(),
+  deliveredMessageId: text('delivered_message_id'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull()
+}, (table) => [
+  uniqueIndex('alignment_issues_evidence_unique').on(table.topicId, table.decisionKey, table.dimension, table.evidenceSetHash),
+  check('alignment_issues_dimension_allowed', sql`${table.dimension} IN ('direction','next_action','owner','deadline','completion_standard')`),
+  check('alignment_issues_status_allowed', sql`${table.status} IN ('candidate','ready','asked','resolved','dismissed','stale')`)
+]);
+
 export const outbox = sqliteTable('outbox', {
   id: text('id').primaryKey(),
   destination: text('destination').notNull(),

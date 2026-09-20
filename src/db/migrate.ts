@@ -4,6 +4,23 @@ import {
 } from '../repositories/job-repository.js';
 
 const migrationSql = `
+  CREATE TABLE IF NOT EXISTS alignment_issues (
+    id TEXT PRIMARY KEY,
+    topic_id TEXT NOT NULL REFERENCES context_topics(id),
+    decision_key TEXT NOT NULL,
+    dimension TEXT NOT NULL CONSTRAINT alignment_issues_dimension_allowed
+      CHECK(dimension IN ('direction','next_action','owner','deadline','completion_standard')),
+    evidence_set_hash TEXT NOT NULL,
+    candidate_json TEXT NOT NULL,
+    status TEXT NOT NULL CONSTRAINT alignment_issues_status_allowed
+      CHECK(status IN ('candidate','ready','asked','resolved','dismissed','stale')),
+    delivered_message_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS alignment_issues_evidence_unique
+    ON alignment_issues(topic_id, decision_key, dimension, evidence_set_hash);
+
   CREATE TABLE IF NOT EXISTS feishu_events (
     event_id TEXT PRIMARY KEY,
     minute_id TEXT NOT NULL,

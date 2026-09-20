@@ -29,7 +29,15 @@ export interface ContextPromotionIntent {
   relationType: 'supplements' | 'confirms' | 'corrects' | 'supersedes' | 'conflicts_with' | 'duplicates';
 }
 
-export type OutboxMessage = IvyMeetingSummaryMessage | IvyContextReviewMessage;
+export interface AlignmentQuestionMessage {
+  kind: 'alignment_question';
+  issueId: string;
+  evidenceSetHash: string;
+  targetChatId: string;
+  card: Record<string, unknown>;
+}
+
+export type OutboxMessage = IvyMeetingSummaryMessage | IvyContextReviewMessage | AlignmentQuestionMessage;
 
 export interface MeetingSummaryDeliveryAcknowledgement {
   minuteId: string;
@@ -39,6 +47,64 @@ export interface MeetingSummaryDeliveryAcknowledgement {
 
 export class OutboxRepository {
   constructor(readonly client: Database.Database) {}
+
+  enqueueAlignmentQuestion(message: AlignmentQuestionMessage, now = new Date()): { created: boolean } {
+    const issue = this.client.prepare("SELECT status, evidence_set_hash FROM alignment_issues WHERE id = ?")
+      .get(message.issueId) as { status: string; evidence_set_hash: string } | undefined;
+    if (issue?.status !== 'ready' || issue.evidence_set_hash !== message.evidenceSetHash || !message.targetChatId.trim()) {
+      throw new Error('alignment question requires a policy-approved ready issue');
+    }
+    const key = alignmentQuestionKey(message);
+    const result = this.client.prepare(`INSERT INTO outbox
+      (id, destination, payload, idempotency_key, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)
+      ON CONFLICT(idempotency_key) DO NOTHING`)
+      .run(key, message.targetChatId, JSON.stringify(message), key, now.toISOString());
+    return { created: result.changes === 1 };
+  }
+
+  listPendingAlignmentQuestions(availableAt = new Date()): AlignmentQuestionMessage[] {
+    const rows = this.client.prepare(`SELECT o.payload FROM outbox o
+      JOIN alignment_issues i ON o.idempotency_key = 'alignment-question:' || i.id || ':' || i.evidence_set_hash
+      WHERE o.status = 'pending' AND i.status = 'ready' AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= ?)
+      ORDER BY o.created_at, o.id`).all(availableAt.toISOString()) as { payload: string }[];
+    return rows.map((row) => parseOutboxMessage(row.payload)).filter((item): item is AlignmentQuestionMessage => item?.kind === 'alignment_question');
+  }
+
+  markAlignmentQuestionRetry(input: { issueId: string; evidenceSetHash: string; errorCode: string; retryAt: Date }): void {
+    const result = this.client.prepare(`UPDATE outbox SET attempt_count = attempt_count + 1,
+      next_attempt_at = ?, last_error_code = ? WHERE idempotency_key = ? AND status = 'pending'`)
+      .run(input.retryAt.toISOString(), input.errorCode, alignmentQuestionKey(input));
+    if (result.changes !== 1) throw new Error('alignment question retry lost its race');
+  }
+
+  acknowledgeAlignmentQuestionDelivery(input: { issueId: string; evidenceSetHash: string; messageId: string; deliveredAt: Date }): { updated: boolean } {
+    const messageId = input.messageId.trim();
+    if (!messageId || messageId.startsWith('pending:')) throw new Error('delivery acknowledgement requires an actual message ID');
+    return this.client.transaction(() => {
+      const key = alignmentQuestionKey(input);
+      const row = this.client.prepare('SELECT status, payload, delivered_message_id FROM outbox WHERE idempotency_key = ?')
+        .get(key) as { status: string; payload: string; delivered_message_id: string | null } | undefined;
+      const message = row ? parseOutboxMessage(row.payload) : null;
+      const issue = this.client.prepare('SELECT status, evidence_set_hash, delivered_message_id FROM alignment_issues WHERE id = ?')
+        .get(input.issueId) as { status: string; evidence_set_hash: string; delivered_message_id: string | null } | undefined;
+      if (!row || !issue || message?.kind !== 'alignment_question' || message.issueId !== input.issueId ||
+        message.evidenceSetHash !== input.evidenceSetHash || issue.evidence_set_hash !== input.evidenceSetHash) {
+        throw new Error('alignment delivery correlation mismatch');
+      }
+      if (row.status === 'delivered') {
+        if (row.delivered_message_id === messageId && issue.delivered_message_id === messageId) return { updated: false };
+        throw new Error('delivery already acknowledged with a different message ID');
+      }
+      if (row.status !== 'pending' || issue.status !== 'ready') throw new Error('alignment issue is not ready');
+      const issueUpdate = this.client.prepare("UPDATE alignment_issues SET status = 'asked', delivered_message_id = ?, updated_at = ? WHERE id = ? AND status = 'ready'")
+        .run(messageId, input.deliveredAt.toISOString(), input.issueId);
+      const outboxUpdate = this.client.prepare(`UPDATE outbox SET status = 'delivered', delivered_at = ?,
+        delivered_message_id = ?, next_attempt_at = NULL, last_error_code = NULL
+        WHERE idempotency_key = ? AND status = 'pending'`).run(input.deliveredAt.toISOString(), messageId, key);
+      if (issueUpdate.changes !== 1 || outboxUpdate.changes !== 1) throw new Error('alignment delivery lost its race');
+      return { updated: true };
+    }).immediate();
+  }
 
   enqueueMeetingSummary(message: IvyMeetingSummaryMessage): { created: boolean } {
     const idempotencyKey = `minute-summary:${message.minuteId}`;
@@ -235,6 +301,10 @@ function parseOutboxMessage(payload: string): OutboxMessage | null {
   let value: unknown;
   try { value = JSON.parse(payload); } catch { return null; }
   if (!isRecord(value) || typeof value.kind !== 'string') return null;
+  if (value.kind === 'alignment_question' && typeof value.issueId === 'string' &&
+    typeof value.evidenceSetHash === 'string' && typeof value.targetChatId === 'string' && isRecord(value.card)) {
+    return value as unknown as AlignmentQuestionMessage;
+  }
   if (value.kind === 'ivy_meeting_summary' && typeof value.minuteId === 'string' &&
     typeof value.summaryId === 'string' && typeof value.targetChatId === 'string' && typeof value.body === 'string') {
     return value as unknown as IvyMeetingSummaryMessage;
@@ -246,6 +316,10 @@ function parseOutboxMessage(payload: string): OutboxMessage | null {
     return value as unknown as IvyContextReviewMessage;
   }
   return null;
+}
+
+function alignmentQuestionKey(input: { issueId: string; evidenceSetHash: string }): string {
+  return `alignment-question:${input.issueId}:${input.evidenceSetHash}`;
 }
 
 function isStringArray(value: unknown): value is string[] {
