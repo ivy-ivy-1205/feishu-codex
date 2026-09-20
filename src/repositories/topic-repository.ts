@@ -101,7 +101,7 @@ export class TopicRepository {
     const nextVersion = input.expectedVersion + 1;
     const versionId = topicVersionId(input.topicId, nextVersion);
 
-    return this.client.transaction(() => {
+    const append = this.client.transaction(() => {
       const current = this.client.prepare(`
         SELECT current_version FROM context_topics WHERE id = ?
       `).get(input.topicId) as { current_version: number } | undefined;
@@ -128,7 +128,13 @@ export class TopicRepository {
       `).run(nextVersion, changedAt, input.topicId, input.expectedVersion);
       if (updated.changes !== 1) throw new TopicVersionConflictError();
       return this.getVersionOrThrow(input.topicId, nextVersion);
-    })();
+    });
+    try {
+      return append.immediate();
+    } catch (error) {
+      if (isSqliteBusyError(error)) throw new TopicVersionConflictError();
+      throw error;
+    }
   }
 
   addSource(input: AddTopicSourceInput): TopicSourceLink {
@@ -364,6 +370,16 @@ function nullableText(value: string | null | undefined): string | null {
 
 function uniqueIds(ids: readonly string[]): string[] {
   return [...new Set(ids.map((id) => requiredText(id, 'evidence id')))];
+}
+
+function isSqliteBusyError(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    error.code.startsWith('SQLITE_BUSY')
+  );
 }
 
 function topicVersionId(topicId: string, versionNumber: number): string {

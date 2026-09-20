@@ -215,3 +215,4 @@
 - 2026-09-20 Founder Stream Alignment Task 3 本地回填采用调用者显式 ISO 起点与固定截止时间；dry-run 不打开数据库、只打印聚合，persist 才保存不可变消息与覆盖/缺口审计并入队。根消息和已发现话题分别分页，游标循环、权限/读取失败、已删除消息和缺转写都保留缺口；飞书原生 `audio` 归为语音，普通音频附件仍跳过。批次按消息 source ID 集合幂等，重复读取时间变化不重复入队；现有会议 worker 不消费新批次，后续分析 consumer 另行接入。仅本地 fixture 验证，未读取真实飞书、未部署。
 - 2026-09-21 Task 3 复核确认两类真实接口兼容风险：历史 post 正文既可能直接提供 title/content，也可能多语言包装；历史分页不能把缺失或异常 has_more 当成结束。修复后保留异常分页当前页的可读消息，同时保存 typed gap 与 incomplete 覆盖状态；只有明确且合法的结束标记才认定可见分页穷尽。
 - 2026-09-21 Founder Stream Alignment Task 4 新增 topic-first 不可变历史层：阶段固定为 `idea/exploring/project_candidate/active_project/paused/closed`，改名与阶段变化只追加版本并以 `expectedVersion` CAS 更新当前指针；来源/证据链接和 merge/split 等关系均为追加式记录，不删除原 topic 或证据，版本竞争统一返回 `TOPIC_VERSION_CONFLICT`。
+- 2026-09-21 Task 4 并发复核发现 SQLite DEFERRED 事务会让两个连接先读到同一 topic version，失败方可能泄露 `SQLITE_BUSY`；`appendVersion` 改用 IMMEDIATE 写序列化后再读版本，并将残余 `SQLITE_BUSY*` 统一映射为 `TOPIC_VERSION_CONFLICT`，双进程 WAL 回归锁定该领域契约。

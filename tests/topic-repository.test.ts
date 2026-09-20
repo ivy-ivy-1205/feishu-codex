@@ -1,3 +1,8 @@
+import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
@@ -48,6 +53,107 @@ function insertEvidence(
     '2026-09-01T00:01:00.000Z'
   );
   return { sourceId, evidenceId };
+}
+
+interface ConcurrentAppendResult {
+  ok: boolean;
+  versionNumber?: number;
+  name?: string;
+  code?: string;
+  message?: string;
+}
+
+function spawnConcurrentAppend(
+  databasePath: string,
+  topicId: string,
+  label: string
+): { ready: Promise<void>; start(): void; result: Promise<ConcurrentAppendResult> } {
+  const clientUrl = pathToFileURL(resolve('src/db/client.ts')).href;
+  const repositoryUrl = pathToFileURL(resolve('src/repositories/topic-repository.ts')).href;
+  const script = `
+    import { createSqliteDatabase } from ${JSON.stringify(clientUrl)};
+    import { TopicRepository } from ${JSON.stringify(repositoryUrl)};
+    const database = createSqliteDatabase(${JSON.stringify(databasePath)});
+    database.client.pragma('busy_timeout = 2000');
+    database.client.function('topic_test_pause', () => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
+      return 0;
+    });
+    process.send?.('ready');
+    process.once('message', (message) => {
+      if (message !== 'start') return;
+      let result;
+      try {
+        const version = new TopicRepository(database.client).appendVersion({
+          topicId: ${JSON.stringify(topicId)},
+          expectedVersion: 1,
+          displayName: ${JSON.stringify(`并发写入 ${label}`)},
+          stage: 'exploring',
+          outcome: null,
+          rationale: ${JSON.stringify(`并发竞争 ${label}`)},
+          evidenceIds: [],
+          changedAt: new Date(${JSON.stringify(`2026-09-02T01:00:0${label === 'A' ? '1' : '2'}.000Z`)})
+        });
+        result = { ok: true, versionNumber: version.versionNumber };
+      } catch (error) {
+        result = {
+          ok: false,
+          name: error instanceof Error ? error.name : typeof error,
+          code: error && typeof error === 'object' && 'code' in error
+            ? String(error.code)
+            : undefined,
+          message: error instanceof Error ? error.message : String(error)
+        };
+      } finally {
+        database.close();
+      }
+      process.send?.({ type: 'result', value: result }, () => process.disconnect());
+    });
+  `;
+  const child = spawn(process.execPath, [
+    '--import', 'tsx', '--input-type=module', '--eval', script
+  ], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  return concurrentAppendHandle(child);
+}
+
+function concurrentAppendHandle(
+  child: ChildProcess
+): { ready: Promise<void>; start(): void; result: Promise<ConcurrentAppendResult> } {
+  let readyResolve!: () => void;
+  let resultResolve!: (result: ConcurrentAppendResult) => void;
+  let resultReject!: (error: Error) => void;
+  let stderr = '';
+  let settled = false;
+  const ready = new Promise<void>((resolveReady) => { readyResolve = resolveReady; });
+  const result = new Promise<ConcurrentAppendResult>((resolveResult, rejectResult) => {
+    resultResolve = resolveResult;
+    resultReject = rejectResult;
+  });
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+  child.on('message', (message: unknown) => {
+    if (message === 'ready') {
+      readyResolve();
+      return;
+    }
+    if (message && typeof message === 'object' && 'type' in message &&
+      message.type === 'result' && 'value' in message) {
+      settled = true;
+      resultResolve(message.value as ConcurrentAppendResult);
+    }
+  });
+  child.on('error', (error) => {
+    settled = true;
+    resultReject(error);
+  });
+  child.on('exit', (code) => {
+    if (!settled) resultReject(new Error(`concurrent append exited ${code}: ${stderr}`));
+  });
+  return {
+    ready,
+    start: () => child.send('start'),
+    result
+  };
 }
 
 describe('TopicRepository', () => {
@@ -135,6 +241,58 @@ describe('TopicRepository', () => {
       .toEqual([1, 2]);
     expect(repository.listCurrentTopics()[0]?.currentVersion).toBe(2);
   });
+
+  it('returns TOPIC_VERSION_CONFLICT instead of a SQLite lock error for a real two-connection race', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'topic-version-race-'));
+    const databasePath = join(directory, 'topics.sqlite');
+    const database = createSqliteDatabase(databasePath);
+    try {
+      database.client.pragma('journal_mode = WAL');
+      migrateDatabase(database.client);
+      const repository = new TopicRepository(database.client);
+      const topic = repository.createTopic({
+        displayName: '买家知识库',
+        stage: 'idea',
+        createdAt: new Date('2026-09-01T01:00:00.000Z')
+      });
+      database.client.exec(`
+        CREATE TRIGGER pause_topic_version_two
+        BEFORE INSERT ON context_topic_versions
+        WHEN NEW.version_number = 2
+        BEGIN
+          SELECT topic_test_pause();
+        END
+      `);
+      database.close();
+
+      const first = spawnConcurrentAppend(databasePath, topic.id, 'A');
+      const second = spawnConcurrentAppend(databasePath, topic.id, 'B');
+      await Promise.all([first.ready, second.ready]);
+      first.start();
+      second.start();
+      const results = await Promise.all([first.result, second.result]);
+
+      expect(results.filter((result) => result.ok)).toEqual([
+        expect.objectContaining({ ok: true, versionNumber: 2 })
+      ]);
+      expect(results.filter((result) => !result.ok)).toEqual([
+        expect.objectContaining({
+          ok: false,
+          name: TopicVersionConflictError.name,
+          code: 'TOPIC_VERSION_CONFLICT',
+          message: 'TOPIC_VERSION_CONFLICT'
+        })
+      ]);
+
+      const verification = createSqliteDatabase(databasePath);
+      expect(new TopicRepository(verification.client).listVersions(topic.id)
+        .map((version) => version.versionNumber)).toEqual([1, 2]);
+      verification.close();
+    } finally {
+      if (database.client.open) database.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 10_000);
 
   it('keeps topics, versions, source links and evidence after merge and split relations', () => {
     const { database, repository } = createHarness();
