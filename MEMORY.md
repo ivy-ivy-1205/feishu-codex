@@ -216,3 +216,4 @@
 - 2026-09-21 Task 3 复核确认两类真实接口兼容风险：历史 post 正文既可能直接提供 title/content，也可能多语言包装；历史分页不能把缺失或异常 has_more 当成结束。修复后保留异常分页当前页的可读消息，同时保存 typed gap 与 incomplete 覆盖状态；只有明确且合法的结束标记才认定可见分页穷尽。
 - 2026-09-21 Founder Stream Alignment Task 4 新增 topic-first 不可变历史层：阶段固定为 `idea/exploring/project_candidate/active_project/paused/closed`，改名与阶段变化只追加版本并以 `expectedVersion` CAS 更新当前指针；来源/证据链接和 merge/split 等关系均为追加式记录，不删除原 topic 或证据，版本竞争统一返回 `TOPIC_VERSION_CONFLICT`。
 - 2026-09-21 Task 4 并发复核发现 SQLite DEFERRED 事务会让两个连接先读到同一 topic version，失败方可能泄露 `SQLITE_BUSY`；`appendVersion` 改用 IMMEDIATE 写序列化后再读版本，并将残余 `SQLITE_BUSY*` 统一映射为 `TOPIC_VERSION_CONFLICT`，双进程 WAL 回归锁定该领域契约。
+- 2026-09-21 Founder Stream Alignment Task 5 的分析边界只接收不可变群/妙记来源与有来源支撑的当前话题，不读取旧项目种子、规则或源 metadata；保留 occurredAt 防止历史承诺与后续撤回失去时间关系。名称、成果目标与当前行动要求逐字原文引用；自动归并仅允许同名、明确延续、双高置信且新旧共享证据，其余延续/拆分输出 needs_confirmation。归并器是纯决策层，不改 topic 数据库；后续 worker 负责把决定映射为版本追加与确认流程。当前仅 fake executor 验证，语义阶段判断尚未经过真实 Codex 质量验收。
