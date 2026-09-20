@@ -357,4 +357,30 @@ describe('migrateDatabase', () => {
         NULL, '', '[]', '2026-09-01')
     `).run()).toThrow(/CHECK constraint failed/);
   });
+
+  it('creates aligned constrained founder identity and perspective history tables', () => {
+    const database = createSqliteDatabase(':memory:');
+    migrateDatabase(database.client);
+    migrateDatabase(database.client);
+
+    expect(database.client.prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (
+        'founder_identities', 'topic_perspectives', 'topic_perspective_versions'
+      ) ORDER BY name
+    `).all()).toEqual([
+      { name: 'founder_identities' },
+      { name: 'topic_perspective_versions' },
+      { name: 'topic_perspectives' }
+    ]);
+    expect(() => database.client.prepare(`
+      INSERT INTO founder_identities (
+        id, founder, source_system, external_author_id, configured_at
+      ) VALUES ('founder_bad', 'invented', 'feishu', 'ou_bad', '2026-09-01')
+    `).run()).toThrow(/CHECK constraint failed/);
+    expect(() => database.client.prepare(`
+      INSERT INTO topic_perspectives (
+        id, topic_id, kind, current_version, created_at, updated_at
+      ) VALUES ('perspective_bad', 'missing_topic', 'consensus', 1, '2026-09-01', '2026-09-01')
+    `).run()).toThrow(/CHECK constraint failed/);
+  });
 });

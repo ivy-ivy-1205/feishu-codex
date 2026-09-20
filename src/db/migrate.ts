@@ -231,6 +231,47 @@ const migrationSql = `
     UNIQUE(from_topic_id, to_topic_id, relation_type)
   );
 
+  CREATE TABLE IF NOT EXISTS founder_identities (
+    id TEXT PRIMARY KEY,
+    founder TEXT NOT NULL
+      CONSTRAINT founder_identities_founder_allowed
+      CHECK(founder IN ('ivy', 'james')),
+    source_system TEXT NOT NULL,
+    external_author_id TEXT NOT NULL,
+    configured_at TEXT NOT NULL,
+    UNIQUE(source_system, external_author_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS topic_perspectives (
+    id TEXT PRIMARY KEY,
+    topic_id TEXT NOT NULL REFERENCES context_topics(id),
+    kind TEXT NOT NULL
+      CONSTRAINT topic_perspectives_kind_allowed
+      CHECK(kind IN ('ivy_view', 'james_view', 'shared_decision', 'unresolved')),
+    current_version INTEGER NOT NULL
+      CONSTRAINT topic_perspectives_current_version_positive CHECK(current_version > 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(topic_id, kind)
+  );
+
+  CREATE TABLE IF NOT EXISTS topic_perspective_versions (
+    id TEXT PRIMARY KEY,
+    perspective_id TEXT NOT NULL REFERENCES topic_perspectives(id),
+    version_number INTEGER NOT NULL
+      CONSTRAINT topic_perspective_versions_number_positive CHECK(version_number > 0),
+    statement TEXT NOT NULL,
+    confidence REAL NOT NULL
+      CONSTRAINT topic_perspective_versions_confidence_range CHECK(confidence >= 0 AND confidence <= 1),
+    evidence_ids_json TEXT NOT NULL,
+    decision_key TEXT,
+    speech_act TEXT NOT NULL
+      CONSTRAINT topic_perspective_versions_speech_act_allowed
+      CHECK(speech_act IN ('view', 'decision_proposal', 'explicit_agreement', 'explicit_disagreement')),
+    observed_at TEXT NOT NULL,
+    UNIQUE(perspective_id, version_number)
+  );
+
   CREATE TABLE IF NOT EXISTS context_extraction_runs (
     id TEXT PRIMARY KEY,
     source_set_hash TEXT NOT NULL,

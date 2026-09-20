@@ -287,6 +287,62 @@ export const contextTopicRelations = sqliteTable('context_topic_relations', {
     .on(table.fromTopicId, table.toTopicId, table.relationType)
 ]);
 
+export const founderIdentities = sqliteTable('founder_identities', {
+  id: text('id').primaryKey(),
+  founder: text('founder', { enum: ['ivy', 'james'] }).notNull(),
+  sourceSystem: text('source_system').notNull(),
+  externalAuthorId: text('external_author_id').notNull(),
+  configuredAt: text('configured_at').notNull()
+}, (table) => [
+  check('founder_identities_founder_allowed', sql`${table.founder} IN ('ivy', 'james')`),
+  uniqueIndex('founder_identities_source_author_unique')
+    .on(table.sourceSystem, table.externalAuthorId)
+]);
+
+export const topicPerspectives = sqliteTable('topic_perspectives', {
+  id: text('id').primaryKey(),
+  topicId: text('topic_id').notNull().references(() => contextTopics.id),
+  kind: text('kind', {
+    enum: ['ivy_view', 'james_view', 'shared_decision', 'unresolved']
+  }).notNull(),
+  currentVersion: integer('current_version').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull()
+}, (table) => [
+  check(
+    'topic_perspectives_kind_allowed',
+    sql`${table.kind} IN ('ivy_view', 'james_view', 'shared_decision', 'unresolved')`
+  ),
+  check('topic_perspectives_current_version_positive', sql`${table.currentVersion} > 0`),
+  uniqueIndex('topic_perspectives_topic_kind_unique').on(table.topicId, table.kind)
+]);
+
+export const topicPerspectiveVersions = sqliteTable('topic_perspective_versions', {
+  id: text('id').primaryKey(),
+  perspectiveId: text('perspective_id').notNull().references(() => topicPerspectives.id),
+  versionNumber: integer('version_number').notNull(),
+  statement: text('statement').notNull(),
+  confidence: real('confidence').notNull(),
+  evidenceIdsJson: text('evidence_ids_json').notNull(),
+  decisionKey: text('decision_key'),
+  speechAct: text('speech_act', {
+    enum: ['view', 'decision_proposal', 'explicit_agreement', 'explicit_disagreement']
+  }).notNull(),
+  observedAt: text('observed_at').notNull()
+}, (table) => [
+  check('topic_perspective_versions_number_positive', sql`${table.versionNumber} > 0`),
+  check(
+    'topic_perspective_versions_confidence_range',
+    sql`${table.confidence} >= 0 AND ${table.confidence} <= 1`
+  ),
+  check(
+    'topic_perspective_versions_speech_act_allowed',
+    sql`${table.speechAct} IN ('view', 'decision_proposal', 'explicit_agreement', 'explicit_disagreement')`
+  ),
+  uniqueIndex('topic_perspective_versions_perspective_version_unique')
+    .on(table.perspectiveId, table.versionNumber)
+]);
+
 export const contextExtractionRuns = sqliteTable('context_extraction_runs', {
   id: text('id').primaryKey(),
   sourceSetHash: text('source_set_hash').notNull(),
