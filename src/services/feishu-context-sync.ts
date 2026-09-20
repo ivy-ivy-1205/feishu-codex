@@ -32,6 +32,7 @@ export interface FeishuContextClient {
 export interface FeishuContextPage {
   messages: FeishuContextMessage[];
   nextCursor: string | null;
+  paginationStatus?: 'more' | 'exhausted' | 'invalid';
   gaps?: FeishuContextGap[];
 }
 
@@ -43,7 +44,7 @@ export interface FeishuContextSnapshot {
 
 export interface FeishuContextGap {
   code: 'MEDIA_SKIPPED' | 'IMAGE_SKIPPED' | 'MESSAGE_UNSUPPORTED' | 'MESSAGE_TEXT_UNAVAILABLE' | 'VOICE_TEXT_MISSING' | 'FILE_TEXT_UNREADABLE'
-    | 'ROOT_PAGE_UNAVAILABLE' | 'THREAD_PAGE_UNAVAILABLE' | 'PAGINATION_CURSOR_REPEATED'
+    | 'ROOT_PAGE_UNAVAILABLE' | 'THREAD_PAGE_UNAVAILABLE' | 'PAGINATION_CURSOR_REPEATED' | 'PAGINATION_STATE_INVALID'
     | 'REFERENCED_FILES_UNAVAILABLE' | 'FILE_REFERENCE_UNAVAILABLE' | 'MESSAGE_DELETED' | 'MESSAGE_TIME_INVALID' | 'MESSAGE_INVALID';
   sourceRef: string;
   reason: string;
@@ -66,7 +67,7 @@ export interface FeishuContextSyncReport {
   sourceCoverage: {
     messageIds: string[];
     fileTokens: string[];
-    pages: Array<{ kind: 'root' | 'thread'; threadId: string | null; requestCursor: string | null; nextCursor: string | null; messageIds: string[]; status: 'read' | 'unavailable' | 'cursor_repeated'; observedMessageTimeRange: { earliest: string | null; latest: string | null } }>;
+    pages: Array<{ kind: 'root' | 'thread'; threadId: string | null; requestCursor: string | null; nextCursor: string | null; messageIds: string[]; status: 'read' | 'unavailable' | 'cursor_repeated' | 'pagination_invalid'; observedMessageTimeRange: { earliest: string | null; latest: string | null } }>;
     observedMessageTimeRange: { earliest: string | null; latest: string | null };
     termination: 'next_cursor_null' | 'incomplete';
   };
@@ -165,6 +166,10 @@ export async function syncFeishuProjectContext(
       pageAudit.nextCursor = page.nextCursor;
       pageAudit.messageIds = page.messages.map((message) => message.messageId);
       gaps.push(...(page.gaps ?? []));
+      if (page.paginationStatus === 'invalid') {
+        pageAudit.status = 'pagination_invalid';
+        paginationIncomplete = true;
+      }
       for (const message of page.messages) {
         if (message.threadId) threads.add(message.threadId);
         const sourceRef = messageSourceRef(chatId, message.messageId);
@@ -226,7 +231,7 @@ export async function syncFeishuProjectContext(
           gaps.push({ code: 'MESSAGE_UNSUPPORTED', sourceRef, reason: 'message type is unsupported' });
         }
       }
-      cursor = page.nextCursor;
+      cursor = page.paginationStatus === 'invalid' ? null : page.nextCursor;
     } while (cursor !== null);
   }
   await readPages(null);
@@ -278,7 +283,7 @@ export async function syncFeishuProjectContext(
     pagesRead,
     requestedRange: { since: input.since.toISOString(), until: capturedAt },
     coverage,
-    coverageStatus: gaps.length > 0 ? 'partial' : 'visible_range_exhausted',
+    coverageStatus: gaps.length > 0 || paginationIncomplete ? 'partial' : 'visible_range_exhausted',
     sourceCoverage: {
       messageIds,
       fileTokens,

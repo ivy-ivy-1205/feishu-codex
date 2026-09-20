@@ -3,6 +3,7 @@ import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
 import { JobRepository } from '../src/repositories/job-repository.js';
+import { FeishuSdkContextClient, type FeishuSdkClientLike } from '../src/adapters/feishu-sdk.js';
 import * as backfill from '../src/services/founder-stream-backfill.js';
 import * as cli from '../src/cli/backfill-founder-stream.js';
 import type { FeishuContextClient, FeishuContextMessage } from '../src/services/feishu-context-sync.js';
@@ -44,6 +45,43 @@ function fixture() {
 }
 
 describe('founder stream backfill', () => {
+  it('persists readable SDK items but retains missing termination state as an audited gap', async () => {
+    const deps = repositories();
+    const feishu = sdkHistoryFixture({ items: [{
+      message_id: 'readable', msg_type: 'text', create_time: String(Date.parse('2026-09-01T00:00:00.000Z')),
+      body: { content: JSON.stringify({ text: 'readable despite unknown pagination' }) }
+    }] });
+    const report = await backfill.runFounderStreamBackfill({ chatId, since, now, feishu, ...deps, dryRun: false });
+    expect(report.sourcesCaptured).toBe(1);
+    expect(report.coverageStatus).toBe('partial');
+    expect(report.sourceCoverage.termination).toBe('incomplete');
+    expect(report.gaps.map((gap) => gap.code)).toContain('PAGINATION_STATE_INVALID');
+    const sources = deps.sourceRepository.listSources();
+    expect(sources.find((source) => source.sourceType === 'group_message')).toMatchObject({ contentText: 'readable despite unknown pagination' });
+    expect(sources.find((source) => source.sourceType === 'feishu_sync_coverage')?.contentText).toContain('"termination":"incomplete"');
+    expect(sources.find((source) => source.sourceType === 'feishu_sync_gap')?.contentText).toContain('PAGINATION_STATE_INVALID');
+  });
+
+  it('persists direct and multilingual SDK history post bodies through the shared immutable source path', async () => {
+    const deps = repositories();
+    const directBody = { title: '更新', content: [[{ tag: 'text', text: '已完成' }]] };
+    const feishu = sdkHistoryFixture({ has_more: false, items: [
+      { message_id: 'direct_post', msg_type: 'post', create_time: String(Date.parse('2026-09-01T00:00:00.000Z')),
+        sender: { id: 'ou_ivy', id_type: 'open_id' }, body: { content: JSON.stringify(directBody) } },
+      { message_id: 'wrapped_post', msg_type: 'post', create_time: String(Date.parse('2026-09-02T00:00:00.000Z')),
+        sender: { id: 'ou_ivy', id_type: 'open_id' }, body: { content: JSON.stringify({ zh_cn: directBody }) } }
+    ] });
+    const report = await backfill.runFounderStreamBackfill({ chatId, since, now, feishu, ...deps, dryRun: false });
+    expect(report.sourcesCaptured).toBe(2);
+    expect(report.gaps).toEqual([]);
+    const sources = deps.sourceRepository.listSources().filter((source) => source.sourceType === 'group_message');
+    expect(sources.map((source) => ({ externalId: source.externalId, contentText: source.contentText, sourceVersion: source.sourceVersion }))).toEqual([
+      { externalId: 'direct_post', contentText: '更新\n已完成', sourceVersion: 1 },
+      { externalId: 'wrapped_post', contentText: '更新\n已完成', sourceVersion: 1 }
+    ]);
+    await backfill.runFounderStreamBackfill({ chatId, since, now, feishu, ...deps, dryRun: false });
+    expect(deps.sourceRepository.listSources().filter((source) => source.sourceType === 'group_message')).toHaveLength(2);
+  });
   it('requires an explicit exact window, pages roots and threads, deduplicates and persists immutable sources', async () => {
     const deps = repositories();
     const { feishu, requests } = fixture();
@@ -127,3 +165,12 @@ describe('founder stream backfill', () => {
     }
   });
 });
+
+function sdkHistoryFixture(data: Record<string, unknown>): FeishuSdkContextClient {
+  const unused = async () => { throw new Error('unexpected fixture call'); };
+  const sdk: FeishuSdkClientLike = {
+    im: { message: { create: unused }, v1: { message: { list: async () => ({ code: 0, data }) } } },
+    minutes: { v1: { minute: { get: unused }, minuteTranscript: { get: unused } } }
+  };
+  return new FeishuSdkContextClient(sdk);
+}

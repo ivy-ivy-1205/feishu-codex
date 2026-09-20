@@ -347,12 +347,36 @@ describe('FeishuSdkApiClient', () => {
     await expect(context.listThreadMessages({ threadId: 'unknown-thread', cursor: null, since: new Date() })).rejects.toThrow();
   });
 
-  it('rejects SDK error codes and inconsistent pagination instead of returning an empty successful page', async () => {
-    for (const response of [{ code: 999, msg: 'sensitive error' }, { code: 0, data: { items: [], has_more: true } }]) {
+  it('rejects SDK error codes instead of returning an empty successful page', async () => {
+    for (const response of [{ code: 999, msg: 'sensitive error' }]) {
       const sdk = createFakeSdkClient({});
       sdk.im.v1!.message.list = async () => response;
       await expect(new FeishuSdkContextClient(sdk).listMessages({ chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', cursor: null, since: new Date() })).rejects.toThrow();
     }
+  });
+
+  it.each([
+    {}, { has_more: 'false' }, { has_more: null }, { has_more: 0 }, { has_more: {} },
+    { has_more: true }, { has_more: true, page_token: '' }, { has_more: true, page_token: '  ' },
+    { has_more: true, page_token: 123 }, { has_more: false, page_token: 123 }
+  ])('preserves a typed gap and readable items for invalid pagination fields %j', async (pagination) => {
+    const sdk = createFakeSdkClient({});
+    sdk.im.v1!.message.list = async () => ({ code: 0, data: { ...pagination, items: [{
+      message_id: 'readable', msg_type: 'text', create_time: '1783425868000', body: { content: JSON.stringify({ text: 'keep current page' }) }
+    }] } });
+    const page = await new FeishuSdkContextClient(sdk).listMessages({ chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', cursor: 'current', since: new Date() });
+    expect(page).toMatchObject({ messages: [{ text: 'keep current page' }], nextCursor: null,
+      paginationStatus: 'invalid', gaps: [{ code: 'PAGINATION_STATE_INVALID', sourceRef: 'feishu:chat:oc_a84d5b6ca478220d0a37964b50776edb:page:current' }] });
+  });
+
+  it.each([
+    { has_more: false, expectedStatus: 'exhausted', expectedCursor: null },
+    { has_more: true, page_token: 'next', expectedStatus: 'more', expectedCursor: 'next' }
+  ])('uses only explicit valid pagination state $has_more', async ({ expectedStatus, expectedCursor, ...pagination }) => {
+    const sdk = createFakeSdkClient({});
+    sdk.im.v1!.message.list = async () => ({ code: 0, data: { ...pagination, items: [] } });
+    const page = await new FeishuSdkContextClient(sdk).listMessages({ chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', cursor: null, since: new Date() });
+    expect(page).toMatchObject({ paginationStatus: expectedStatus, nextCursor: expectedCursor, gaps: [] });
   });
 
   it('rejects an unapproved group before SDK access and does not discover foreign-chat threads', async () => {
@@ -469,6 +493,17 @@ describe('FeishuSdkApiClient', () => {
       messages: [{ messageId: 'om_post_1', messageType: 'post', text: '项目更新\nOpenMontage B-roll 已完成。\n查看方案' }]
     });
   });
+
+  it('extracts readable text from an unwrapped history post body', async () => {
+    const context = new FeishuSdkContextClient(createFakeSdkClient({
+      contextMessages: [{
+        message_id: 'om_direct_post', msg_type: 'post', create_time: '1783425868000',
+        body: { content: JSON.stringify({ title: '更新', content: [[{ tag: 'text', text: '已完成' }]] }) }
+      }]
+    }));
+    const page = await context.listMessages({ chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', cursor: null, since: new Date('2026-07-01T00:00:00.000Z') });
+    expect(page.messages[0]).toMatchObject({ messageId: 'om_direct_post', messageType: 'post', text: '更新\n已完成' });
+  });
 });
 
 function createFakeSdkClient(options: {
@@ -493,7 +528,7 @@ function createFakeSdkClient(options: {
         message: {
           async list(payload) {
             options.calls?.push({ method: 'im.v1.message.list', payload });
-            return { data: { items: options.contextMessages ?? [] } };
+            return { data: { items: options.contextMessages ?? [], has_more: false } };
           }
         }
       }

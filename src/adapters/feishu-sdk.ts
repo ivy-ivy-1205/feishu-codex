@@ -9,7 +9,8 @@ import {
 import type {
   FeishuContextClient,
   FeishuContextFile,
-  FeishuContextMessage
+  FeishuContextMessage,
+  FeishuContextPage
 } from '../services/feishu-context-sync.js';
 import { approvedFeishuProjectContextChatId, FeishuContextSyncError } from '../services/feishu-context-sync.js';
 
@@ -94,7 +95,7 @@ export class FeishuSdkContextClient implements FeishuContextClient {
     return this.#listPage('thread', input.threadId, input);
   }
 
-  async #listPage(containerType: 'chat' | 'thread', containerId: string, input: { cursor: string | null; since: Date; until?: Date }) {
+  async #listPage(containerType: 'chat' | 'thread', containerId: string, input: { cursor: string | null; since: Date; until?: Date }): Promise<FeishuContextPage> {
     if (!this.#sdkClient.im.v1) {
       throw new Error('Feishu SDK context message API is unavailable');
     }
@@ -113,9 +114,11 @@ export class FeishuSdkContextClient implements FeishuContextClient {
     if (!isRecord(data) || !Array.isArray(data.items)) throw new Error('FEISHU_HISTORY_PAGE_INVALID');
     const record = data;
     const items = data.items as unknown[];
-    const nextCursor = record.has_more === false ? null
-      : typeof record.page_token === 'string' && record.page_token.trim() ? record.page_token : null;
-    if (record.has_more === true && !nextCursor) throw new Error('FEISHU_HISTORY_CURSOR_MISSING');
+    const hasCursor = typeof record.page_token === 'string' && record.page_token.trim().length > 0;
+    const tokenTypeValid = record.page_token === undefined || typeof record.page_token === 'string';
+    const paginationStatus = record.has_more === false && tokenTypeValid ? 'exhausted'
+      : record.has_more === true && hasCursor ? 'more' : 'invalid';
+    const nextCursor = paginationStatus === 'more' ? record.page_token as string : null;
     const messages = items.map(toContextMessage).filter((message): message is FeishuContextMessage => message !== null);
     for (const item of items) {
       const parsed = toContextMessage(item);
@@ -127,11 +130,16 @@ export class FeishuSdkContextClient implements FeishuContextClient {
     return {
       messages,
       nextCursor,
-      gaps: items.flatMap((item, index) => toContextMessage(item) ? [] : [{
+      paginationStatus,
+      gaps: [...items.flatMap((item, index) => toContextMessage(item) ? [] : [{
         code: 'MESSAGE_INVALID' as const,
         sourceRef: `feishu:${containerType}:${containerId}:page:${input.cursor ?? 'first'}:item:${index}`,
         reason: 'message metadata unavailable or invalid'
-      }])
+      }]), ...(paginationStatus === 'invalid' ? [{
+        code: 'PAGINATION_STATE_INVALID' as const,
+        sourceRef: `feishu:${containerType}:${containerId}:page:${input.cursor ?? 'first'}`,
+        reason: 'pagination requires explicit boolean has_more and a valid next cursor when more pages exist'
+      }] : [])]
     };
   }
 
@@ -381,9 +389,9 @@ function parseMessageText(content: string, messageType: FeishuContextMessage['me
 }
 
 function extractPostText(post: Record<string, unknown>): string | null {
-  const locale = isRecord(post.zh_cn)
-    ? post.zh_cn
-    : Object.values(post).find(isRecord);
+  const locale = Array.isArray(post.content)
+    ? post
+    : isRecord(post.zh_cn) ? post.zh_cn : Object.values(post).find(isRecord);
   if (!locale) {
     return null;
   }
