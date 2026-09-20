@@ -6,7 +6,7 @@ import { JobRepository } from '../src/repositories/job-repository.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
 import { TopicRepository } from '../src/repositories/topic-repository.js';
 import { createFounderStreamRuntime } from '../src/services/founder-stream-worker.js';
-import type { FounderStreamInput } from '../src/ports/founder-stream-analyzer.js';
+import type { FounderStreamInput, TopicProposal } from '../src/ports/founder-stream-analyzer.js';
 import { captureGroupMessageSource } from '../src/services/group-message-source-capture.js';
 import { buildFounderStreamInput, saveFounderEvidence } from '../src/services/founder-stream-worker.js';
 import { AlignmentRepository } from '../src/repositories/alignment-repository.js';
@@ -43,6 +43,45 @@ function event(id = 'om_1', eventId = `evt_${id}`, thread = '', sender = 'user',
       content: JSON.stringify({ text: `知识库 ${id}` }), create_time: String(start.getTime()) } } };
 }
 describe('founder stream durable wiring', () => {
+  it('aggregates every same-target protected proposal once with stable deduplicated evidence and suggestions',async()=>{
+    const run=async(reverse:boolean)=>{
+      const h=harness();new AlignmentRepository(h.db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:start});
+      const capture=(id:string,text:string)=>h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:id,threadId:null,rootId:null,
+        author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text,occurredAt:start.toISOString()},start).source).source;
+      const originals=['知识库','网站'].map((name,index)=>{
+        const source=capture(`om_prior_${index}`,name);
+        return{source,topic:h.topics.createTopic({displayName:name,stage:'idea',evidenceIds:[saveFounderEvidence(h.sources,source.id,name,start)],createdAt:start})};
+      });
+      const outbox=new OutboxRepository(h.db.client);
+      const map=renderFounderWorkMap({since:'2026-09-01T00:00:00Z',until:start.toISOString(),topics:originals.map(({topic})=>({...topic,evidence:[]})),uncertainGrouping:[],coverageGaps:[]})[0]!;
+      outbox.enqueueFounderWorkMap({...map,mapId:'multi',targetChatId:chat},start);outbox.acknowledgeFounderWorkMapDelivery({mapId:'multi',page:1,messageId:'om_multi_map',deliveredAt:start});
+      const proposals:TopicProposal[]=[];const sourceIds=originals.map(o=>o.source.id);
+      for(const {topic} of originals){
+        expect(applyTopicCorrection({chatId:chat,openId:'ou_ivy',messageId:`om_pause_${topic.id}`,replyTo:'om_multi_map',text:`${topic.displayName} 暂停`,occurredAt:new Date(start.getTime()+1000).toISOString()},
+          {kind:'pause_topic',topic:{id:topic.id,expectedVersion:1}},{client:h.db.client,approvedChatIds:[chat],now:()=>new Date(start.getTime()+1000)}).kind).toBe('corrected');
+        for(const variant of ['A','B']){
+          const name=`${topic.displayName}方案${variant}`;const source=capture(`om_${topic.id}_${variant}`,name);sourceIds.push(source.id);
+          proposals.push({displayName:name,stage:'idea',outcome:null,currentAction:null,confidence:'high',sourceIds:[source.id],evidenceExcerpts:[{sourceId:source.id,excerpt:name}],
+            joinDecision:{kind:'exact_continuation',topicId:topic.id,confidence:'high',sharedTerms:[topic.displayName]},splitSuggestions:[]});
+        }
+      }
+      proposals.push(proposals[0]!);if(reverse)proposals.reverse();
+      const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>new Date(start.getTime()+600_000),analyzer:{async analyze(){return{topics:proposals}}}});
+      const batch={chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[...sourceIds,sourceIds[0]!],capturedAt:start};
+      const queued=h.jobs.enqueueFounderStreamBatch(batch);await runtime.runOnce();
+      expect(h.db.client.prepare('SELECT status FROM batch_jobs WHERE stable_key=?').get(queued.key)).toEqual({status:'completed'});
+      expect(h.jobs.enqueueFounderStreamBatch(batch).created).toBe(false);await runtime.runOnce();
+      const current=h.topics.listCurrentTopics();expect(current).toHaveLength(2);
+      for(const topic of current){
+        expect(topic.currentVersion).toBe(3);expect(topic.stage).toBe('paused');expect(topic.evidenceIds).toHaveLength(4);
+        expect(new Set(topic.evidenceIds).size).toBe(4);
+        expect(JSON.parse(topic.rationale).suggestions.map((s:{displayName:string})=>s.displayName)).toEqual([`${topic.displayName}方案A`,`${topic.displayName}方案B`]);
+        expect(h.topics.listVersions(topic.id)).toHaveLength(3);
+      }
+      await h.app.close();h.db.close();return current;
+    };
+    expect(await run(false)).toEqual(await run(true));
+  });
   it.each(['pause_topic','reclassify_stage','rename_topic'] as const)('keeps %s authoritative against old and newer automatic proposals', async kind => {
     const h=harness();new AlignmentRepository(h.db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:start});
     const original=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_old',threadId:null,rootId:null,

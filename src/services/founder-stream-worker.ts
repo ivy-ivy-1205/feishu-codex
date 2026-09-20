@@ -20,7 +20,7 @@ import { captureMinuteTranscriptSource } from './context-source-capture.js';
 import { PerspectiveReconciler } from './perspective-reconciler.js';
 import { AlignmentDetector } from './alignment-detector.js';
 import { renderAlignmentQuestion } from './alignment-question-renderer.js';
-import { stableId } from './canonical-json.js';
+import { canonicalJson, stableId } from './canonical-json.js';
 import { topicCorrectionSchema } from './topic-correction-service.js';
 import type { CurrentTopic, TopicVersion } from '../domain/topic.js';
 import type { FeishuContextGap } from './feishu-context-sync.js';
@@ -149,6 +149,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         const prepared = plan.topics.map(item => ({ item,
           topicId: item.topicId ?? stableId('topic', `${new Date(plannedAt.getTime()+item.proposalIndex).toISOString()}\n${item.proposal.displayName.trim()}`),
           ids: item.evidenceExcerpts.map(e => saveFounderEvidence(sources,e.sourceId,e.excerpt,plannedAt)) }));
+        const byTopic = new Map<string, typeof prepared>();
+        for(const row of prepared) byTopic.set(row.topicId,[...(byTopic.get(row.topicId) ?? []),row]);
         const scopedEvidence = new Map<string, { id:string;sourceId:string;topicIds:string[];excerpt:string;founder:'ivy'|'james'|null }>();
         for (const row of prepared) {
           const previous = input.currentTopics.find(t=>t.id===row.topicId)?.evidenceExcerpts ?? [];
@@ -161,7 +163,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           }
         }
         const perspectiveResult = options.perspectiveAnalyzer && prepared.length ? await options.perspectiveAnalyzer.analyze({
-          sourceIds:input.sources.map(s=>s.id),topicIds:prepared.map(p=>p.topicId),evidence:[...scopedEvidence.values()]
+          sourceIds:input.sources.map(s=>s.id),topicIds:[...byTopic.keys()].sort(),evidence:[...scopedEvidence.values()]
         }) : { observations:[],alignmentProposals:[] };
         const assertScoped = (topicId:string,evidenceIds:readonly string[]) => {
           if(!prepared.some(p=>p.topicId===topicId) || evidenceIds.some(id=>!scopedEvidence.get(id)?.topicIds.includes(topicId)))
@@ -169,15 +171,21 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         };
         options.client.transaction(() => {
           const stamp = now(); if (!options.jobRepository.ownsLease(job, stamp)) throw new LeaseLostError(job.key);
-          for (const {item,ids} of prepared) {
+          // One CAS/version per target. Several validated suggestions can point
+          // to the same human-protected topic; none may overwrite or drop another.
+          for (const [,rows] of [...byTopic.entries()].sort(([a],[b])=>a.localeCompare(b))) {
+            const {item}=rows[0]!;
             const old = item.topicId ? topics.listCurrentTopics().find(t => t.id === item.topicId) : undefined;
-            const evidenceIds = [...new Set([...(old?.evidenceIds ?? []), ...ids])];
+            const evidenceIds = [...new Set([...(old?.evidenceIds ?? []), ...rows.flatMap(row=>row.ids)])].sort();
             const authority = old ? topicAuthority(options.client, topics, old) : null;
-            const rationale = JSON.stringify({ origin: 'founder_stream', jobKey: job.key, needsConfirmation: item.relations,
+            const suggestions = authority ? stableUnique(rows.map(row=>({status:'needs_confirmation',
+              displayName:row.item.proposal.displayName,stage:row.item.proposal.stage,outcome:row.item.proposal.outcome,
+              currentAction:row.item.proposal.currentAction,evidenceIds:[...new Set(row.ids)].sort(),
+              evidenceAfterCorrection:row.item.proposal.evidenceExcerpts.every(e=>Date.parse(sources.getSource(e.sourceId)!.occurredAt)>Date.parse(authority.occurredAt))}))) : [];
+            const rationale = JSON.stringify({ origin: 'founder_stream', jobKey: job.key, needsConfirmation: stableUnique(rows.flatMap(row=>row.item.relations)),
               ...(authority ? { humanAuthority: { correctionId: authority.correctionId, evidenceId: authority.evidenceId,
-                occurredAt: authority.occurredAt }, suggestion: { status: 'needs_confirmation',
-                displayName: item.proposal.displayName, stage: item.proposal.stage, outcome: item.proposal.outcome,
-                evidenceAfterCorrection: item.proposal.evidenceExcerpts.every(e => Date.parse(sources.getSource(e.sourceId)!.occurredAt) > Date.parse(authority.occurredAt)) } } : {}) });
+                occurredAt: authority.occurredAt }, suggestions,
+                ...(suggestions.length===1?{suggestion:suggestions[0]}:{}) } : {}) });
             if (item.action === 'join') topics.appendVersion({ topicId: item.topicId!, expectedVersion: item.expectedVersion!,
               displayName: authority?.snapshot.displayName ?? item.proposal.displayName,
               stage: authority?.snapshot.stage ?? item.proposal.stage,
@@ -331,6 +339,10 @@ export function buildFounderStreamInput(sources: ContextSourceRepository, topics
 }
 function minuteEligible(source:ContextSourceRecord,chatId:string):boolean {
   return source.metadata.founderStreamEligible===true && source.metadata.founderStreamChatId===chatId;
+}
+function stableUnique<T>(values:readonly T[]):T[] {
+  return [...new Map(values.map(value=>[canonicalJson(value),value])).entries()]
+    .sort(([a],[b])=>a.localeCompare(b)).map(([,value])=>value);
 }
 function topicAuthority(client: Database.Database, topics: TopicRepository, topic: CurrentTopic): {
   snapshot: TopicVersion | CurrentTopic; correctionId:string|null; evidenceId:string|null; occurredAt:string;
