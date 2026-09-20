@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
+import { canonicalJson, sha256 } from '../src/services/canonical-json.js';
 import { captureMinuteTranscriptSource } from '../src/services/context-source-capture.js';
 
 const sourceInput = {
@@ -62,6 +63,41 @@ describe('ContextSourceRepository', () => {
     expect(repository.getSource(saved.id)?.availabilityStatus).toBe('deleted');
   });
 
+  it('reuses legacy minute evidence stored before discriminated locators', () => {
+    const database = createSqliteDatabase(':memory:');
+    migrateDatabase(database.client);
+    const repository = new ContextSourceRepository(database.client);
+    const source = repository.saveSource(sourceInput).source;
+    const excerpt = 'Phase 1E 已进入实现。';
+    const legacyLocator = {
+      segmentOrdinal: 0,
+      sourceVersion: 1,
+      contentHash: source.contentHash,
+      speakerName: 'Ivy',
+      startMs: 0,
+      endMs: 1000
+    };
+    database.client.prepare(`
+      INSERT INTO context_evidence (
+        id, source_id, source_version, excerpt, locator_json, excerpt_hash,
+        evidence_level, captured_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('ctxev_legacy', source.id, 1, excerpt, canonicalJson(legacyLocator), sha256(excerpt),
+      'primary_statement', sourceInput.capturedAt.toISOString());
+
+    const replay = repository.saveEvidence({
+      sourceId: source.id,
+      excerpt,
+      locator: legacyLocator,
+      evidenceLevel: 'primary_statement',
+      capturedAt: sourceInput.capturedAt
+    });
+
+    expect(replay).toMatchObject({ created: false, evidence: { id: 'ctxev_legacy' } });
+    expect(replay.evidence.locator).toMatchObject({ kind: 'minute_segment', segmentOrdinal: 0 });
+    expect(database.client.prepare('SELECT COUNT(*) AS count FROM context_evidence').get()).toEqual({ count: 1 });
+  });
+
   it('persists evidence against real multiline segment boundaries and continuation lines', () => {
     const database = createSqliteDatabase(':memory:');
     migrateDatabase(database.client);
@@ -87,9 +123,52 @@ describe('ContextSourceRepository', () => {
         speakerName: 'James', startMs: 0, endMs: 1 }, capturedAt: sourceInput.capturedAt
     });
 
-    expect(laterSegment.evidence.locator.segmentOrdinal).toBe(1);
+    expect(laterSegment.evidence.locator).toMatchObject({ kind: 'minute_segment', segmentOrdinal: 1 });
     expect(continuationLine.evidence.excerpt).toBe('第二行');
     expect(database.client.prepare('SELECT COUNT(*) AS count FROM context_evidence').get()).toEqual({ count: 2 });
+  });
+
+  it('binds group-message evidence to stable message and thread identity', () => {
+    const database = createSqliteDatabase(':memory:');
+    migrateDatabase(database.client);
+    const repository = new ContextSourceRepository(database.client);
+    const capturedAt = new Date('2026-09-01T00:01:00.000Z');
+    const source = repository.saveSource({
+      sourceSystem: 'feishu',
+      sourceType: 'group_message',
+      externalId: 'om_1',
+      logicalKey: 'feishu:chat:oc_a84d5b6ca478220d0a37964b50776edb:message:om_1',
+      occurredAt: '2026-09-01T00:00:00.000Z',
+      authors: [{ openId: 'ou_ivy', displayName: 'Ivy' }],
+      locatorUri: 'https://applink.feishu.cn/client/message/open?chatId=oc_a84d5b6ca478220d0a37964b50776edb&messageId=om_1',
+      contentFormat: 'text/plain',
+      contentText: '先做页面预览',
+      metadata: {
+        chatId: 'oc_a84d5b6ca478220d0a37964b50776edb',
+        messageId: 'om_1',
+        threadId: 'omt_1',
+        rootId: 'om_root',
+        messageType: 'text'
+      },
+      availabilityStatus: 'available',
+      capturedAt
+    }).source;
+    const locator = {
+      kind: 'group_message' as const,
+      sourceVersion: 1,
+      contentHash: source.contentHash,
+      chatId: 'oc_a84d5b6ca478220d0a37964b50776edb',
+      messageId: 'om_1',
+      threadId: 'omt_1',
+      authorOpenId: 'ou_ivy',
+      occurredAt: '2026-09-01T00:00:00.000Z'
+    };
+
+    expect(repository.saveEvidence({ sourceId: source.id, excerpt: '先做页面预览', locator,
+      evidenceLevel: 'primary_statement', capturedAt })).toMatchObject({
+      created: true,
+      evidence: { locator }
+    });
   });
 
   it.each([

@@ -26,18 +26,57 @@ export const contextProjectMappingStatusSchema = z.enum([
   'mapped', 'needs_confirmation', 'unmapped', 'conflict'
 ]);
 
-export const transcriptEvidenceLocatorSchema = z.object({
+const transcriptEvidenceLocatorFields = {
   segmentOrdinal: z.number().int().nonnegative(),
   sourceVersion: z.number().int().positive(),
   contentHash: z.string().regex(/^[a-f0-9]{64}$/),
   speakerName: z.string().trim().min(1),
   startMs: z.number().int().nonnegative(),
   endMs: z.number().int().nonnegative()
-}).strict().superRefine((locator, context) => {
+} as const;
+
+function validateMinuteRange(locator: { startMs: number; endMs: number }, context: z.RefinementCtx): void {
   if (locator.endMs < locator.startMs) {
     context.addIssue({ code: 'custom', path: ['endMs'], message: 'endMs must not precede startMs' });
   }
-});
+}
+
+export const transcriptEvidenceLocatorSchema = z.object(transcriptEvidenceLocatorFields)
+  .strict().superRefine(validateMinuteRange);
+
+export const minuteSegmentEvidenceLocatorSchema = z.object({
+  kind: z.literal('minute_segment'),
+  ...transcriptEvidenceLocatorFields
+}).strict().superRefine(validateMinuteRange);
+
+export const groupMessageEvidenceLocatorSchema = z.object({
+  kind: z.literal('group_message'),
+  sourceVersion: z.number().int().positive(),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  chatId: z.string().trim().min(1),
+  messageId: z.string().trim().min(1),
+  threadId: z.string().trim().min(1).nullable(),
+  authorOpenId: z.string().trim().min(1).nullable(),
+  occurredAt: z.string().datetime({ offset: true })
+}).strict();
+
+const discriminatedContextEvidenceLocatorSchema = z.discriminatedUnion('kind', [
+  minuteSegmentEvidenceLocatorSchema,
+  groupMessageEvidenceLocatorSchema
+]);
+
+function withLegacyMinuteKind(locator: unknown): unknown {
+  if (locator && typeof locator === 'object' && !Array.isArray(locator) &&
+    !Object.prototype.hasOwnProperty.call(locator, 'kind')) {
+    return { ...locator, kind: 'minute_segment' };
+  }
+  return locator;
+}
+
+export const contextEvidenceLocatorSchema = z.preprocess(
+  withLegacyMinuteKind,
+  discriminatedContextEvidenceLocatorSchema
+);
 
 export const initialFactualStatusByCandidateType = {
   proposal: 'source_attested', decision: 'source_attested', requirement: 'source_attested',
@@ -75,4 +114,8 @@ export type ContextExtractionSourceRole = z.infer<typeof contextExtractionSource
 export type ContextProjectConfidence = z.infer<typeof contextProjectConfidenceSchema>;
 export type ContextProjectRole = z.infer<typeof contextProjectRoleSchema>;
 export type ContextProjectMappingStatus = z.infer<typeof contextProjectMappingStatusSchema>;
+export type MinuteSegmentEvidenceLocator = z.infer<typeof minuteSegmentEvidenceLocatorSchema>;
+export type GroupMessageEvidenceLocator = z.infer<typeof groupMessageEvidenceLocatorSchema>;
+export type ContextEvidenceLocator = z.infer<typeof contextEvidenceLocatorSchema>;
 export type TranscriptEvidenceLocator = z.infer<typeof transcriptEvidenceLocatorSchema>;
+export type ContextEvidenceLocatorInput = ContextEvidenceLocator | TranscriptEvidenceLocator;

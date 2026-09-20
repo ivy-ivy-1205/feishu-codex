@@ -1,5 +1,8 @@
 import {
+  contextEvidenceLocatorSchema,
   transcriptEvidenceLocatorSchema,
+  type ContextEvidenceLocator,
+  type GroupMessageEvidenceLocator,
   type TranscriptEvidenceLocator
 } from '../domain/context.js';
 
@@ -8,6 +11,10 @@ interface TranscriptEvidenceSource {
   contentHash: string;
   contentText: string;
   metadata: Record<string, unknown>;
+  sourceType?: string;
+  externalId?: string;
+  occurredAt?: string;
+  authors?: readonly Record<string, unknown>[];
 }
 
 interface NormalizedTranscriptSegment {
@@ -33,6 +40,45 @@ export function validateTranscriptEvidenceLocator(
   if (!segment || segment.segmentOrdinal !== locator.segmentOrdinal ||
     segment.speakerName !== locator.speakerName || segment.startMs !== locator.startMs ||
     segment.endMs !== locator.endMs || !excerpt.trim() || !segment.text.includes(excerpt)) {
+    throw new Error('CONTEXT_EVIDENCE_LOCATOR_INVALID');
+  }
+  return locator;
+}
+
+export function validateContextEvidenceLocator(
+  source: TranscriptEvidenceSource | null,
+  excerpt: string,
+  locatorInput: unknown
+): ContextEvidenceLocator {
+  if (!source) throw new Error('CONTEXT_EVIDENCE_SOURCE_NOT_FOUND');
+  const locator = contextEvidenceLocatorSchema.parse(locatorInput);
+  if (locator.kind === 'minute_segment') {
+    const { kind: _kind, ...legacyLocator } = locator;
+    validateTranscriptEvidenceLocator(source, excerpt, legacyLocator);
+    return locator;
+  }
+  return validateGroupMessageEvidenceLocator(source, excerpt, locator);
+}
+
+function validateGroupMessageEvidenceLocator(
+  source: TranscriptEvidenceSource,
+  excerpt: string,
+  locator: GroupMessageEvidenceLocator
+): GroupMessageEvidenceLocator {
+  if (locator.sourceVersion !== source.sourceVersion || locator.contentHash !== source.contentHash) {
+    throw new Error('CONTEXT_EVIDENCE_SOURCE_BINDING_INVALID');
+  }
+  const storedThreadId = typeof source.metadata.threadId === 'string' ? source.metadata.threadId : null;
+  const storedMessageId = typeof source.metadata.messageId === 'string'
+    ? source.metadata.messageId
+    : source.externalId;
+  const authorMatches = source.authors?.some((author) =>
+    (typeof author.openId === 'string' ? author.openId : null) === locator.authorOpenId
+  ) ?? false;
+  if (source.sourceType !== 'group_message' || source.metadata.chatId !== locator.chatId ||
+    storedMessageId !== locator.messageId || source.externalId !== locator.messageId ||
+    storedThreadId !== locator.threadId || source.occurredAt !== locator.occurredAt ||
+    !authorMatches || !excerpt.trim() || !source.contentText.includes(excerpt)) {
     throw new Error('CONTEXT_EVIDENCE_LOCATOR_INVALID');
   }
   return locator;

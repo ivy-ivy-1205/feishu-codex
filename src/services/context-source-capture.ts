@@ -40,6 +40,15 @@ export interface CapturedMinuteSource {
   }[];
 }
 
+export function assertContextSourceBytesWithinLimit(
+  contentText: string,
+  limits?: Pick<ContextSourceCaptureLimits, 'maxBytes'>
+): void {
+  if (limits && Buffer.byteLength(contentText, 'utf8') > limits.maxBytes) {
+    throw new ContextSourceCaptureError('CONTEXT_SOURCE_BYTES_EXCEEDED');
+  }
+}
+
 export function captureMinuteTranscriptSource(
   context: MinuteContext,
   capturedAt: Date,
@@ -54,9 +63,7 @@ export function captureMinuteTranscriptSource(
   const contentText = context.transcript.map((segment) =>
     `${segment.speakerName} [${segment.startMs}-${segment.endMs}]: ${segment.text}`
   ).join('\n');
-  if (limits && Buffer.byteLength(contentText, 'utf8') > limits.maxBytes) {
-    throw new ContextSourceCaptureError('CONTEXT_SOURCE_BYTES_EXCEEDED');
-  }
+  assertContextSourceBytesWithinLimit(contentText, limits);
   return {
     source: {
       sourceSystem: 'feishu',

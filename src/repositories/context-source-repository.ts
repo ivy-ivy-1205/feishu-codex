@@ -1,11 +1,12 @@
 import type Database from 'better-sqlite3';
 import {
-  transcriptEvidenceLocatorSchema,
+  contextEvidenceLocatorSchema,
+  type ContextEvidenceLocator,
+  type ContextEvidenceLocatorInput,
   type ContextEvidenceLevel,
-  type TranscriptEvidenceLocator
 } from '../domain/context.js';
 import { canonicalJson, sha256, stableId } from '../services/canonical-json.js';
-import { validateTranscriptEvidenceLocator } from '../services/context-evidence-locator.js';
+import { validateContextEvidenceLocator } from '../services/context-evidence-locator.js';
 
 export type ContextSourceAvailability = 'available' | 'deleted' | 'permission_lost' | 'unknown';
 
@@ -45,7 +46,7 @@ export interface ContextSourceRecord {
 export interface SaveEvidenceInput {
   sourceId: string;
   excerpt: string;
-  locator: TranscriptEvidenceLocator;
+  locator: ContextEvidenceLocatorInput;
   evidenceLevel: ContextEvidenceLevel;
   capturedAt: Date;
 }
@@ -55,7 +56,7 @@ export interface ContextEvidenceRecord {
   sourceId: string;
   sourceVersion: number;
   excerpt: string;
-  locator: TranscriptEvidenceLocator;
+  locator: ContextEvidenceLocator;
   excerptHash: string;
   evidenceLevel: ContextEvidenceLevel;
   capturedAt: string;
@@ -112,9 +113,14 @@ export class ContextSourceRepository {
   saveEvidence(input: SaveEvidenceInput): { created: boolean; evidence: ContextEvidenceRecord } {
     const source = this.getSourceOrThrow(input.sourceId);
     const excerpt = input.excerpt.trim();
-    const locator = validateTranscriptEvidenceLocator(source, excerpt, input.locator);
+    const locator = validateContextEvidenceLocator(source, excerpt, input.locator);
     const locatorJson = canonicalJson(locator);
     const excerptHash = sha256(excerpt);
+    if (locator.kind === 'minute_segment') {
+      const { kind: _kind, ...legacyLocator } = locator;
+      const legacy = this.findEvidence(source.id, excerptHash, canonicalJson(legacyLocator));
+      if (legacy) return { created: false, evidence: legacy };
+    }
     const id = stableId('ctxev', `${source.id}\n${locatorJson}\n${excerptHash}`);
     const result = this.client.prepare(`
       INSERT INTO context_evidence (
@@ -240,5 +246,5 @@ interface EvidenceRow { id: string; source_id: string; source_version: number; e
 interface RunRow { id: string; source_set_hash: string; extractor_name: string; extractor_version: string; prompt_version: string; status: ContextExtractionRunRecord['status']; error_code: string | null; started_at: string; completed_at: string | null }
 
 function toSourceRecord(row: SourceRow): ContextSourceRecord { return { id: row.id, sourceSystem: row.source_system, sourceType: row.source_type, externalId: row.external_id, logicalKey: row.logical_key, sourceVersion: row.source_version, occurredAt: row.occurred_at, authors: JSON.parse(row.authors_json) as Record<string, unknown>[], locatorUri: row.locator_uri, contentFormat: row.content_format, contentText: row.content_text, metadata: JSON.parse(row.metadata_json) as Record<string, unknown>, contentHash: row.content_hash, availabilityStatus: row.availability_status, capturedAt: row.captured_at }; }
-function toEvidenceRecord(row: EvidenceRow): ContextEvidenceRecord { return { id: row.id, sourceId: row.source_id, sourceVersion: row.source_version, excerpt: row.excerpt, locator: transcriptEvidenceLocatorSchema.parse(JSON.parse(row.locator_json)), excerptHash: row.excerpt_hash, evidenceLevel: row.evidence_level, capturedAt: row.captured_at }; }
+function toEvidenceRecord(row: EvidenceRow): ContextEvidenceRecord { return { id: row.id, sourceId: row.source_id, sourceVersion: row.source_version, excerpt: row.excerpt, locator: contextEvidenceLocatorSchema.parse(JSON.parse(row.locator_json)), excerptHash: row.excerpt_hash, evidenceLevel: row.evidence_level, capturedAt: row.captured_at }; }
 function toRunRecord(row: RunRow): ContextExtractionRunRecord { return { id: row.id, sourceSetHash: row.source_set_hash, extractorName: row.extractor_name, extractorVersion: row.extractor_version, promptVersion: row.prompt_version, status: row.status, errorCode: row.error_code, startedAt: row.started_at, completedAt: row.completed_at }; }
