@@ -8,13 +8,18 @@ import { JobRepository } from '../repositories/job-repository.js';
 import { runFounderStreamBackfill, validateFounderStreamWindow,
   type FounderStreamBackfillInput } from '../services/founder-stream-backfill.js';
 
-export function parseBackfillArguments(args: string[]): { chatId: string; since: string; dryRun: boolean } {
+export function parseBackfillArguments(args: string[]): { chatId: string; since: string; until?: string; dryRun: boolean } {
   const { values } = parseArgs({ args: args[0] === '--' ? args.slice(1) : args, strict: true,
-    options: { 'chat-id': { type: 'string' }, since: { type: 'string' }, 'dry-run': { type: 'boolean' }, persist: { type: 'boolean' } } });
+    options: { 'chat-id': { type: 'string' }, since: { type: 'string' }, until: { type: 'string' }, 'dry-run': { type: 'boolean' }, persist: { type: 'boolean' } } });
   if (!values['chat-id'] || !values.since || Boolean(values['dry-run']) === Boolean(values.persist)) {
     throw new Error('require --chat-id <approved-id> --since <ISO> and exactly one of --dry-run or --persist');
   }
-  return { chatId: values['chat-id'], since: values.since, dryRun: values['dry-run'] === true };
+  if (values.until !== undefined) {
+    validateFounderStreamWindow(values['chat-id'], values.until, new Date(values.until));
+    validateFounderStreamWindow(values['chat-id'], values.since, new Date(values.until));
+    if (Date.parse(values.until) <= Date.parse(values.since)) throw new Error('FOUNDER_STREAM_RANGE_INVALID');
+  }
+  return { chatId: values['chat-id'], since: values.since, ...(values.until === undefined ? {} : { until: values.until }), dryRun: values['dry-run'] === true };
 }
 
 type CliDependencies = Omit<FounderStreamBackfillInput, 'chatId' | 'since' | 'dryRun'> & { write: (line: string) => void };
@@ -38,6 +43,7 @@ async function main(): Promise<void> {
   const options = parseBackfillArguments(args);
   const now = new Date();
   validateFounderStreamWindow(options.chatId, options.since, now);
+  if (options.until) validateFounderStreamWindow(options.chatId, options.until, now);
   const appId = process.env.FEISHU_APP_ID?.trim();
   const appSecret = process.env.FEISHU_APP_SECRET?.trim();
   if (!appId || !appSecret) throw new Error('Feishu app configuration required');

@@ -17,7 +17,7 @@ import { MeetingRepository } from './repositories/meeting-repository.js';
 import { OAuthTokenRepository } from './repositories/oauth-token-repository.js';
 import { OutboxRepository } from './repositories/outbox-repository.js';
 import { ProjectRepository } from './repositories/project-repository.js';
-import { createServiceReadiness } from './routes/health.js';
+import { createPipelineReadiness } from './routes/health.js';
 import { FeishuOAuthService, InMemoryOAuthStateStore } from './services/feishu-oauth.js';
 import { ingestMinuteGenerated } from './services/minute-ingestion.js';
 import { TokenCrypto } from './services/oauth-token-crypto.js';
@@ -144,15 +144,16 @@ workerRuntime.start();
 if (!config.worker.enabled) founderRuntime.start();
 
 const app = buildApp({
-  readiness: createServiceReadiness({
+  readiness: createPipelineReadiness({
     checkDatabase: () => database.client.prepare('SELECT 1').get(),
-    isFeishuReaderAvailable: () => config.worker.enabled,
-    isFeishuDeliveryAvailable: () => config.worker.enabled,
-    isWorkerConsumptionAvailable: () => workerRuntime.isConsumptionAvailable(),
-    isCodexAuthAvailable: async () =>
-      (config.codex.summarizerMode === 'codex' || config.context.candidatesEnabled || config.founderStream.analysisEnabled) &&
-      await codexAuthProbe.isAvailable()
+    meetingEnabled: config.worker.enabled,
+    founderFlags: config.founderStream,
+    meetingConsumerAvailable: () => workerRuntime.isConsumptionAvailable(),
+    founderConsumerAvailable: () => founderRuntime.isConsumptionAvailable(),
+    meetingCodexRequired: config.codex.summarizerMode === 'codex' || config.context.candidatesEnabled,
+    isCodexAuthAvailable: () => codexAuthProbe.isAvailable()
   }),
+  founderStreamDiagnostics: { client: database.client },
   projectRepository,
   ...(contextRuntime ? {
     context: {

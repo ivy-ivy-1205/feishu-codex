@@ -312,8 +312,14 @@ describe('migrateDatabase', () => {
         confidence_hint, priority, source, active, created_at, updated_at
       ) VALUES (
         'system:amy-live', 'Amy Live', 'keyword', 'realagent-ai-cc', 'amy-voice',
-        'high', 100, 'system', 1, '2026-07-31', '2026-07-31'
+        'high', 100, 'system', 0, '2026-07-31', '2026-07-31'
       );
+      UPDATE projects SET status='archived' WHERE project_key='openmontage';
+      INSERT INTO project_mapping_rules (
+        id, pattern, pattern_kind, project_key, subproject_key,
+        confidence_hint, priority, source, active, created_at, updated_at
+      ) VALUES ('ivy:correction', '已纠正的归属', 'keyword', 'feishu-adaptor', NULL,
+        'high', 200, 'ivy_correction', 1, '2026-08-01', '2026-08-02');
     `);
 
     migrateDatabase(database.client);
@@ -323,11 +329,16 @@ describe('migrateDatabase', () => {
     expect(projectRepository.listProjects()).toHaveLength(9);
     expect(projectRepository.getProject('openmontage')).toMatchObject({
       origin: 'legacy_seed',
-      stage: 'active_project'
+      stage: 'active_project',
+      status: 'archived'
     });
-    expect(projectRepository.listMappingRules()).toEqual([
-      expect.objectContaining({ id: 'system:amy-live', active: true })
-    ]);
+    expect(projectRepository.listMappingRules()).toHaveLength(2);
+    expect(projectRepository.listMappingRules()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'system:amy-live', active: false }),
+      expect.objectContaining({ id: 'ivy:correction', source: 'ivy_correction', active: true, pattern: '已纠正的归属', projectKey: 'feishu-adaptor' })
+    ]));
+    expect(database.client.prepare("SELECT created_at, updated_at FROM project_mapping_rules WHERE id='ivy:correction'").get())
+      .toEqual({ created_at: '2026-08-01', updated_at: '2026-08-02' });
     expect(projectRepository.listDiscoveryEligibleProjects()).toEqual([]);
   });
 

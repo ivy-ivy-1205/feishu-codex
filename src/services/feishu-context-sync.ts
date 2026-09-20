@@ -79,6 +79,7 @@ export interface SyncFeishuProjectContextInput {
   chatId: string;
   approvedChatIds: readonly string[];
   since: Date;
+  until?: Date;
   feishu: FeishuContextClient;
   saveSnapshot: (snapshot: FeishuContextSnapshot) => Promise<void>;
   saveMessage?: (message: FeishuContextMessage) => Promise<void>;
@@ -109,7 +110,10 @@ export async function syncFeishuProjectContext(
     throw new FeishuContextSyncError(chatId);
   }
   const capturedAt = (input.now ?? (() => new Date()))().toISOString();
-  if (!(input.since instanceof Date) || !Number.isFinite(input.since.getTime()) || input.since.toISOString() > capturedAt) {
+  const until = input.until ?? new Date(capturedAt);
+  if (!(input.since instanceof Date) || !Number.isFinite(input.since.getTime()) ||
+    !(until instanceof Date) || !Number.isFinite(until.getTime()) ||
+    input.since > until || until.toISOString() > capturedAt) {
     throw new Error('FEISHU_HISTORY_RANGE_INVALID');
   }
 
@@ -150,7 +154,7 @@ export async function syncFeishuProjectContext(
       visited.add(cursor);
       let page: FeishuContextPage;
       try {
-        const window = { cursor: requestCursor, since: input.since, until: new Date(capturedAt) };
+        const window = { cursor: requestCursor, since: input.since, until };
         if (threadId === null) page = await input.feishu.listMessages({ chatId, ...window });
         else {
           if (!input.feishu.listThreadMessages) throw new Error('thread reader unavailable');
@@ -192,7 +196,7 @@ export async function syncFeishuProjectContext(
           gaps.push({ code: 'MESSAGE_TIME_INVALID', sourceRef, reason: 'message timestamp is unavailable or invalid' });
           continue;
         }
-        if (messageTime < input.since.toISOString() || messageTime > capturedAt) continue;
+        if (messageTime < input.since.toISOString() || messageTime > until.toISOString()) continue;
         messagesRead += 1;
         messageIds.push(message.messageId);
         if (message.deleted) {
@@ -282,7 +286,7 @@ export async function syncFeishuProjectContext(
     mediaSkipped,
     voiceTextMissing,
     pagesRead,
-    requestedRange: { since: input.since.toISOString(), until: capturedAt },
+    requestedRange: { since: input.since.toISOString(), until: until.toISOString() },
     coverage,
     coverageStatus: gaps.length > 0 || paginationIncomplete ? 'partial' : 'visible_range_exhausted',
     sourceCoverage: {

@@ -45,6 +45,23 @@ function fixture() {
 }
 
 describe('founder stream backfill', () => {
+  it('freezes the same explicit window for dry-run and persist despite later invocation time', async () => {
+    const until = '2026-09-20T00:00:00.000Z';
+    const deps = repositories();
+    const outputs: Record<string, unknown>[] = [];
+    for (const mode of ['--dry-run', '--persist']) {
+      await cli.runBackfillCli(['--chat-id', chatId, '--since', since, '--until', until, mode], {
+        ...fixture(), ...deps, now: new Date('2026-09-25T00:00:00.000Z'), write: line => outputs.push(JSON.parse(line))
+      });
+    }
+    expect(outputs.map(o => o.requestedRange)).toEqual([{ since, until }, { since, until }]);
+    expect(deps.sourceRepository.listSources().filter(s => s.sourceType === 'group_message')).toHaveLength(5);
+    expect(deps.sourceRepository.listSources().filter(s => s.sourceType === 'group_message').map(s => s.capturedAt))
+      .toEqual(Array(5).fill('2026-09-25T00:00:00.000Z'));
+    for (const invalid of ['bad-date', since, '2026-08-01T00:00:00.000Z']) {
+      expect(() => cli.parseBackfillArguments(['--chat-id', chatId, '--since', since, '--until', invalid, '--dry-run'])).toThrow();
+    }
+  });
   it('persists readable SDK items but retains missing termination state as an audited gap', async () => {
     const deps = repositories();
     const feishu = sdkHistoryFixture({ items: [{

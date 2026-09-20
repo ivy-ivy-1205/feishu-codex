@@ -8,6 +8,7 @@ import { approvedFeishuProjectContextChatId, FeishuContextSyncError, syncFeishuP
 export interface FounderStreamBackfillInput {
   chatId: string;
   since: string;
+  until?: string;
   now: Date;
   feishu: FeishuContextClient;
   sourceRepository?: ContextSourceRepository;
@@ -31,6 +32,11 @@ export function validateFounderStreamWindow(chatId: string, since: string, now: 
 
 export async function runFounderStreamBackfill(input: FounderStreamBackfillInput): Promise<FounderStreamBackfillReport> {
   validateFounderStreamWindow(input.chatId, input.since, input.now);
+  if (input.until !== undefined) {
+    validateFounderStreamWindow(input.chatId, input.until, input.now);
+    validateFounderStreamWindow(input.chatId, input.since, new Date(input.until));
+    if (Date.parse(input.until) <= Date.parse(input.since)) throw new Error('FOUNDER_STREAM_RANGE_INVALID');
+  }
   const dryRun = input.dryRun ?? true;
   const { sourceRepository, jobRepository } = input;
   if (!dryRun && (!sourceRepository || !jobRepository || sourceRepository.client !== jobRepository.client)) {
@@ -40,7 +46,7 @@ export async function runFounderStreamBackfill(input: FounderStreamBackfillInput
   const sourceIds: string[] = [];
   const report = await syncFeishuProjectContext({
     chatId: input.chatId, approvedChatIds: [approvedFeishuProjectContextChatId],
-    since: new Date(input.since), now: () => input.now, feishu: input.feishu,
+    since: new Date(input.since), ...(input.until ? { until: new Date(input.until) } : {}), now: () => input.now, feishu: input.feishu,
     saveMessage: async (message) => {
       const captured = captureGroupMessageSource({
         chatId: input.chatId, messageId: message.messageId, threadId: message.threadId ?? null,
