@@ -6,6 +6,7 @@ import type {
   PerspectiveVersion
 } from '../domain/alignment.js';
 import type { AlignmentRepository } from '../repositories/alignment-repository.js';
+import { compareEvidence, evidenceOrder, isStrictlyNewer } from './evidence-order.js';
 
 export type PerspectiveObservationSpeechAct = PerspectiveSpeechAct | 'non_decision';
 
@@ -22,7 +23,7 @@ export interface PerspectiveObservation {
 export interface PerspectiveReconciliationResult {
   founder: FounderRole | null;
   status: 'updated' | 'ignored';
-  reason: 'unknown_identity' | 'non_decision' | null;
+  reason: 'unknown_identity' | 'non_decision' | 'historical_only' | 'duplicate' | null;
   versions: readonly PerspectiveVersion[];
 }
 
@@ -33,18 +34,51 @@ export class PerspectiveReconciler {
     return this.repository.runInTransaction(() => this.reconcileInTransaction(input));
   }
 
-  private reconcileInTransaction(input: PerspectiveObservation): PerspectiveReconciliationResult {
+  reconcileBatch(inputs:readonly PerspectiveObservation[]):PerspectiveReconciliationResult[] {
+    return this.repository.runInTransaction(()=>{
+      const accepted=inputs.filter(input=>this.audit(input));
+      // Evaluate each founder's effective latest view, not model array order.
+      const effective=accepted.filter(input=>!accepted.some(other=>other.speechAct!=='non_decision' && other.topicId===input.topicId &&
+        this.repository.resolveFounderForEvidence(other.evidenceId)===this.repository.resolveFounderForEvidence(input.evidenceId) &&
+        compareEvidence(this.repository.client,other.evidenceId,input.evidenceId)===1));
+      effective.sort((a,b)=>compareEvidence(this.repository.client,a.evidenceId,b.evidenceId)??0);
+      return effective.map(input=>this.reconcileInTransaction(input,true));
+    });
+  }
+
+  private audit(input:PerspectiveObservation):boolean {
+    if(!this.repository.getAttributedFounderEvidence(input.evidenceId))return false;
+    return this.repository.client.prepare(`INSERT INTO founder_perspective_observations
+      (topic_id,evidence_id,statement,speech_act,decision_key) VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING`)
+      .run(input.topicId,input.evidenceId,input.statement,input.speechAct,input.decisionKey).changes===1;
+  }
+
+  private ambiguousSupport(perspective:CurrentPerspective):boolean {
+    const rows=this.repository.client.prepare(`SELECT evidence_id,statement,speech_act FROM founder_perspective_observations
+      WHERE topic_id=?`).all(perspective.topicId) as {evidence_id:string;statement:string;speech_act:string}[];
+    return rows.some(row=>!perspective.evidenceIds.includes(row.evidence_id) &&
+      this.repository.resolveFounderForEvidence(row.evidence_id)===(perspective.kind==='ivy_view'?'ivy':'james') &&
+      perspective.evidenceIds.some(id=>compareEvidence(this.repository.client,row.evidence_id,id)===0) &&
+      (row.statement!==perspective.statement || row.speech_act!==perspective.speechAct));
+  }
+
+  private reconcileInTransaction(input: PerspectiveObservation, audited=false): PerspectiveReconciliationResult {
     const sourceEvidence = this.repository.getAttributedFounderEvidence(input.evidenceId);
     if (!sourceEvidence) {
       return { founder: null, status: 'ignored', reason: 'unknown_identity', versions: [] };
     }
     const founder = sourceEvidence.founder;
+    if(!audited && !this.audit(input))return{founder,status:'ignored',reason:'duplicate',versions:[]};
     if (input.speechAct === 'non_decision') {
       return { founder, status: 'ignored', reason: 'non_decision', versions: [] };
     }
 
     const kind = founderViewKind(founder);
     const current = this.repository.getCurrentPerspective(input.topicId, kind);
+    if(current && !isStrictlyNewer(this.repository.client,input.evidenceId,current.evidenceIds))
+      return{founder,status:'ignored',reason:'historical_only',versions:[]};
+    const order=evidenceOrder(this.repository.client,input.evidenceId);
+    if(!order)return{founder,status:'ignored',reason:'historical_only',versions:[]};
     const version = this.repository.savePerspective({
       topicId: input.topicId,
       kind,
@@ -54,7 +88,7 @@ export class PerspectiveReconciler {
       evidenceIds: [input.evidenceId],
       decisionKey: input.decisionKey,
       speechAct: input.speechAct,
-      observedAt: input.observedAt
+      observedAt: new Date(order.occurredAt)
     });
     const versions = [version];
     const agreedDecision = input.speechAct === 'explicit_agreement' && input.decisionKey
@@ -67,6 +101,8 @@ export class PerspectiveReconciler {
         founderViewKind(otherFounder)
       );
       if (other && other.decisionKey === input.decisionKey &&
+        other.evidenceIds.every(id=>{const order=compareEvidence(this.repository.client,input.evidenceId,id);return order!==null && order>=0;}) &&
+        !this.ambiguousSupport(other) && !this.ambiguousSupport({...version,createdAt:'',updatedAt:''}) &&
         this.hasMatchingDirectSupport(other, otherFounder, agreedDecision)) {
         const shared = this.repository.getCurrentPerspective(input.topicId, 'shared_decision');
         versions.push(this.repository.savePerspective({

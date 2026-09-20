@@ -33,6 +33,7 @@ export const TranscriptSegment = z.object({
   speakerName: z.string().trim().min(1),
   // Only a verified platform identity may populate this; display names are not identities.
   speakerOpenId: z.string().trim().regex(/^ou_[A-Za-z0-9_-]+$/).optional(),
+  timingKind: z.enum(['media_offset','ordinal']).optional(),
   startMs: z.number().int().nonnegative(),
   endMs: z.number().int().nonnegative(),
   text: z.string().trim().min(1)

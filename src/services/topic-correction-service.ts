@@ -10,6 +10,7 @@ import { captureGroupMessageSource } from './group-message-source-capture.js';
 import { PerspectiveReconciler } from './perspective-reconciler.js';
 import { canonicalJson, sha256, stableId } from './canonical-json.js';
 import type { CurrentPerspective } from '../domain/alignment.js';
+import { compareEvidence, evidenceOrder, isStrictlyNewer } from './evidence-order.js';
 
 export const founderFeedbackInputSchema = z.object({
   chatId: z.string().trim().min(1), openId: z.string().regex(/^ou_\S+$/u),
@@ -117,15 +118,18 @@ export function applyTopicCorrection(rawInput: FounderFeedbackInput, rawCorrecti
           const founder = alignment.resolveFounderForEvidence(evidence.id)!;
           const current = alignment.getCurrentPerspective(issue.topicId, founder === 'ivy' ? 'ivy_view' : 'james_view');
           const other = alignment.getCurrentPerspective(issue.topicId, founder === 'ivy' ? 'james_view' : 'ivy_view');
-          const currentTime = latestPerspectiveSourceTime(client, current);
           // Source time is authoritative. At equal times retain the first-ingested view;
           // the later arrival is audit-only and conflicting tied support cannot form consensus.
-          if (current && (currentTime === null || Date.parse(source.occurredAt) <= currentTime)) {
+          if (current && !isStrictlyNewer(client,evidence.id,current.evidenceIds)) {
+            new PerspectiveReconciler(alignment).reconcile({topicId:issue.topicId,evidenceId:evidence.id,statement:correction.statement,
+              speechAct:correction.speechAct,decisionKey:issue.decisionKey,confidence:1,observedAt:new Date(source.occurredAt)});
             status = 'historical_only';
           } else {
             const otherTime = latestPerspectiveSourceTime(client, other);
             const speechAct = correction.speechAct === 'explicit_agreement' &&
-              (otherTime === null || otherTime < Date.parse(issue.updatedAt) || otherTime > Date.parse(source.occurredAt) ||
+              (otherTime === null || otherTime < Date.parse(issue.updatedAt) || other!.evidenceIds.some(id=>{
+                const order=compareEvidence(client,evidence.id,id);return order===null||order<0;
+              }) ||
                 hasAmbiguousTiedSupport(client, other!, issue.id))
               ? 'view' as const : correction.speechAct;
             const reconciler = new PerspectiveReconciler(alignment);
@@ -170,9 +174,7 @@ function feedbackHash(input: FounderFeedbackInput): string { return sha256(canon
 function latestPerspectiveSourceTime(client: Database.Database, perspective: CurrentPerspective | null): number | null {
   if (!perspective || perspective.evidenceIds.length === 0) return null;
   const times = perspective.evidenceIds.map((id) => {
-    const row = client.prepare(`SELECT s.occurred_at FROM context_evidence e
-      JOIN context_sources s ON s.id = e.source_id WHERE e.id = ?`).get(id) as { occurred_at: string } | undefined;
-    return row ? Date.parse(row.occurred_at) : NaN;
+    return evidenceOrder(client,id)?.occurredAt ?? NaN;
   });
   return times.every(Number.isFinite) ? Math.max(...times) : null;
 }

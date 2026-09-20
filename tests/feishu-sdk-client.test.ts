@@ -188,6 +188,7 @@ describe('FeishuSdkApiClient', () => {
 
     await expect(client.exportMinuteTranscript('min_token_1')).resolves.toEqual([{
       speakerName: 'Ivy',
+      timingKind: 'media_offset',
       startMs: 0,
       endMs: 1_000,
       text: '逐字稿来自 SDK stream'

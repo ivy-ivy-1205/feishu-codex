@@ -156,9 +156,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           }
           for(const observation of perspectiveResult.observations) {
             assertScoped(observation.topicId,[observation.evidenceId]);
-            const evidence=sources.getEvidence(observation.evidenceId)!;
-            perspectiveReconciler.reconcile({...observation,observedAt:new Date(sources.getSource(evidence.sourceId)!.occurredAt)});
           }
+          perspectiveReconciler.reconcileBatch(perspectiveResult.observations);
           for(const proposal of perspectiveResult.alignmentProposals) {
             const candidate=new AlignmentDetector().propose(proposal);
             assertScoped(candidate.topicId,candidate.evidenceIds);

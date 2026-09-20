@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { check, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const feishuEvents = sqliteTable('feishu_events', {
   eventId: text('event_id').primaryKey(),
@@ -542,3 +542,9 @@ export const contextRecordRelations = sqliteTable('context_record_relations', {
   uniqueIndex('context_record_relations_unique')
     .on(table.fromRecordVersionId, table.toRecordVersionId, table.relationType)
 ]);
+
+export const founderPerspectiveObservations = sqliteTable('founder_perspective_observations', {
+  topicId:text('topic_id').notNull().references(()=>contextTopics.id),
+  evidenceId:text('evidence_id').notNull().references(()=>contextEvidence.id),
+  statement:text('statement').notNull(),speechAct:text('speech_act').notNull(),decisionKey:text('decision_key')
+}, table=>[primaryKey({columns:[table.topicId,table.evidenceId]})]);

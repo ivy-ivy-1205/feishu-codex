@@ -56,6 +56,7 @@ function parseVerifiedSingleSpeakerSrt(raw: string): TranscriptSegmentRecord[] {
   try {
     return matched.segments.map((segment) => TranscriptSegment.parse({
       speakerName: '说话人 1',
+      timingKind:'media_offset',
       startMs: segment.startMs,
       endMs: segment.endMs,
       text: segment.text
@@ -140,6 +141,7 @@ function parsePlainTextTranscript(raw: string): TranscriptSegmentRecord[] {
   try {
     return segments.map((segment, index) => TranscriptSegment.parse({
       speakerName: segment.speakerName,
+      timingKind:'ordinal',
       startMs: index,
       endMs: index + 1,
       text: segment.textLines.join('\n')
@@ -253,6 +255,7 @@ function normalizeSegment(input: unknown): TranscriptSegmentRecord {
   }
   return TranscriptSegment.parse({
     speakerName: pickString(input, ['speakerName', 'speaker_name', 'speaker']),
+    timingKind:'media_offset',
     startMs: pickNumber(input, ['startMs', 'start_ms', 'start_time']),
     endMs: pickNumber(input, ['endMs', 'end_ms', 'end_time']),
     text: pickString(input, ['text', 'content'])

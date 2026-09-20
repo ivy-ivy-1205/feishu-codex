@@ -4,6 +4,14 @@ import {
 } from '../repositories/job-repository.js';
 
 const migrationSql = `
+  CREATE TABLE IF NOT EXISTS founder_perspective_observations (
+    topic_id TEXT NOT NULL REFERENCES context_topics(id),
+    evidence_id TEXT NOT NULL REFERENCES context_evidence(id),
+    statement TEXT NOT NULL,
+    speech_act TEXT NOT NULL,
+    decision_key TEXT,
+    PRIMARY KEY(topic_id,evidence_id)
+  );
   CREATE TABLE IF NOT EXISTS founder_feedback_corrections (
     id TEXT PRIMARY KEY,
     chat_id TEXT NOT NULL,

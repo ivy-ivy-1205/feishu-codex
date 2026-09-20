@@ -4,6 +4,7 @@ import type { AlignmentRepository } from '../repositories/alignment-repository.j
 import type { OutboxRepository } from '../repositories/outbox-repository.js';
 import { AlignmentDetector } from './alignment-detector.js';
 import { canonicalJson } from './canonical-json.js';
+import { compareEvidence, evidenceOrder } from './evidence-order.js';
 
 export type AlignmentNotificationDecision = { send: boolean; reason:
   'action_divergence' | 'missing_dual_evidence' | 'ungrounded_divergence' |
@@ -43,13 +44,19 @@ export class AlignmentNotificationPolicy {
       Date.parse(horizon.startsAt) > now.getTime() || Date.parse(horizon.endsAt) <= now.getTime() ||
       Date.parse(horizon.startsAt) >= Date.parse(horizon.endsAt)) return reject('outside_action_horizon');
 
-    const latestEvidenceAt = Math.max(...candidate.evidenceIds.map((id) => this.evidenceAt(id)));
+    if(candidate.evidenceIds.some(id=>!evidenceOrder(this.issues.client,id)))return reject('ungrounded_divergence');
     const matchingDecisions = this.perspectives.listPerspectiveVersions(candidate.topicId, 'shared_decision')
       .filter((shared) => shared.decisionKey === candidate.decisionKey);
     if (matchingDecisions.some((shared) => {
-      const times = shared.evidenceIds.map((id) => this.evidenceAt(id));
+      const times = shared.evidenceIds.map((id) => evidenceOrder(this.issues.client,id)?.occurredAt ?? NaN);
       return times.length > 0 && times.every(Number.isFinite) &&
-        Math.max(...times) > latestEvidenceAt && Math.max(...times) <= now.getTime() &&
+        shared.evidenceIds.some(id=>candidate.evidenceIds.every(previous=>compareEvidence(this.issues.client,id,previous)===1)) &&
+        Math.max(...times) <= now.getTime() &&
+        !(['ivy_view','james_view'] as const).some(kind=>{
+          const current=this.perspectives.getCurrentPerspective(candidate.topicId,kind);
+          return current?.decisionKey===candidate.decisionKey && current.speechAct==='explicit_disagreement' &&
+            current.evidenceIds.some(id=>shared.evidenceIds.every(previous=>compareEvidence(this.issues.client,id,previous)===1));
+        }) &&
         shared.evidenceIds.some((id) => this.perspectives.resolveFounderForEvidence(id) === 'ivy') &&
         shared.evidenceIds.some((id) => this.perspectives.resolveFounderForEvidence(id) === 'james');
     })) {
@@ -102,11 +109,6 @@ export class AlignmentNotificationPolicy {
     return this.perspectives.getAttributedFounderEvidence(reference.evidenceId)?.excerpt.includes(reference.excerpt) ?? false;
   }
 
-  private evidenceAt(id: string): number {
-    const row = this.issues.client.prepare(`SELECT s.occurred_at FROM context_evidence e
-      JOIN context_sources s ON s.id = e.source_id WHERE e.id = ?`).get(id) as { occurred_at: string } | undefined;
-    return row ? Date.parse(row.occurred_at) : Infinity;
-  }
 }
 
 function hasAction(text: string): boolean {

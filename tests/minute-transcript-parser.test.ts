@@ -7,6 +7,11 @@ import {
 import { matchFeishuSingleSpeakerSrtExport } from '../src/adapters/minute-transcript-srt.js';
 
 describe('parseMinuteTranscriptStream', () => {
+  it('marks real JSON offsets separately from synthesized plain-text ordinal placeholders',async()=>{
+    const timed=await parseMinuteTranscriptStream(streamFromJson([{speakerName:'Ivy',startMs:1000,endMs:2000,text:'讨论'}]));
+    const plain=await parseMinuteTranscriptStream(Readable.from(['发言人（1）:\nIvy\n\nIvy\n讨论']));
+    expect(timed[0]?.timingKind).toBe('media_offset');expect(plain[0]?.timingKind).toBe('ordinal');
+  });
   it('parses a JSON array stream into internal TranscriptSegment records', async () => {
     await expect(parseMinuteTranscriptStream(streamFromJson([
       {
@@ -21,7 +26,7 @@ describe('parseMinuteTranscriptStream', () => {
         end_ms: 24_000,
         text: '暂时不做总结'
       }
-    ]))).resolves.toEqual([
+    ]))).resolves.toMatchObject([
       {
         speakerName: 'Ivy',
         startMs: 0,
@@ -45,7 +50,7 @@ describe('parseMinuteTranscriptStream', () => {
         end_time: '2000',
         content: '这个 parser 是为了真实飞书联调。'
       }]
-    }))).resolves.toEqual([{
+    }))).resolves.toMatchObject([{
       speakerName: 'Ivy',
       startMs: 1_000,
       endMs: 2_000,
@@ -55,7 +60,7 @@ describe('parseMinuteTranscriptStream', () => {
 
   it('returns an empty array for an empty transcript stream', async () => {
     await expect(parseMinuteTranscriptStream(Readable.from(['[]'])))
-      .resolves.toEqual([]);
+      .resolves.toMatchObject([]);
   });
 
   it('parses Feishu plain text transcript exports into ordered text segments', async () => {
@@ -77,7 +82,7 @@ describe('parseMinuteTranscriptStream', () => {
     ].join('\n');
 
     await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
-      .resolves.toEqual([
+      .resolves.toMatchObject([
         {
           speakerName: 'Ivy',
           startMs: 0,
@@ -115,7 +120,7 @@ describe('parseMinuteTranscriptStream', () => {
     ].join('\n');
 
     await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
-      .resolves.toEqual([
+      .resolves.toMatchObject([
         { speakerName: 'James', startMs: 0, endMs: 1, text: '第一行\n第二行' },
         { speakerName: 'Ivy', startMs: 1, endMs: 2, text: '后续决定' }
       ]);
@@ -134,7 +139,7 @@ describe('parseMinuteTranscriptStream', () => {
     ].join('\n');
 
     await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
-      .resolves.toEqual([{
+      .resolves.toMatchObject([{
         speakerName: '说话人 1',
         startMs: 0,
         endMs: 1,
@@ -158,7 +163,7 @@ describe('parseMinuteTranscriptStream', () => {
     ].join('\n');
 
     await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
-      .resolves.toEqual([
+      .resolves.toMatchObject([
         {
           speakerName: '说话人 1',
           startMs: 0,
@@ -190,7 +195,7 @@ describe('parseMinuteTranscriptStream', () => {
     ].join('\n');
 
     await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
-      .resolves.toEqual([{
+      .resolves.toMatchObject([{
         speakerName: '说话人 1',
         startMs: 0,
         endMs: 1,
@@ -225,7 +230,7 @@ describe('parseMinuteTranscriptStream', () => {
 
     await expect(parseMinuteTranscriptStream(Readable.from([srt]), {
       speakerBoundaryMode: 'verified_single_speaker_srt'
-    })).resolves.toEqual([
+    })).resolves.toMatchObject([
       {
         speakerName: '说话人 1',
         startMs: 0,
@@ -276,7 +281,7 @@ describe('parseMinuteTranscriptStream', () => {
     expect(srt.split('\n')).toHaveLength(17);
     await expect(parseMinuteTranscriptStream(Readable.from([srt]), {
       speakerBoundaryMode: 'verified_single_speaker_srt'
-    })).resolves.toEqual([
+    })).resolves.toMatchObject([
       { speakerName: '说话人 1', startMs: 3_476, endMs: 8_226,
         text: '候选上下文必须经过审核后才能成为正式内容' },
       { speakerName: '说话人 1', startMs: 8_546, endMs: 18_306,
@@ -381,7 +386,7 @@ describe('parseMinuteTranscriptStream', () => {
     ].join('\n');
 
     await expect(parseMinuteTranscriptStream(Readable.from([plainText])))
-      .resolves.toEqual([
+      .resolves.toMatchObject([
         {
           speakerName: 'Ivy',
           startMs: 0,

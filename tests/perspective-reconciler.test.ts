@@ -53,6 +53,37 @@ function saveGroupEvidence(
 }
 
 describe('PerspectiveReconciler', () => {
+  it('ignores model order, keeps the latest withdrawal in a reversed batch, and replays evidence idempotently',()=>{
+    const h=createHarness();
+    const records=[['ivy','按 A 方案推进','decision_proposal','1'],['james','同意按 A 方案推进','explicit_agreement','2'],['ivy','不同意按 A 方案推进','explicit_disagreement','3']] as const;
+    const inputs=records.map(([who,text,speechAct,day],i)=>({topicId:h.topic.id,evidenceId:saveGroupEvidence(h.sources,{messageId:`batch_${i}`,openId:`ou_${who}`,displayName:who,text,occurredAt:`2026-09-0${day}T01:00:00Z`}),statement:text,speechAct,decisionKey:'direction',confidence:1,observedAt:new Date('2030-01-01')}));
+    h.reconciler.reconcileBatch([...inputs].reverse());h.reconciler.reconcileBatch(inputs);
+    expect(h.repository.getCurrentPerspective(h.topic.id,'ivy_view')?.speechAct).toBe('explicit_disagreement');
+    expect(h.repository.getCurrentPerspective(h.topic.id,'shared_decision')).toBeNull();
+    expect(h.repository.listPerspectiveVersions(h.topic.id,'ivy_view')).toHaveLength(1);
+    expect(h.database.client.prepare('SELECT COUNT(*) n FROM founder_perspective_observations').get()).toEqual({n:3});
+  });
+  it('audits conflicting tied founder observations before any batch agreement can create consensus',()=>{
+    const h=createHarness();
+    const records=[['ivy','按 A 方案推进','decision_proposal','1'],['ivy','按 B 方案推进','decision_proposal','1'],['james','同意按 A 方案推进','explicit_agreement','2']] as const;
+    const inputs=records.map(([who,text,speechAct,day],i)=>({topicId:h.topic.id,evidenceId:saveGroupEvidence(h.sources,{messageId:`tied_${i}`,openId:`ou_${who}`,displayName:who,text,occurredAt:`2026-09-0${day}T01:00:00Z`}),statement:text,speechAct,decisionKey:'direction',confidence:1,observedAt:new Date('2030-01-01')}));
+    h.reconciler.reconcileBatch([inputs[2]!,inputs[0]!,inputs[1]!]);
+    expect(h.repository.getCurrentPerspective(h.topic.id,'shared_decision')).toBeNull();
+    expect(h.repository.listPerspectiveVersions(h.topic.id,'ivy_view')).toHaveLength(1);
+  });
+  it('never replays an older proposal over a later withdrawal, even when agreement is ingested last',()=>{
+    const h=createHarness();
+    const evidence=(id:string,who:string,text:string,day:string)=>saveGroupEvidence(h.sources,{messageId:id,openId:`ou_${who}`,displayName:who,text,occurredAt:`2026-09-0${day}T01:00:00Z`});
+    const withdraw=evidence('withdraw','ivy','不同意按 A 方案推进','3');
+    const proposal=evidence('proposal','ivy','按 A 方案推进','1');
+    const agree=evidence('agree','james','同意按 A 方案推进','2');
+    const observe=(evidenceId:string,statement:string,speechAct:'decision_proposal'|'explicit_agreement'|'explicit_disagreement')=>h.reconciler.reconcile({topicId:h.topic.id,evidenceId,statement,speechAct,decisionKey:'direction',confidence:1,observedAt:new Date('2030-01-01')});
+    observe(withdraw,'不同意按 A 方案推进','explicit_disagreement');observe(proposal,'按 A 方案推进','decision_proposal');observe(agree,'同意按 A 方案推进','explicit_agreement');
+    expect(h.repository.getCurrentPerspective(h.topic.id,'ivy_view')?.speechAct).toBe('explicit_disagreement');
+    expect(h.repository.getCurrentPerspective(h.topic.id,'shared_decision')).toBeNull();
+    observe(withdraw,'不同意按 A 方案推进','explicit_disagreement');
+    expect(h.repository.listPerspectiveVersions(h.topic.id,'ivy_view')).toHaveLength(1);
+  });
   it('keeps an unknown sender unknown even when its display name says Ivy', () => {
     const { repository, sources, topic, reconciler } = createHarness();
     const evidenceId = saveGroupEvidence(sources, {
