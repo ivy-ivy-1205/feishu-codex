@@ -12,6 +12,7 @@ import { buildFounderStreamInput, saveFounderEvidence } from '../src/services/fo
 import { AlignmentRepository } from '../src/repositories/alignment-repository.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { renderFounderWorkMap } from '../src/services/founder-work-map-renderer.js';
+import { applyTopicCorrection, type TopicCorrection } from '../src/services/topic-correction-service.js';
 
 const chat = 'oc_a84d5b6ca478220d0a37964b50776edb';
 const start = new Date('2026-09-21T00:00:00.000Z');
@@ -32,7 +33,7 @@ function harness(flags = { captureEnabled: true, analysisEnabled: true, groupDel
   });
   const app = buildApp({ readiness: () => ({ ready: true }), verificationToken: 'verify', encryptKey: 'encrypt',
     logger: false, ingestMinute: () => ({ status: 'ignored' }), routeReply: () => ({ kind: 'reject', reason: 'wrong_chat' }),
-    founderStream: runtime.route });
+    founderStream: runtime.route, founderStreamDiagnostics: { client: db.client } });
   return { db, jobs, sources, topics, runtime, app, inputs, calls: () => calls, setNow: (value: Date) => { now = value; } };
 }
 function event(id = 'om_1', eventId = `evt_${id}`, thread = '', sender = 'user', chatId = chat) {
@@ -42,6 +43,96 @@ function event(id = 'om_1', eventId = `evt_${id}`, thread = '', sender = 'user',
       content: JSON.stringify({ text: `知识库 ${id}` }), create_time: String(start.getTime()) } } };
 }
 describe('founder stream durable wiring', () => {
+  it.each(['pause_topic','reclassify_stage','rename_topic'] as const)('keeps %s authoritative against old and newer automatic proposals', async kind => {
+    const h=harness();new AlignmentRepository(h.db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:start});
+    const original=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_old',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'知识库 今天开始制作演示，交付演示稿，或交付替代稿',occurredAt:start.toISOString()},start).source).source;
+    const topic=h.topics.createTopic({displayName:'知识库',stage:'active_project',outcome:'交付演示稿',evidenceIds:[saveFounderEvidence(h.sources,original.id,original.contentText,start)],createdAt:start});
+    const map=renderFounderWorkMap({since:'2026-09-01T00:00:00Z',until:start.toISOString(),topics:[{...topic,evidence:[]}],uncertainGrouping:[],coverageGaps:[]})[0]!;
+    const outbox=new OutboxRepository(h.db.client);outbox.enqueueFounderWorkMap({...map,mapId:'authority',targetChatId:chat},start);
+    outbox.acknowledgeFounderWorkMapDelivery({mapId:'authority',page:1,messageId:'om_authority_map',deliveredAt:start});
+    const correction={kind,topic:{id:topic.id,expectedVersion:1},...(kind==='rename_topic'?{name:'销售知识库'}:kind==='reclassify_stage'?{stage:'idea'}:{})} as TopicCorrection;
+    expect(applyTopicCorrection({chatId:chat,openId:'ou_ivy',messageId:'om_authority',replyTo:'om_authority_map',text:'知识库：更名销售知识库，暂停，不作为项目',occurredAt:new Date(start.getTime()+1000).toISOString()},correction,
+      {client:h.db.client,approvedChatIds:[chat],now:()=>new Date(start.getTime()+1000)}).kind).toBe('corrected');
+    const corrected=h.topics.listCurrentTopics()[0]!;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>new Date(start.getTime()+600_000),
+      analyzer:{async analyze(input){const source=input.sources[0]!;return{topics:[{displayName:'知识库',stage:'active_project',outcome:'交付替代稿',currentAction:'今天开始制作演示',confidence:'high',sourceIds:[source.id],evidenceExcerpts:[{sourceId:source.id,excerpt:source.contentText}],joinDecision:{kind:'exact_continuation',topicId:topic.id,confidence:'high',sharedTerms:['知识库']},splitSuggestions:[]}]}}}});
+    for(const [index,source] of [original,h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_new',threadId:null,rootId:null,author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:original.contentText,occurredAt:new Date(start.getTime()+2000).toISOString()},start).source).source].entries()){
+      h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[source.id],capturedAt:start});
+      await runtime.runOnce();
+      expect(h.topics.listCurrentTopics()).toHaveLength(1);
+      expect(h.topics.listCurrentTopics()[0]).toMatchObject({displayName:corrected.displayName,stage:corrected.stage,outcome:corrected.outcome});
+      expect(h.topics.listCurrentTopics()[0]!.rationale).toContain('needs_confirmation');
+      expect(JSON.parse(h.topics.listCurrentTopics()[0]!.rationale).suggestion.evidenceAfterCorrection).toBe(index===1);
+      expect(h.topics.listCurrentTopics()[0]!.evidenceIds.length).toBeGreaterThanOrEqual(2+index);
+    }
+    expect(h.db.client.prepare('SELECT count(*) n FROM founder_feedback_corrections').get()).toEqual({n:1});
+    await h.app.close();h.db.close();
+  });
+  it('recovers a completed capture-only interval once after enabling analysis and restarting', async () => {
+    const h=harness({captureEnabled:true,analysisEnabled:false,groupDeliveryEnabled:false});
+    for(let i=0;i<25;i++){await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload:event(`om_recover_${i}`)});await h.runtime.runOnce();}
+    const ids=h.sources.listSources().map(s=>s.id);const seen=new Set<string>();let calls=0;
+    const create=()=>createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>new Date(start.getTime()+600_000),
+      analyzer:{async analyze(input){calls++;for(const source of input.sources)seen.add(source.id);return{topics:[]}}}});
+    let runtime=create();await runtime.afterTick();runtime=create();
+    for(let i=0;i<6;i++)await runtime.runOnce();
+    expect([...seen].sort()).toEqual(ids.sort());expect(calls).toBe(2);
+    const rows=h.db.client.prepare("SELECT payload FROM batch_jobs WHERE type='analyze_founder_stream_batch'").all();
+    expect(JSON.stringify(rows)).not.toContain('知识库');expect(rows).toHaveLength(2);
+    await runtime.afterTick();expect(h.db.client.prepare("SELECT count(*) n FROM batch_jobs WHERE type='analyze_founder_stream_batch'").get()).toEqual({n:2});
+    await h.app.close();h.db.close();
+  });
+  it.each([['audio','VOICE_TEXT_MISSING'],['voice','VOICE_TEXT_MISSING'],['file','FILE_TEXT_UNREADABLE'],['media','MEDIA_SKIPPED'],['text','MESSAGE_TEXT_UNAVAILABLE']])('persists a typed live %s gap once without forwarding media or IDs to diagnostics',async(messageType,code)=>{
+    const h=harness();const payload=event('om_media');Object.assign(payload.event.message,{message_type:messageType,content:'{"file_key":"secret_file_key"}'});
+    await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload});await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload});
+    const sources=h.sources.listSources();expect(sources).toHaveLength(2);
+    expect(sources.find(s=>s.sourceType==='group_message')).toMatchObject({externalId:'om_media',availabilityStatus:'unknown',contentText:'',metadata:{messageType,senderType:'user'}});
+    expect(JSON.parse(sources.find(s=>s.sourceType==='feishu_sync_gap')!.contentText)).toMatchObject({code});
+    const diag=await h.app.inject({method:'GET',url:'/diag/founder-stream'});expect(diag.json().gapsByCode).toEqual({[code]:1});
+    expect(diag.body).not.toContain('om_media');expect(JSON.stringify(sources)).not.toContain('secret_file_key');
+    await h.runtime.runOnce();expect(h.calls()).toBe(0);expect(h.jobs.list()).toHaveLength(0);await h.app.close();h.db.close();
+  });
+  it.each(['audio','voice'])('uses an existing platform %s text transcript without reading a media resource',async messageType=>{
+    const h=harness();const payload=event();Object.assign(payload.event.message,{message_type:messageType,content:JSON.stringify({text:'知识库 语音转文字',file_key:'must_not_read'})});
+    await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload});await h.runtime.runOnce();h.setNow(new Date(start.getTime()+300_000));await h.runtime.runOnce();
+    expect(h.calls()).toBe(1);expect(h.sources.listSources()[0]).toMatchObject({contentText:'知识库 语音转文字',metadata:{messageType}});
+    expect(h.sources.listSources().some(s=>s.sourceType==='feishu_sync_gap')).toBe(false);
+    expect(JSON.stringify(h.sources.listSources())).not.toContain('must_not_read');await h.app.close();h.db.close();
+  });
+  it('does not recover an older capture before the latest arrival in its thread has been quiet for 300 seconds',async()=>{
+    const h=harness({captureEnabled:true,analysisEnabled:false,groupDeliveryEnabled:false});
+    await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload:event()});await h.runtime.runOnce();
+    h.setNow(new Date(start.getTime()+299_000));await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload:event('om_later')});await h.runtime.runOnce();
+    let now=new Date(start.getTime()+300_000);let calls=0;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>now,analyzer:{async analyze(){calls++;return{topics:[]}}}});
+    await runtime.afterTick();await runtime.runOnce();expect(calls).toBe(0);
+    now=new Date(start.getTime()+599_000);await runtime.afterTick();await runtime.runOnce();expect(calls).toBe(1);
+    await h.app.close();h.db.close();
+  });
+  it('extends already recovered analysis when a new webhook arrives before it is leased',async()=>{
+    const h=harness({captureEnabled:true,analysisEnabled:false,groupDeliveryEnabled:false});
+    await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload:event()});await h.runtime.runOnce();
+    let now=new Date(start.getTime()+600_000);let calls=0;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>now,analyzer:{async analyze(){calls++;return{topics:[]}}}});
+    await runtime.afterTick();runtime.route.ingest(event('om_new_arrival'));await runtime.runOnce();await runtime.runOnce();expect(calls).toBe(0);
+    now=new Date(start.getTime()+900_000);await runtime.runOnce();expect(calls).toBe(1);await h.app.close();h.db.close();
+  });
+  it('recovers legacy user sources without a handoff but excludes unknown, bot and unavailable sources',async()=>{
+    const h=harness();const eligible:string[]=[];
+    for(const senderType of ['user','app','unknown'] as const){
+      for(const availabilityStatus of ['available','unknown'] as const){
+        const captured=captureGroupMessageSource({chatId:chat,messageId:`om_legacy_${senderType}_${availabilityStatus}`,threadId:null,rootId:null,
+          author:{openId:'ou_ivy',displayName:null},senderType,messageType:'text',text:'知识库',occurredAt:start.toISOString()},start);
+        const source=h.sources.saveSource({...captured.source,availabilityStatus}).source;
+        if(senderType==='user'&&availabilityStatus==='available')eligible.push(source.id);
+      }
+    }
+    h.setNow(new Date(start.getTime()+600_000));await h.runtime.afterTick();await h.runtime.runOnce();await h.runtime.runOnce();
+    expect(h.calls()).toBe(1);expect(h.inputs[0]!.sources.map(s=>s.id)).toEqual(eligible);expect(h.sources.listSources()).toHaveLength(6);
+    expect(h.db.client.prepare("SELECT count(*) n FROM batch_jobs WHERE type='analyze_founder_stream_batch'").get()).toEqual({n:1});
+    await h.app.close();h.db.close();
+  });
   it('keeps a trusted founder rename in the next model current-topic window', async () => {
     const h=harness();new AlignmentRepository(h.db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:start});
     const topic=h.topics.createTopic({displayName:'旧名称',stage:'idea',createdAt:start});

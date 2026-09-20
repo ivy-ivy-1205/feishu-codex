@@ -21,6 +21,9 @@ import { PerspectiveReconciler } from './perspective-reconciler.js';
 import { AlignmentDetector } from './alignment-detector.js';
 import { renderAlignmentQuestion } from './alignment-question-renderer.js';
 import { stableId } from './canonical-json.js';
+import { topicCorrectionSchema } from './topic-correction-service.js';
+import type { CurrentTopic, TopicVersion } from '../domain/topic.js';
+import type { FeishuContextGap } from './feishu-context-sync.js';
 
 export interface FounderPerspectiveAnalysisPort {
   analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[];
@@ -70,6 +73,19 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
       const stamp = now(), text = messageText(message.message_type, message.content);
       let disposition = event.sender.sender_type !== 'user' ? 'bot_audit' : !text ? 'skipped_media' : 'captured';
       let decision: ReturnType<typeof routeFounderFeedback> | undefined;
+      if (disposition === 'skipped_media') {
+        const captured = captureGroupMessageSource({ chatId, messageId: message.message_id, threadId: message.thread_id || null,
+          rootId: message.root_id || null, author: { openId: event.sender.sender_id.open_id ?? null, displayName: null },
+          messageType: message.message_type, senderType: 'user', text: '', occurredAt: at }, stamp);
+        const gapCode = liveGapCode(message.message_type);
+        const source = sources.saveSource({ ...captured.source, availabilityStatus: 'unknown',
+          metadata: { ...captured.source.metadata, gapCode } }).source;
+        sources.saveSource({ ...captured.source, sourceType: 'feishu_sync_gap',
+          logicalKey: `${captured.source.logicalKey}:gap:${gapCode}`, contentFormat: 'application/json',
+          contentText: JSON.stringify({ code: gapCode, sourceRef: source.logicalKey,
+            reason: 'No reliable text available; media was not downloaded or analyzed.' }),
+          metadata: { chatId, messageId: message.message_id, sourceId: source.id, messageType: message.message_type } });
+      }
       if (disposition === 'captured') {
         const replyTo = message.parent_id || message.root_id || null;
         const correctionLike = /^(?:第\s*\d+\s*项(?:改|只是|拆)|\d+\s*(?:和|与)\s*\d+\s*是同一个|这个(?:只是想法|改名为|改为|拆分为)|暂停\s*\d+\s*项)/u.test(text!);
@@ -120,6 +136,15 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         const input = buildFounderStreamInput(sources, topics, job.sourceIds, job.chatId);
         const analysis = input.sources.length ? await options.analyzer.analyze(input) : { topics: [] };
         const plan = reconcileTopics(input, analysis);
+        // The model can suggest a continuation, but it cannot revoke a founder's
+        // accepted correction. Bind its evidence to the protected topic instead
+        // of creating a renamed/reactivated duplicate.
+        for (const item of plan.topics) {
+          const target = topics.listCurrentTopics().find(t => t.id === item.proposal.joinDecision.topicId);
+          if (target && topicAuthority(options.client, topics, target)) {
+            item.action = 'join'; item.topicId = target.id; item.expectedVersion = target.currentVersion;
+          }
+        }
         const plannedAt = now();
         const prepared = plan.topics.map(item => ({ item,
           topicId: item.topicId ?? stableId('topic', `${new Date(plannedAt.getTime()+item.proposalIndex).toISOString()}\n${item.proposal.displayName.trim()}`),
@@ -147,9 +172,16 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           for (const {item,ids} of prepared) {
             const old = item.topicId ? topics.listCurrentTopics().find(t => t.id === item.topicId) : undefined;
             const evidenceIds = [...new Set([...(old?.evidenceIds ?? []), ...ids])];
-            const rationale = JSON.stringify({ origin: 'founder_stream', jobKey: job.key, needsConfirmation: item.relations });
+            const authority = old ? topicAuthority(options.client, topics, old) : null;
+            const rationale = JSON.stringify({ origin: 'founder_stream', jobKey: job.key, needsConfirmation: item.relations,
+              ...(authority ? { humanAuthority: { correctionId: authority.correctionId, evidenceId: authority.evidenceId,
+                occurredAt: authority.occurredAt }, suggestion: { status: 'needs_confirmation',
+                displayName: item.proposal.displayName, stage: item.proposal.stage, outcome: item.proposal.outcome,
+                evidenceAfterCorrection: item.proposal.evidenceExcerpts.every(e => Date.parse(sources.getSource(e.sourceId)!.occurredAt) > Date.parse(authority.occurredAt)) } } : {}) });
             if (item.action === 'join') topics.appendVersion({ topicId: item.topicId!, expectedVersion: item.expectedVersion!,
-              displayName: item.proposal.displayName, stage: item.proposal.stage, outcome: item.proposal.outcome,
+              displayName: authority?.snapshot.displayName ?? item.proposal.displayName,
+              stage: authority?.snapshot.stage ?? item.proposal.stage,
+              outcome: authority ? authority.snapshot.outcome : item.proposal.outcome,
               evidenceIds, rationale, changedAt: stamp });
             else topics.createTopic({ displayName: item.proposal.displayName, stage: item.proposal.stage, outcome: item.proposal.outcome,
               evidenceIds, rationale, createdAt: new Date(plannedAt.getTime() + item.proposalIndex) });
@@ -186,6 +218,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
     ['capture_group_message','analyze_founder_stream_batch'] : ['capture_group_message'];
   const afterTick = async () => {
       if (!options.flags.analysisEnabled) return;
+      if (allowed(approvedGroup)) recoverGroupAnalysis();
       // The immutable source survives an enqueue failure. Stable source-set keys
       // allow a later tick/restart to repair just the downstream handoff.
       if (allowed(approvedGroup)) for(const source of sources.listSources().filter(s=>s.sourceType==='minute_transcript' && s.availabilityStatus==='available' && minuteEligible(s,approvedGroup))) {
@@ -201,6 +234,45 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   });
   function enqueueMinute(source: ContextSourceRecord) {
     return options.jobRepository.enqueueFounderStreamBatch({chatId:approvedGroup,sourceIds:[source.id],since:source.occurredAt,until:now().toISOString(),capturedAt:now()});
+  }
+  function recoverGroupAnalysis() {
+    // Durable job membership is the downstream receipt, including terminal
+    // failures (operator retry, never an unbounded auto-requeue). A pending
+    // capture owns its handoff and debounce deadline until it completes.
+    options.client.transaction(() => {
+      const claimed = new Set<string>();
+      const rows = options.client.prepare("SELECT type,status,payload FROM batch_jobs WHERE type IN ('capture_group_message','analyze_founder_stream_batch')")
+        .all() as { type:string;status:string;payload:string }[];
+      for (const row of rows) {
+        try {
+          const payload = JSON.parse(row.payload);
+          if (payload.chatId !== approvedGroup || !Array.isArray(payload.sourceIds)) continue;
+          if (row.type === 'analyze_founder_stream_batch' || row.status !== 'completed')
+            for (const id of payload.sourceIds) if (typeof id === 'string') claimed.add(id);
+        } catch { /* Invalid jobs remain diagnostic failures, not source authority. */ }
+      }
+      const stamp = now();
+      const groupSources = sources.listSources().filter(source => source.sourceType === 'group_message' &&
+        source.metadata.chatId === approvedGroup && source.metadata.senderType === 'user');
+      const threadOf = (source:ContextSourceRecord) => String(source.metadata.threadId || source.metadata.rootId || '');
+      const latestArrival = new Map<string,number>();
+      for(const source of groupSources) latestArrival.set(threadOf(source),Math.max(latestArrival.get(threadOf(source))??0,Date.parse(source.capturedAt)));
+      const pending = groupSources.filter(source =>
+        source.availabilityStatus === 'available' && source.metadata.chatId === approvedGroup &&
+        source.metadata.senderType === 'user' && source.contentText.trim() && !claimed.has(source.id) &&
+        latestArrival.get(threadOf(source))! + 300_000 <= stamp.getTime() &&
+        !options.client.prepare("SELECT 1 FROM outbox WHERE delivered_message_id=? AND status='delivered'").get(source.externalId) &&
+        !options.client.prepare('SELECT 1 FROM founder_feedback_corrections WHERE chat_id=? AND source_message_id=?').get(approvedGroup,source.externalId))
+        .sort((a,b)=>a.occurredAt.localeCompare(b.occurredAt)||a.id.localeCompare(b.id));
+      for (const thread of new Set(pending.map(threadOf))) {
+        const threadSources=pending.filter(s=>threadOf(s)===thread);
+        for(let offset=0;offset<threadSources.length;offset+=20){
+          const batch=threadSources.slice(offset,offset+20);
+          options.jobRepository.enqueueFounderStreamBatch({chatId:approvedGroup,sourceIds:batch.map(s=>s.id),
+            since:batch[0]!.occurredAt,until:stamp.toISOString(),capturedAt:stamp,recoveryThreadId:thread||null});
+        }
+      }
+    }).immediate();
   }
   function captureMinute(context: MinuteContext) {
     if(!options.flags.captureEnabled || !allowed(approvedGroup))return;
@@ -260,6 +332,38 @@ export function buildFounderStreamInput(sources: ContextSourceRepository, topics
 function minuteEligible(source:ContextSourceRecord,chatId:string):boolean {
   return source.metadata.founderStreamEligible===true && source.metadata.founderStreamChatId===chatId;
 }
+function topicAuthority(client: Database.Database, topics: TopicRepository, topic: CurrentTopic): {
+  snapshot: TopicVersion | CurrentTopic; correctionId:string|null; evidenceId:string|null; occurredAt:string;
+} | null {
+  const rows=client.prepare(`SELECT f.id,f.evidence_id,f.correction_json,f.result_json,s.occurred_at
+    FROM founder_feedback_corrections f JOIN context_evidence e ON e.id=f.evidence_id
+    JOIN context_sources s ON s.id=e.source_id WHERE f.chat_id=? ORDER BY s.occurred_at DESC,f.created_at DESC,f.id`)
+    .all(approvedGroup) as {id:string;evidence_id:string;correction_json:string;result_json:string;occurred_at:string}[];
+  const versions=topics.listVersions(topic.id);
+  for(const row of rows) {
+    const correction=topicCorrectionSchema.safeParse(JSON.parse(row.correction_json));
+    if(!correction.success || !['merge_topics','split_topic','reclassify_stage','rename_topic','pause_topic'].includes(correction.data.kind) ||
+      JSON.parse(row.result_json).status!=='applied')continue;
+    const refs='topics' in correction.data ? correction.data.topics : 'topic' in correction.data ? [correction.data.topic] : [];
+    const splitParent=correction.data.kind==='split_topic' ? correction.data.topic.id : null;
+    if(!refs.some(ref=>ref.id===topic.id) && !(splitParent && topics.listRelations(topic.id).some(relation=>
+      relation.relationType==='split_from' && relation.fromTopicId===topic.id && relation.toTopicId===splitParent)))continue;
+    // First version carrying this immutable correction is the accepted human
+    // snapshot; later model versions cannot manufacture or erase its authority.
+    const snapshot=versions.find(v=>v.evidenceIds.includes(row.evidence_id));
+    if(snapshot)return {snapshot,correctionId:row.id,evidenceId:row.evidence_id,occurredAt:row.occurred_at};
+  }
+  // Legacy paused/closed rows also require explicit human reactivation.
+  return ['paused','closed'].includes(topic.stage) ? {snapshot:topic,correctionId:null,evidenceId:null,occurredAt:topic.updatedAt} : null;
+}
+function liveGapCode(type:string):FeishuContextGap['code'] {
+  if(type==='audio'||type==='voice')return 'VOICE_TEXT_MISSING';
+  if(type==='media'||type==='video')return 'MEDIA_SKIPPED';
+  if(type==='file')return 'FILE_TEXT_UNREADABLE';
+  if(type==='image')return 'IMAGE_SKIPPED';
+  if(type==='text'||type==='post')return 'MESSAGE_TEXT_UNAVAILABLE';
+  return 'MESSAGE_UNSUPPORTED';
+}
 export function saveFounderEvidence(repository: ContextSourceRepository, sourceId: string, excerpt: string, capturedAt: Date): string {
   const source = repository.getSource(sourceId); if (!source) throw new Error('source missing');
   let locator: unknown;
@@ -314,7 +418,7 @@ function parseTime(value:string):string|null {
 }
 function messageText(type:string,content:string):string|null {
   try {
-    const value=JSON.parse(content); if(type==='text') return typeof value.text==='string' && value.text.trim()?value.text:null;
+    const value=JSON.parse(content); if(['text','audio','voice'].includes(type)) return typeof value.text==='string' && value.text.trim()?value.text:null;
     if(type!=='post') return null;
     const post=Array.isArray(value.content)?value:Object.values(value).find((v:any)=>Array.isArray(v?.content)) as any;
     const text=[post?.title??'',...(post?.content??[]).flat().map((leaf:any)=>leaf.tag==='text'?leaf.text:'')].join('\n').trim();

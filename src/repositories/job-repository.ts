@@ -191,11 +191,12 @@ export class JobRepository {
   /** Queued for the founder-stream consumer only; existing workers do not lease this kind. */
   enqueueFounderStreamBatch(input: {
     chatId: string; since: string; until: string; sourceIds: readonly string[]; capturedAt: Date;
+    recoveryThreadId?: string | null;
   }): { created: boolean; key: string } {
     const sourceIds = [...new Set(input.sourceIds)].sort();
     if (sourceIds.length === 0) throw new Error('founder stream batch requires sources');
-    const windowKey = `history:${sha256(canonicalJson(sourceIds))}`;
-    const payload = { chatId: input.chatId, since: input.since, until: input.until, sourceIds, windowKey, threadId: null, attempt: 0 };
+    const windowKey = `${input.recoveryThreadId === undefined ? 'history' : 'live:recovery'}:${sha256(canonicalJson(sourceIds))}`;
+    const payload = { chatId: input.chatId, since: input.since, until: input.until, sourceIds, windowKey, threadId: input.recoveryThreadId ?? null, attempt: 0 };
     const key = `analyze_founder_stream_batch:${input.chatId}:${windowKey}`;
     const timestamp = input.capturedAt.toISOString();
     const result = this.client.prepare(`
