@@ -34,6 +34,7 @@ const retryBudgets = {
 } as const satisfies Record<RetryErrorCode, number>;
 
 export interface MeetingWorkerDependencies {
+  founder?: { minuteCaptureChatId?: string; captureMinute(context: import('../ports/feishu.js').MinuteContext): void | Promise<void> };
   reader: FeishuMinutesReader;
   summarizer: MeetingSummarizer;
   meetingRepository: MeetingRepository;
@@ -72,7 +73,7 @@ export async function processMinuteJob(
         const captured = captureMinuteTranscriptSource(context, captureAt, {
           maxBytes: contextDependencies.sourceMaxBytes,
           maxSegments: contextDependencies.sourceMaxSegments
-        });
+        }, dependencies.founder?.minuteCaptureChatId);
         dependencies.meetingRepository.client.transaction(() => {
           if (!dependencies.jobRepository.ownsLease(job, captureAt)) {
             throw new LeaseLostError(job.key);
@@ -214,6 +215,11 @@ export async function processMinuteJob(
     if (!persisted) {
       return 'lost_lease';
     }
+
+    // Independent downstream handoff: a founder-stream failure must never roll
+    // back or fail the already committed personalized summary and Todo outbox.
+    try { await dependencies.founder?.captureMinute(context); }
+    catch { /* The founder runtime retries persisted source handoffs separately. */ }
 
     dependencies.jobRepository.markCompleted(job, operationNow);
     return 'completed';

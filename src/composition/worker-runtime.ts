@@ -82,6 +82,7 @@ export function createWorkerRuntime(
         outboxRepository: options.outboxRepository,
         targetChatId: options.targetChatId,
         now: options.now,
+        founder: options.founder,
         context: options.context?.capture ?? { enabled: false }
       });
       if (result === 'completed') {

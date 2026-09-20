@@ -96,13 +96,24 @@ export class AlignmentRepository {
   getAttributedFounderEvidence(evidenceId: string): AttributedFounderEvidence | null {
     const row = this.client.prepare(`
       SELECT e.id AS evidence_id, e.excerpt, s.content_text,
-             s.source_system, s.source_type, s.authors_json
+             s.source_system, s.source_type, s.authors_json, s.metadata_json, e.locator_json
       FROM context_evidence e
       INNER JOIN context_sources s ON s.id = e.source_id
       WHERE e.id = ?
     `).get(evidenceId) as AttributedEvidenceRow | undefined;
-    if (!row || row.source_type !== 'group_message') return null;
-    const externalAuthorId = singleAuthorOpenId(row.authors_json);
+    if (!row) return null;
+    let sourceText = row.content_text;
+    let externalAuthorId: string | null = null;
+    if (row.source_type === 'group_message') externalAuthorId = singleAuthorOpenId(row.authors_json);
+    else if (row.source_type === 'minute_transcript') {
+      const locator = JSON.parse(row.locator_json);
+      const segment = JSON.parse(row.metadata_json).segments?.[locator.segmentOrdinal];
+      if (!segment || typeof segment.text !== 'string' || !segment.text.includes(row.excerpt) ||
+        segment.speakerName !== locator.speakerName || segment.startMs !== locator.startMs || segment.endMs !== locator.endMs ||
+        typeof segment.speakerOpenId !== 'string' || !/^ou_[A-Za-z0-9_-]+$/.test(segment.speakerOpenId)) return null;
+      externalAuthorId = segment.speakerOpenId;
+      sourceText = segment.text;
+    }
     if (!externalAuthorId) return null;
     const founder = this.findFounderIdentity(row.source_system, externalAuthorId)?.founder;
     if (!founder) return null;
@@ -110,7 +121,7 @@ export class AlignmentRepository {
       evidenceId: row.evidence_id,
       founder,
       excerpt: row.excerpt,
-      sourceText: row.content_text
+      sourceText
     };
   }
 
@@ -270,6 +281,8 @@ interface AttributedEvidenceRow {
   source_system: string;
   source_type: string;
   authors_json: string;
+  metadata_json: string;
+  locator_json: string;
 }
 interface PerspectiveVersionRow {
   id: string;

@@ -15,9 +15,16 @@ import { reconcileTopics } from './topic-reconciler.js';
 import { validateFounderStreamInput, type FounderStreamAnalyzer, type FounderStreamInput, type FounderStreamCurrentTopic } from '../ports/founder-stream-analyzer.js';
 import type { PerspectiveObservation } from './perspective-reconciler.js';
 import type { AlignmentProposal } from '../domain/alignment.js';
+import type { MinuteContext } from '../ports/feishu.js';
+import { captureMinuteTranscriptSource } from './context-source-capture.js';
+import { PerspectiveReconciler } from './perspective-reconciler.js';
+import { AlignmentDetector } from './alignment-detector.js';
+import { renderAlignmentQuestion } from './alignment-question-renderer.js';
+import { stableId } from './canonical-json.js';
 
 export interface FounderPerspectiveAnalysisPort {
-  analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[] }): Promise<{
+  analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[];
+    evidence: readonly { id: string; sourceId: string; topicIds: readonly string[]; excerpt: string; founder: 'ivy' | 'james' | null }[] }): Promise<{
     observations: readonly PerspectiveObservation[]; alignmentProposals: readonly AlignmentProposal[];
   }>;
 }
@@ -25,6 +32,7 @@ export interface FounderStreamRoute { ingest(envelope: unknown): Record<string, 
 export interface FounderStreamOptions {
   client: Database.Database; jobRepository: JobRepository; flags: AppConfig['founderStream'];
   approvedChatIds: readonly string[]; ivyPrivateChatId: string; analyzer?: FounderStreamAnalyzer;
+  perspectiveAnalyzer?: FounderPerspectiveAnalysisPort;
   now?: () => Date; intervalMs?: number;
   policy?: Pick<AlignmentNotificationPolicy, 'reconcilePending'>;
   delivery?: { sendTextMessage(input: { chatId: string; text: string; idempotencyKey?: string }): Promise<{ messageId: string }>;
@@ -45,6 +53,9 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   const now = options.now ?? (() => new Date());
   const sources = new ContextSourceRepository(options.client), topics = new TopicRepository(options.client);
   const outbox = new OutboxRepository(options.client);
+  const perspectives = new AlignmentRepository(options.client);
+  const perspectiveReconciler = new PerspectiveReconciler(perspectives);
+  const notificationPolicy = new AlignmentNotificationPolicy(new AlignmentIssueRepository(options.client), perspectives, outbox);
   const policy = options.policy ?? new AlignmentNotificationPolicy(new AlignmentIssueRepository(options.client), new AlignmentRepository(options.client), outbox);
   const allowed = (chatId: string) => chatId === approvedGroup && options.approvedChatIds.includes(chatId);
   const route: FounderStreamRoute = { ingest(raw) {
@@ -109,10 +120,31 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         const input = buildFounderStreamInput(sources, topics, job.sourceIds, job.chatId);
         const analysis = input.sources.length ? await options.analyzer.analyze(input) : { topics: [] };
         const plan = reconcileTopics(input, analysis);
+        const plannedAt = now();
+        const prepared = plan.topics.map(item => ({ item,
+          topicId: item.topicId ?? stableId('topic', `${new Date(plannedAt.getTime()+item.proposalIndex).toISOString()}\n${item.proposal.displayName.trim()}`),
+          ids: item.evidenceExcerpts.map(e => saveFounderEvidence(sources,e.sourceId,e.excerpt,plannedAt)) }));
+        const scopedEvidence = new Map<string, { id:string;sourceId:string;topicIds:string[];excerpt:string;founder:'ivy'|'james'|null }>();
+        for (const row of prepared) {
+          const previous = input.currentTopics.find(t=>t.id===row.topicId)?.evidenceExcerpts ?? [];
+          const ids = [...row.ids,...previous.map(e=>saveFounderEvidence(sources,e.sourceId,e.excerpt,plannedAt))];
+          for(const id of ids) {
+            const evidence=sources.getEvidence(id)!;
+            const existing=scopedEvidence.get(id);
+            if(existing) { if(!existing.topicIds.includes(row.topicId)) existing.topicIds.push(row.topicId); }
+            else scopedEvidence.set(id,{id,sourceId:evidence.sourceId,topicIds:[row.topicId],excerpt:evidence.excerpt,founder:perspectives.resolveFounderForEvidence(id)});
+          }
+        }
+        const perspectiveResult = options.perspectiveAnalyzer && prepared.length ? await options.perspectiveAnalyzer.analyze({
+          sourceIds:input.sources.map(s=>s.id),topicIds:prepared.map(p=>p.topicId),evidence:[...scopedEvidence.values()]
+        }) : { observations:[],alignmentProposals:[] };
+        const assertScoped = (topicId:string,evidenceIds:readonly string[]) => {
+          if(!prepared.some(p=>p.topicId===topicId) || evidenceIds.some(id=>!scopedEvidence.get(id)?.topicIds.includes(topicId)))
+            throw new Error('FOUNDER_PERSPECTIVE_OUT_OF_SCOPE');
+        };
         options.client.transaction(() => {
           const stamp = now(); if (!options.jobRepository.ownsLease(job, stamp)) throw new LeaseLostError(job.key);
-          for (const item of plan.topics) {
-            const ids = item.evidenceExcerpts.map(e => saveFounderEvidence(sources, e.sourceId, e.excerpt, stamp));
+          for (const {item,ids} of prepared) {
             const old = item.topicId ? topics.listCurrentTopics().find(t => t.id === item.topicId) : undefined;
             const evidenceIds = [...new Set([...(old?.evidenceIds ?? []), ...ids])];
             const rationale = JSON.stringify({ origin: 'founder_stream', jobKey: job.key, needsConfirmation: item.relations });
@@ -120,7 +152,23 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
               displayName: item.proposal.displayName, stage: item.proposal.stage, outcome: item.proposal.outcome,
               evidenceIds, rationale, changedAt: stamp });
             else topics.createTopic({ displayName: item.proposal.displayName, stage: item.proposal.stage, outcome: item.proposal.outcome,
-              evidenceIds, rationale, createdAt: new Date(stamp.getTime() + item.proposalIndex) });
+              evidenceIds, rationale, createdAt: new Date(plannedAt.getTime() + item.proposalIndex) });
+          }
+          for(const observation of perspectiveResult.observations) {
+            assertScoped(observation.topicId,[observation.evidenceId]);
+            const evidence=sources.getEvidence(observation.evidenceId)!;
+            perspectiveReconciler.reconcile({...observation,observedAt:new Date(sources.getSource(evidence.sourceId)!.occurredAt)});
+          }
+          for(const proposal of perspectiveResult.alignmentProposals) {
+            const candidate=new AlignmentDetector().propose(proposal);
+            assertScoped(candidate.topicId,candidate.evidenceIds);
+            const card=renderAlignmentQuestion({issue:{...candidate,status:'ready',createdAt:stamp.toISOString(),updatedAt:stamp.toISOString(),deliveredMessageId:null},
+              topicName:prepared.find(p=>p.topicId===candidate.topicId)!.item.proposal.displayName,
+              evidence:candidate.evidenceIds.map(id=>{
+                const e=sources.getEvidence(id)!,s=sources.getSource(e.sourceId)!;
+                return {...e,occurredAt:s.occurredAt,...(s.sourceType==='minute_transcript'?{minuteToken:s.externalId}:{})};
+              })});
+            notificationPolicy.prepare(candidate,{targetChatId:job.chatId,card:card.card},stamp);
           }
           policy.reconcilePending(stamp);
           options.jobRepository.markCompleted(job, stamp);
@@ -139,6 +187,11 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
     ['capture_group_message','analyze_founder_stream_batch'] : ['capture_group_message'];
   const afterTick = async () => {
       if (!options.flags.analysisEnabled) return;
+      // The immutable source survives an enqueue failure. Stable source-set keys
+      // allow a later tick/restart to repair just the downstream handoff.
+      if (allowed(approvedGroup)) for(const source of sources.listSources().filter(s=>s.sourceType==='minute_transcript' && s.availabilityStatus==='available' && minuteEligible(s,approvedGroup))) {
+        try { enqueueMinute(source); } catch { /* Retry on the next independent tick. */ }
+      }
       policy.reconcilePending(now());
       if (!options.flags.groupDeliveryEnabled || !options.delivery) return;
       await deliverFounderMessages(options, outbox, policy, now, allowed);
@@ -147,7 +200,17 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
     leaseNext: at => options.jobRepository.leaseNextSupportedJob(at,supportedKinds),
     process: job => process(job as FounderStreamJob), afterTick
   });
-  return { route, process, afterTick, supportedKinds, runOnce: () => consumer.runOnce(), start: () => { if (options.flags.captureEnabled) consumer.start(); },
+  function enqueueMinute(source: ContextSourceRecord) {
+    return options.jobRepository.enqueueFounderStreamBatch({chatId:approvedGroup,sourceIds:[source.id],since:source.occurredAt,until:now().toISOString(),capturedAt:now()});
+  }
+  function captureMinute(context: MinuteContext) {
+    if(!options.flags.captureEnabled || !allowed(approvedGroup))return;
+    const source=sources.saveSource(captureMinuteTranscriptSource(context,now(),{maxBytes:200_000,maxSegments:10_000},approvedGroup).source).source;
+    if(options.flags.analysisEnabled && minuteEligible(source,approvedGroup))enqueueMinute(source);
+  }
+  return { route, process, afterTick, captureMinute,
+    minuteCaptureChatId:options.flags.captureEnabled && allowed(approvedGroup)?approvedGroup:undefined,
+    supportedKinds, runOnce: () => consumer.runOnce(), start: () => { if (options.flags.captureEnabled) consumer.start(); },
     stop: () => consumer.stop(), isConsumptionAvailable: () => consumer.isConsumptionAvailable() };
 }
 
@@ -157,6 +220,7 @@ export function buildFounderStreamInput(sources: ContextSourceRepository, topics
     const source = sources.getSource(id);
     if (!source || source.availabilityStatus !== 'available' || !['group_message','minute_transcript'].includes(source.sourceType) ||
       (source.sourceType === 'group_message' && source.metadata.chatId !== chatId)) return null;
+    if(source.sourceType==='minute_transcript' && !minuteEligible(source,chatId))return null;
     if (source.sourceType === 'group_message' && (source.metadata.senderType !== 'user' ||
       sources.client.prepare("SELECT 1 FROM outbox WHERE delivered_message_id=? AND status='delivered'").get(source.externalId))) return null;
     return source;
@@ -194,6 +258,9 @@ export function buildFounderStreamInput(sources: ContextSourceRepository, topics
   }
   return validateFounderStreamInput({ sources: [...selected.values()], currentTopics });
 }
+function minuteEligible(source:ContextSourceRecord,chatId:string):boolean {
+  return source.metadata.founderStreamEligible===true && source.metadata.founderStreamChatId===chatId;
+}
 export function saveFounderEvidence(repository: ContextSourceRepository, sourceId: string, excerpt: string, capturedAt: Date): string {
   const source = repository.getSource(sourceId); if (!source) throw new Error('source missing');
   let locator: unknown;
@@ -203,8 +270,8 @@ export function saveFounderEvidence(repository: ContextSourceRepository, sourceI
   else {
     const segment = (source.metadata.segments as Record<string, unknown>[] | undefined)?.find(s => typeof s.text === 'string' && s.text.includes(excerpt));
     if (!segment) throw new Error('minute evidence must fit one segment');
-    const { text: _text, ...fields } = segment;
-    locator = { kind: 'minute_segment', sourceVersion: source.sourceVersion, contentHash: source.contentHash, ...fields };
+    locator = { kind: 'minute_segment', sourceVersion: source.sourceVersion, contentHash: source.contentHash,
+      segmentOrdinal:segment.segmentOrdinal,speakerName:segment.speakerName,startMs:segment.startMs,endMs:segment.endMs };
   }
   return repository.saveEvidence({ sourceId, excerpt, locator: locator as never, evidenceLevel:'primary_statement', capturedAt }).evidence.id;
 }

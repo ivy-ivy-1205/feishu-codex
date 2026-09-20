@@ -52,7 +52,8 @@ export function assertContextSourceBytesWithinLimit(
 export function captureMinuteTranscriptSource(
   context: MinuteContext,
   capturedAt: Date,
-  limits?: ContextSourceCaptureLimits
+  limits?: ContextSourceCaptureLimits,
+  founderStreamChatId?: string
 ): CapturedMinuteSource {
   if (limits && context.transcript.length > limits.maxSegments) {
     throw new ContextSourceCaptureError('CONTEXT_SOURCE_SEGMENTS_EXCEEDED');
@@ -77,6 +78,7 @@ export function captureMinuteTranscriptSource(
       contentFormat: `text/plain; profile=${minuteTranscriptNormalizationVersion}`,
       contentText,
       metadata: {
+        ...(founderStreamChatId ? { founderStreamEligible: true, founderStreamChatId } : {}),
         title: context.title,
         startedAt: context.startedAt,
         endedAt: context.endedAt,

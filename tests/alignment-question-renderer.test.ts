@@ -31,11 +31,12 @@ describe('alignment cards', () => {
   });
 
   it('supports traceable minute evidence and bounds displayed source text', () => {
-    const minute = { ...source('james'), excerpt: '文'.repeat(3000), locator: { kind: 'minute_segment' as const,
+    const minute = { ...source('james'), minuteToken:'obcn_fixture', excerpt: '文'.repeat(3000), locator: { kind: 'minute_segment' as const,
       sourceVersion: 1, contentHash: 'b'.repeat(64), segmentOrdinal: 7, speakerName: 'ou_private', startMs: 1000, endMs: 2000 } };
     const result = renderAlignmentQuestion({ issue, topicName: '官网', evidence: [source('ivy'), minute] });
     const body = JSON.stringify(result.card);
-    expect(body).toContain('source-james@v1');
+    expect(body).toContain('obcn_fixture');
+    expect(body).not.toContain('source-james');
     expect(body).toContain('第 8 段');
     expect(body).not.toContain('文'.repeat(241));
     expect(body).not.toContain('ou_private');

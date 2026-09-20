@@ -1,5 +1,7 @@
 # MEMORY.md
 
+- 2026-09-21 Founder Stream Task 11 将妙记接入相同 topic/观点/对齐管线，但只允许新捕获且带 `founderStreamEligible` 和匹配群标记的来源；旧未标记妙记不自动带入共享群语境。不可变来源保存后用 source-set 稳定键独立补队列，enqueue/analysis 故障不回滚既有私人会议总结与 Todo，也不重复投递。妙记观点归因只接受逐段可靠平台 ID 与配置身份映射，纯文本显示名不作身份；未知身份仍可贡献话题 Context，不生成个人观点或共识。群卡片显示安全的外部妙记编号与段落，不显示内部 source ID。structured perspective port 已接入且输出再经过来源/话题范围及共识/提醒策略校验；缺省未注入语义 adapter 时保持无观点/提醒，不用关键词伪造共识。本轮仅本地 fake 与 SQLite 验证，未访问生产。
+
 - 2026-09-21 Task 10 复核修正：仅在白名单群且已配置创始人身份验证后的人工纠错源标注可信 user，避免改名使话题退出后续整理；模型窗口先筛可信证据，再保留名称与最新成果目标所需锚点，余量优先最新证据，不删除完整历史。新 webhook 入站与 capture intent 同事务延长待分析窗口，消费者优先完成 capture，保证迟到的排队消费不会让旧批次在新消息静默满 300 秒前开跑。
 
 - 2026-09-21 Founder Stream Task 10 的实时群入口只做本地原子留存/入队；capture、analysis、group delivery 三层默认关闭，会议与群分析共用单串行消费者。重复事件/消息不重复处理，按群/话题静默 300 秒后分析；大历史批次拆为持久子批次，模型只见有界证据窗口，当前版本仍累计保留全部旧 evidence。群纠错回执走 durable outbox，不在 webhook 内发送。历史 source 必须明确 senderType=user 才可进入话题分析，app/unknown 和已知 Bot 投递只保留审计，不按显示名猜创始人；旧缺失 senderType 的来源保守跳过。观点/分歧的语义输出尚未接入，本任务不伪造双方共识；生产开关/真实语料/群发送仍未获本轮授权。

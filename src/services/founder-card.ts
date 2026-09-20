@@ -2,12 +2,13 @@ import type { ContextEvidenceRecord } from '../repositories/context-source-repos
 
 export type FounderCardKind = 'founder_work_map' | 'alignment_question' | 'alignment_resolution';
 export interface FounderCard { kind: FounderCardKind; card: Record<string, unknown> }
-export type FounderCardEvidence = Pick<ContextEvidenceRecord, 'id' | 'sourceId' | 'sourceVersion' | 'excerpt' | 'locator'> & { occurredAt: string };
+export type FounderCardEvidence = Pick<ContextEvidenceRecord, 'id' | 'sourceId' | 'sourceVersion' | 'excerpt' | 'locator'> & { occurredAt: string; minuteToken?: string };
 export const founderSourceExcerptLimit = 240;
 
 /** Display-only projection: never serialize a domain record into a card. */
 export function founderText(value: string, limit: number): string {
   const text = value.replace(/ou_[\w-]+/gu, '[身份已隐藏]')
+    .replace(/ctxsrc_[\w-]+/gu, '[内部来源已隐藏]')
     .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').replace(/\s+/gu, ' ').trim()
     .replace(/</gu, '＜').replace(/>/gu, '＞');
   const chars = Array.from(text);
@@ -19,7 +20,7 @@ export function founderSourceText(source: FounderCardEvidence): string {
     !Number.isFinite(Date.parse(source.occurredAt)) || !source.excerpt.trim()) throw new Error('valid founder source evidence is required');
   const reference = source.locator.kind === 'group_message'
     ? `群消息 ${founderText(source.locator.messageId, 100)}`
-    : `妙记 ${founderText(source.sourceId, 100)}@v${source.sourceVersion} · 第 ${source.locator.segmentOrdinal + 1} 段`;
+    : `妙记 ${source.minuteToken && /^obcn[A-Za-z0-9_-]{1,100}$/.test(source.minuteToken) ? source.minuteToken : '（外部编号不可用）'} · 第 ${source.locator.segmentOrdinal + 1} 段`;
   return `来源：${reference} · ${new Date(source.occurredAt).toISOString()}\n原文：${founderText(source.excerpt, founderSourceExcerptLimit)}`;
 }
 
