@@ -13,7 +13,8 @@ import type {
   FeishuContextMessage,
   FeishuContextPage
 } from '../services/feishu-context-sync.js';
-import { approvedFeishuProjectContextChatId, FeishuContextSyncError } from '../services/feishu-context-sync.js';
+import { approvedFeishuProjectContextChatId, FeishuContextSyncError, FeishuHistoryReadError,
+  type FeishuReadFailureDiagnostic } from '../services/feishu-context-sync.js';
 
 export interface FeishuSdkClientOptions {
   appId: string;
@@ -100,19 +101,28 @@ export class FeishuSdkContextClient implements FeishuContextClient {
     if (!this.#sdkClient.im.v1) {
       throw new Error('Feishu SDK context message API is unavailable');
     }
-    const response = await this.#sdkClient.im.v1.message.list({
-      params: {
-        container_id_type: containerType,
-        container_id: containerId,
-        page_size: 50,
-        ...(input.cursor ? { page_token: input.cursor } : {}),
-        start_time: String(Math.floor(input.since.getTime() / 1_000)),
-        ...(input.until ? { end_time: String(Math.ceil(input.until.getTime() / 1_000)) } : {})
-      }
-    });
-    if (isRecord(response) && response.code !== undefined && response.code !== 0) throw new Error('FEISHU_HISTORY_API_ERROR');
+    let response: unknown;
+    try {
+      response = await this.#sdkClient.im.v1.message.list({
+        params: {
+          container_id_type: containerType,
+          container_id: containerId,
+          page_size: 50,
+          ...(input.cursor ? { page_token: input.cursor } : {}),
+          start_time: String(Math.floor(input.since.getTime() / 1_000)),
+          ...(input.until ? { end_time: String(Math.ceil(input.until.getTime() / 1_000)) } : {})
+        }
+      });
+    } catch (error) {
+      throw new FeishuHistoryReadError(classifyHistoryReadFailure(error));
+    }
+    if (isRecord(response) && response.code !== undefined && response.code !== 0) {
+      throw new FeishuHistoryReadError({ category: 'api_rejected', feishuCode: safeInteger(response.code), httpStatus: null });
+    }
     const data = responseData(response);
-    if (!isRecord(data) || !Array.isArray(data.items)) throw new Error('FEISHU_HISTORY_PAGE_INVALID');
+    if (!isRecord(data) || !Array.isArray(data.items)) {
+      throw new FeishuHistoryReadError({ category: 'invalid_response', feishuCode: null, httpStatus: null });
+    }
     const record = data;
     const items = data.items as unknown[];
     const hasCursor = typeof record.page_token === 'string' && record.page_token.trim().length > 0;
@@ -148,6 +158,39 @@ export class FeishuSdkContextClient implements FeishuContextClient {
     if (input.chatId !== approvedFeishuProjectContextChatId) throw new FeishuContextSyncError(input.chatId);
     return input.messageIds.flatMap((messageId) => this.#filesByMessageId.get(messageId) ?? []);
   }
+}
+
+const networkErrorCodes = new Set(['ECONNABORTED', 'ECONNREFUSED', 'ECONNRESET', 'ENETUNREACH', 'ETIMEDOUT']);
+
+function classifyHistoryReadFailure(error: unknown): FeishuReadFailureDiagnostic {
+  const raw = isRecord(error) ? error : {};
+  const response = isRecord(raw.response) ? raw.response : {};
+  const responseBody = isRecord(response.data) ? response.data : {};
+  const directBody = isRecord(raw.data) ? raw.data : {};
+  const httpStatus = safeHttpStatus(response.status ?? raw.status ?? raw.statusCode);
+  const feishuCode = safeInteger(responseBody.code ?? directBody.code ?? raw.code);
+  const transportCode = typeof raw.code === 'string' ? raw.code : null;
+  const category: FeishuReadFailureDiagnostic['category'] = httpStatus === 401 || httpStatus === 403
+    ? 'permission_denied'
+    : httpStatus === 429
+      ? 'rate_limited'
+      : httpStatus !== null && httpStatus >= 500
+        ? 'remote_service'
+        : feishuCode !== null
+          ? 'api_rejected'
+          : transportCode !== null && networkErrorCodes.has(transportCode)
+            ? 'network'
+            : 'unknown';
+  return { category, feishuCode, httpStatus };
+}
+
+function safeInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null;
+}
+
+function safeHttpStatus(value: unknown): number | null {
+  const status = safeInteger(value);
+  return status !== null && status >= 100 && status <= 599 ? status : null;
 }
 
 export interface FeishuSdkApiClientOptions {

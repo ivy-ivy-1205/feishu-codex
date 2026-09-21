@@ -28,14 +28,30 @@ export async function runBackfillCli(args: string[], dependencies: CliDependenci
   const options = parseBackfillArguments(args);
   const report = await runFounderStreamBackfill({ ...dependencies, ...options });
   const gapsByCode: Record<string, number> = {};
-  for (const gap of report.gaps) gapsByCode[gap.code] = (gapsByCode[gap.code] ?? 0) + 1;
+  const readFailuresByCategory: Record<string, number> = {};
+  const feishuErrorCodes: Record<string, number> = {};
+  const httpStatuses: Record<string, number> = {};
+  for (const gap of report.gaps) {
+    gapsByCode[gap.code] = (gapsByCode[gap.code] ?? 0) + 1;
+    if (!gap.diagnostic) continue;
+    readFailuresByCategory[gap.diagnostic.category] = (readFailuresByCategory[gap.diagnostic.category] ?? 0) + 1;
+    if (gap.diagnostic.feishuCode !== null) {
+      const code = String(gap.diagnostic.feishuCode);
+      feishuErrorCodes[code] = (feishuErrorCodes[code] ?? 0) + 1;
+    }
+    if (gap.diagnostic.httpStatus !== null) {
+      const status = String(gap.diagnostic.httpStatus);
+      httpStatuses[status] = (httpStatuses[status] ?? 0) + 1;
+    }
+  }
   // Explicit whitelist: never serialize raw report, messages, IDs, cursors, errors or sources.
   dependencies.write(JSON.stringify({ dryRun: report.dryRun, requestedRange: report.requestedRange,
     coverageStatus: report.coverageStatus, coverage: report.coverage,
     messagesRead: report.messagesRead, sourcesCaptured: report.sourcesCaptured,
     sourcesCreated: report.sourcesCreated, jobsEnqueued: report.jobsEnqueued,
     filesRead: report.filesRead, filesUnreadable: report.filesUnreadable,
-    mediaSkipped: report.mediaSkipped, voiceTextMissing: report.voiceTextMissing, gapsByCode }));
+    mediaSkipped: report.mediaSkipped, voiceTextMissing: report.voiceTextMissing, gapsByCode,
+    readFailuresByCategory, feishuErrorCodes, httpStatuses }));
 }
 
 async function main(): Promise<void> {

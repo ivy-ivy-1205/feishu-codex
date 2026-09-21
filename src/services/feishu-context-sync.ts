@@ -49,6 +49,31 @@ export interface FeishuContextGap {
     | 'REFERENCED_FILES_UNAVAILABLE' | 'FILE_REFERENCE_UNAVAILABLE' | 'MESSAGE_DELETED' | 'MESSAGE_TIME_INVALID' | 'MESSAGE_INVALID';
   sourceRef: string;
   reason: string;
+  diagnostic?: FeishuReadFailureDiagnostic;
+}
+
+export type FeishuReadFailureCategory =
+  | 'permission_denied'
+  | 'rate_limited'
+  | 'api_rejected'
+  | 'network'
+  | 'remote_service'
+  | 'invalid_response'
+  | 'unknown';
+
+export interface FeishuReadFailureDiagnostic {
+  category: FeishuReadFailureCategory;
+  feishuCode: number | null;
+  httpStatus: number | null;
+}
+
+export class FeishuHistoryReadError extends Error {
+  readonly code = 'FEISHU_HISTORY_READ_FAILED';
+
+  constructor(readonly diagnostic: FeishuReadFailureDiagnostic) {
+    super('Feishu history read failed');
+    this.name = 'FeishuHistoryReadError';
+  }
 }
 
 export interface FeishuContextSyncReport {
@@ -160,10 +185,11 @@ export async function syncFeishuProjectContext(
           if (!input.feishu.listThreadMessages) throw new Error('thread reader unavailable');
           page = await input.feishu.listThreadMessages({ threadId, ...window });
         }
-      } catch {
+      } catch (error) {
         pageAudit.status = 'unavailable';
         paginationIncomplete = true;
-        gaps.push({ code: threadId === null ? 'ROOT_PAGE_UNAVAILABLE' : 'THREAD_PAGE_UNAVAILABLE', sourceRef: `feishu:chat:${chatId}:${kind}:${threadId ?? 'root'}`, reason: 'page unavailable; requested cursor retained in coverage' });
+        gaps.push({ code: threadId === null ? 'ROOT_PAGE_UNAVAILABLE' : 'THREAD_PAGE_UNAVAILABLE', sourceRef: `feishu:chat:${chatId}:${kind}:${threadId ?? 'root'}`, reason: 'page unavailable; requested cursor retained in coverage',
+          ...(error instanceof FeishuHistoryReadError ? { diagnostic: error.diagnostic } : {}) });
         break;
       }
       pagesRead += 1;

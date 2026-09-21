@@ -165,6 +165,55 @@ describe('founder stream backfill', () => {
     expect(deps.sourceRepository.listSources()).toEqual([]);
   });
 
+  it('reports a rejected Feishu history response by safe category and numeric code only', async () => {
+    const sdk = sdkClientWithHistoryList(async () => ({
+      code: 999,
+      msg: 'sensitive error containing oc_private and a request URL'
+    }));
+    const lines: string[] = [];
+    await cli.runBackfillCli(['--chat-id', chatId, '--since', since, '--dry-run'], {
+      feishu: new FeishuSdkContextClient(sdk),
+      now,
+      write: (line) => lines.push(line)
+    });
+
+    expect(JSON.parse(lines.join(''))).toMatchObject({
+      gapsByCode: { ROOT_PAGE_UNAVAILABLE: 1 },
+      readFailuresByCategory: { api_rejected: 1 },
+      feishuErrorCodes: { '999': 1 },
+      httpStatuses: {}
+    });
+    expect(lines.join('')).not.toContain('sensitive error');
+    expect(lines.join('')).not.toContain('oc_private');
+    expect(lines.join('')).not.toContain('request URL');
+  });
+
+  it('reports a thrown Feishu permission failure without serializing the remote error body', async () => {
+    const sdk = sdkClientWithHistoryList(async () => {
+      throw {
+        response: {
+          status: 403,
+          data: { code: 230002, msg: 'bot is not in private chat oc_secret' }
+        }
+      };
+    });
+    const lines: string[] = [];
+    await cli.runBackfillCli(['--chat-id', chatId, '--since', since, '--dry-run'], {
+      feishu: new FeishuSdkContextClient(sdk),
+      now,
+      write: (line) => lines.push(line)
+    });
+
+    expect(JSON.parse(lines.join(''))).toMatchObject({
+      gapsByCode: { ROOT_PAGE_UNAVAILABLE: 1 },
+      readFailuresByCategory: { permission_denied: 1 },
+      feishuErrorCodes: { '230002': 1 },
+      httpStatuses: { '403': 1 }
+    });
+    expect(lines.join('')).not.toContain('bot is not in private chat');
+    expect(lines.join('')).not.toContain('oc_secret');
+  });
+
   it('records root API failures and missing thread readers as partial audited runs', async () => {
     for (const failRoot of [true, false]) {
       const deps = repositories();
@@ -190,4 +239,12 @@ function sdkHistoryFixture(data: Record<string, unknown>): FeishuSdkContextClien
     minutes: { v1: { minute: { get: unused }, minuteTranscript: { get: unused } } }
   };
   return new FeishuSdkContextClient(sdk);
+}
+
+function sdkClientWithHistoryList(list: () => Promise<unknown>): FeishuSdkClientLike {
+  const unused = async () => { throw new Error('unexpected fixture call'); };
+  return {
+    im: { message: { create: unused }, v1: { message: { list } } },
+    minutes: { v1: { minute: { get: unused }, minuteTranscript: { get: unused } } }
+  };
 }
