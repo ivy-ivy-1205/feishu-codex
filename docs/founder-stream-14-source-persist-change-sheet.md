@@ -1,8 +1,8 @@
 # Founder Stream：固定 20 天／14 个文本来源持久化变更单
 
-状态：**已提交供 Ivy 审批；尚未授权执行。**
+状态：**已获 Ivy 批准并于 2026-09-22 完成生产执行与验证。**
 
-retention patch 的独立工具镜像、关闭态三列迁移、备份和回滚步骤由 [Founder Stream Retention Patch 精确部署变更单](./founder-stream-retention-deployment-change-sheet.md) 管理；完成该部署验收前，本文件的持久化动作保持 HOLD。
+retention patch 的独立工具镜像、关闭态三列迁移、备份和回滚步骤由 [Founder Stream Retention Patch 精确部署变更单](./founder-stream-retention-deployment-change-sheet.md) 管理；该前置迁移已完成并通过生产验证。
 
 这张变更单只解决一件事：把已经通过只读 Dry-run 验证的 14 个群聊文本来源写入生产 SQLite，作为首张工作地图的可追溯底座。它不生成工作地图、不调用 Codex、不发送群消息、不开启持续捕获。
 
@@ -41,7 +41,7 @@ retention patch 的独立工具镜像、关闭态三列迁移、备份和回滚�
 - `FOUNDER_STREAM_ANALYSIS_ENABLED=false`
 - `FOUNDER_STREAM_GROUP_DELIVERY_ENABLED=false`
 
-## 3. 90 天保留策略与当前阻断项
+## 3. 90 天保留策略与已解除的阻断项
 
 政策已经确定：
 
@@ -50,9 +50,7 @@ retention patch 的独立工具镜像、关闭态三列迁移、备份和回滚�
 - 不自动删除；到期前先生成精确预览，再由 Ivy 单独批准清理。
 - 日志、Git、`MEMORY.md` 和变更报告不得复制原始正文。
 
-**当前数据模型尚不能安全兑现“删除正文但保留来源 ID”。** `context_sources.content_text` 为 `NOT NULL`，来源哈希和后续证据引用也依赖原始记录；现有删除流程只能删除完全无引用的整个 source，不能把已经被工作地图引用的来源变成可审计的脱敏占位记录。
-
-因此本变更单当前仍是 **执行 HOLD**。最小 retention patch 已在本地实现并通过 review；真正持久化前还必须把该 patch 纳入获批部署并完成生产迁移验证：
+生产数据库已完成最小 retention schema 迁移，执行 HOLD 已解除。实现满足以下边界：
 
 1. 为来源记录增加明确的正文到期时间或等价 retention 元数据。
 2. 增加按精确 source ID 将正文替换为不可逆脱敏占位、同时保留来源 ID/时间/locator/审计关系的事务操作。
@@ -62,9 +60,9 @@ retention patch 的独立工具镜像、关闭态三列迁移、备份和回滚�
 
 本地实现还提供 `context-source:retention` 运维入口：`--preview` 与 `--execute` 互斥，必须传入唯一、非空的精确 source ID 集合和 `--as-of` 时间。preview 只输出 ID、来源类型和到期时间，不输出正文；execute 以单事务替换 source 正文及其 evidence excerpt、保留所有 ID/关系、启用 SQLite `secure_delete`，并在存在 queued/retry/processing job 或 processing extraction run 时拒绝执行。它不会自动清理备份。
 
-实际持久化完成后，记录精确 `persisted_at` 和 `raw_text_due_at = persisted_at + 90 days`。建议在第 75 天生成只读清理预览；第 90 天不自动执行。
+实际 `persisted_at` 为 `2026-09-21T17:57:23.562Z`，`raw_text_due_at` 为 `2026-12-20T17:57:23.562Z`。建议在第 75 天生成只读清理预览；第 90 天不自动执行。
 
-## 4. 精确执行顺序（每一步单独审批）
+## 4. 已执行的精确顺序
 
 ### P1 — 只读 Preflight
 
@@ -163,13 +161,20 @@ retention patch 的独立工具镜像、关闭态三列迁移、备份和回滚�
 | 门 | 当前状态 |
 |---|---|
 | 范围与 90 天政策 | Ivy 已接受 |
-| 本精确变更单 review | 待 Ivy review |
+| 本精确变更单 review | 已通过 |
 | retention patch 实现与本地 review | 已完成；72 个测试文件 / 691 个测试、typecheck、build、diff check 全部通过 |
-| retention patch 获批部署与生产迁移验证 | **阻断，尚未执行** |
-| P1 只读 Preflight | 待单独批准 |
-| P2 停服与一致性备份 | 待单独批准 |
-| P3 重复 Dry-run | 待单独批准 |
-| P4 持久化 | 待单独批准 |
-| P5 重启与验证 | 待单独批准 |
+| retention patch 获批部署与生产迁移验证 | 已完成 |
+| P1 只读 Preflight | 已通过 |
+| P2 停服与一致性备份 | 已完成 |
+| P3 重复 Dry-run | 已通过，结果与冻结基线一致 |
+| P4 持久化 | 已完成：14 个文本来源、1 coverage、21 gap、1 queued job |
+| P5 重启与验证 | 已完成：10/10 健康样本通过 |
 
-批准本文件只代表接受方案，不代表授权执行任何服务器操作。
+## 7. 生产执行记录
+
+- 最终维护窗：UTC `20260921T175717Z` 至 `20260921T175731Z`，约 14 秒。
+- 一致性备份：`/opt/feishu-codex/backups/bridge.pre-founder-persist-20260921T175717Z.sqlite`，389120 bytes，`600 root:root`。
+- 写入后总量：`context_sources=37`、`batch_jobs=12`、`outbox=7`；本次新增 14 个 `group_message`、1 个 `feishu_sync_coverage`、21 个 `feishu_sync_gap` 和 1 个 queued 分析 job。
+- 分析 job 的 14 个 source ID 无重复，全部对应批准群和冻结窗口；三个 Founder Stream 能力未启用，因此未调用 Codex、未生成工作地图、未发送群消息。
+- `integrity_check=ok`，无外键违规；生产表集合未变化；原 Bridge 镜像恢复后 5 分钟 10 次采样均为 healthy、restart count 0、health/ready 200。
+- 两次执行前校验问题均 fail closed；一次写后验证脚本问题触发整库恢复。最终执行前已用失败副本证明全部业务断言通过。失败副本、无效备份、一次性 persist 镜像、上传/构建目录和临时脚本均已清理；只保留最终成功备份。
