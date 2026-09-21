@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "founder-stream:backfill": "node --import tsx src/cli/backfill-founder-stream.ts",
+    "context-source-retention:migrate": "node --import tsx src/cli/migrate-context-source-retention.ts",
     "context-source:retention": "node --import tsx src/cli/context-source-retention.ts",
     "dev": "node --env-file=.env --import tsx src/server.ts"
   },

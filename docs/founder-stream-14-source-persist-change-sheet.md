@@ -2,6 +2,8 @@
 
 状态：**已提交供 Ivy 审批；尚未授权执行。**
 
+retention patch 的独立工具镜像、关闭态三列迁移、备份和回滚步骤由 [Founder Stream Retention Patch 精确部署变更单](./founder-stream-retention-deployment-change-sheet.md) 管理；完成该部署验收前，本文件的持久化动作保持 HOLD。
+
 这张变更单只解决一件事：把已经通过只读 Dry-run 验证的 14 个群聊文本来源写入生产 SQLite，作为首张工作地图的可追溯底座。它不生成工作地图、不调用 Codex、不发送群消息、不开启持续捕获。
 
 ## 1. 冻结范围
