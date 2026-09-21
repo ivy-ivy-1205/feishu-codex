@@ -1,5 +1,11 @@
 # MEMORY.md
 
+- 2026-09-22 Ivy 更新工程协作授权：在目标、审查方案、安全边界和回滚路径已明确的情况下，Codex 可连续完成本地实现、构建、验证和上线工程动作，不再逐步申请批准；关键结果需汇报。只有涉及产品取舍、数据/权限范围扩大、不可逆删除、缺少可验证回滚、客户生产数据或新增业务风险时才停下请 Ivy 决定。该授权不允许自动执行 Todo、扩大飞书读取范围、接入新数据源或绕过既有高风险闸门。
+
+- 2026-09-21 Ivy 批准进入 D2，但本地构建合同预检触发停止条件，未访问或修改服务器。审计提交 `2d6ff42` 已有受控 migration CLI，却只有通用 `Dockerfile`：最终镜像会安装 Codex CLI、复制完整 Bridge dist、暴露3000端口并默认启动 `dist/server.js`。将其直接标为 retention 工具镜像会扩大运行入口、凭据/网络误用和误启动风险，不符合“只包含受控CLI、入口唯一”的D2边界。禁止在服务器用未审查的临时 Dockerfile 绕过；继续前需先本地新增专用 retention Dockerfile/构建合同测试，验证镜像无 Codex、无 server 默认入口、默认只运行 migration CLI，再形成新审计 checkpoint。
+
+- 2026-09-21 Ivy 批准并完成 D1 即时只读生产确认（UTC `2026-09-21T15:40:39Z`）：`feishu-codex-bridge` 容器 running/healthy、restart count 0，`/health` 与 `/ready` 均为 200；容器 ID 为 `ba4944641371aff45230cca7c92020764c9cc853427c43ba2b422a3f49bed54e`，原镜像 ID 为 `sha256:5a4d3626c6b6ac62467c650867b9ba170bc23f240857f868d6d6362b12536a71`，compose 工作目录 `/opt/feishu-codex/app/deploy`、配置 `/opt/feishu-codex/app/deploy/docker-compose.production.yml`。SQLite `/opt/feishu-codex/data/bridge.sqlite` 为 389120 bytes、mode 600、`integrity_check=ok`、无外键违规，retention 三列仍全部不存在；source 1 条、outbox 仅 7 条 delivered，无 queued/retry/processing batch job、processing extraction run 或 authorized/running Todo。根盘使用率 85%，可用 10044040 KiB（约9.58 GiB），高于 D1 的6 GiB门槛。首次数据库聚合查询因 SQL 字符串引用错误只读失败，随后改为参数绑定重跑成功，未产生写入。D1 通过；D2 构建独立工具镜像仍需单独批准。
+
 - 2026-09-21 Ivy 批准 D0 本地实现。已按 TDD 补齐独立 `context-source-retention:migrate` CLI：只接受 SQLite 数据库与显式 `--apply`，严格核对 `context_sources` 基础列/约束，三列全缺时在单一 `BEGIN IMMEDIATE` 事务中添加，三列全有时幂等 no-op，部分存在、基础 schema 异常或完整迁移定义不符时 fail closed；输出仅含列状态、source 数量、完整性与外键违规数，不输出正文或 ID。失败注入证明第二条 ALTER 失败会回滚第一条。D0 未访问服务器、飞书或 Codex，未部署；下一步 D1 即时只读生产确认仍需单独批准。
 
 - 2026-09-21 已提交 `docs/founder-stream-retention-deployment-change-sheet.md` 供 Ivy review，未执行部署。为避免把本地 `main` 中尚未批准的整套 Founder Stream 一并替换到生产，方案改为独立一次性 retention 工具镜像：不替换原 Bridge，只在短维护窗内做一致性备份、三列限定事务迁移，随后继续启动原镜像。`f5c9f50` 尚缺只操作 `context_sources` 三列且拒绝部分迁移/异常基础schema的独立 migration CLI；该本地TDD实现与新checkpoint是执行前阻断。部署分为D0本地CLI、D1即时只读确认、D2工具镜像构建、D3停服备份、D4关闭态迁移、D5原Bridge恢复验证，每阶段单独审批；不读取飞书、不调用Codex、不发送消息、不持久化14条来源。

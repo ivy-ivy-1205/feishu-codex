@@ -45,10 +45,11 @@
 aijia/feishu-codex-retention:<新的审计提交短 SHA>
 ```
 
-镜像包含两个受控入口：
+镜像只包含一个受控入口：
 
 1. `context-source-retention-migrate`：只执行上述三列的幂等、事务化迁移与结构验证。
-2. `context-source:retention`：已经实现的精确 source-ID `--preview` / `--execute` 工具。
+
+精确 source-ID 的 `context-source:retention --preview/--execute` 不进入本次镜像。它会不可逆清理正文，权限和用途不同；未来需要时单独构建、审查和授权，不能与 schema 迁移捆绑。
 
 `f5c9f50` 只包含 retention 数据模型和 preview/execute CLI。D0 后续 checkpoint 已补齐独立的“三列限定 migration CLI”：它要求显式 `--apply`，严格核对基础 schema，拒绝部分迁移和异常完整迁移，并用单一 `BEGIN IMMEDIATE` 事务添加三列。不得用通用 migration 或临时内联 SQL 绕过。
 
@@ -94,7 +95,7 @@ aijia/feishu-codex-retention:<新的审计提交短 SHA>
 
 ## 5. 分步执行与审批门
 
-每一阶段完成后停止并汇报；下一阶段需 Ivy 单独批准。
+每一阶段完成后记录并汇报。Ivy 已授权在本变更单既定范围、停止条件和回滚路径内连续推进工程步骤，无需重复逐阶段请示；触发停止条件、需要产品判断、扩大数据/权限范围或涉及计划外不可逆动作时必须停止并询问。
 
 ### D0 — 本地补齐限定 migration CLI
 
@@ -128,7 +129,7 @@ aijia/feishu-codex-retention:<新的审计提交短 SHA>
 - 从D0的新审计提交创建只包含受控CLI的构建上下文。
 - 构建 `aijia/feishu-codex-retention:<sha>`。
 - 记录镜像ID、大小和创建时间。
-- 先用临时 SQLite fixture、`--network none` 验证migration和preview入口。
+- 先用临时 SQLite fixture、`--network none` 验证唯一 migration 入口；无参数必须 fail closed，显式 `--apply` 才迁移。
 - 临时容器执行后删除；保留工具镜像。
 
 停止条件：构建失败、镜像入口不唯一、fixture迁移结果不符、镜像需要Secrets或网络。
@@ -237,8 +238,8 @@ aijia/feishu-codex-retention:<新的审计提交短 SHA>
 |---|---|
 | 本变更单review | 待 Ivy |
 | D0限定migration CLI实现 | 已批准并在本地完成，未部署 |
-| D1即时只读确认 | 待单独批准 |
-| D2工具镜像构建 | 待单独批准 |
+| D1即时只读确认 | 已批准并通过（2026-09-21 UTC），未产生写入 |
+| D2工具镜像构建 | 已批准进入；构建合同预检阻断，服务器未变更 |
 | D3停服与一致性备份 | 待单独批准 |
 | D4数据库迁移 | 待单独批准 |
 | D5原Bridge重启与验证 | 待单独批准 |
