@@ -1,5 +1,7 @@
 # Founder Stream 生产变更单 — 提案，不执行
 
+> 固定 20 天窗口、14 个文本来源的首个持久化动作，现由更窄的 [Founder Stream：固定 20 天／14 个文本来源持久化变更单](./founder-stream-14-source-persist-change-sheet.md) 管理。该变更单已锁定 90 天原始正文保留政策，并指出当前 retention/redaction 能力是执行前阻断项。本文件继续用于后续完整上线阶段。
+
 状态：**本地实现门禁 PASS；生产未获批准，未执行任何步骤。**
 
 本提案对应完整复审提交 `fe102db5e73fa42b0a1235cc24f7b1844b6d4613`；Task 13 round 2 的四项原 Important 及后续问题已关闭，本地 70 文件 / 682 测试、类型检查、构建与 diff 检查通过。**这不是生产授权**。真实 perspective/alignment semantic adapter 仍未实现；本提案不得开启 ANALYSIS / GROUP_DELIVERY。本文没有真实 source count、真实工作地图或后台权限已生效的结论。
@@ -98,4 +100,3 @@ Ivy/James 身份必须分别由可信平台 ID 确认后写入 `founder_identiti
 ## 最终审批状态
 
 所有生产审批栏均为**待批准**；真实source/gap统计与initial work-map预览均为**待执行对应获批步骤后填写**。四项原 Important 已通过本地复核，但真实语义 adapter 仍是明确阻塞；另行实现、独立审查和 Ivy 批准前，analysis/delivery 保持 false。本文只构成下一轮讨论材料，不构成操作授权。
-

@@ -225,10 +225,14 @@ export const contextSources = sqliteTable('context_sources', {
   availabilityStatus: text('availability_status', {
     enum: ['available', 'deleted', 'permission_lost', 'unknown']
   }).notNull(),
-  capturedAt: text('captured_at').notNull()
+  capturedAt: text('captured_at').notNull(),
+  rawTextExpiresAt: text('raw_text_expires_at'),
+  contentState: text('content_state', { enum: ['cleartext', 'redacted'] }).notNull().default('cleartext'),
+  redactedAt: text('redacted_at')
 }, (table) => [
   check('context_sources_version_positive', sql`${table.sourceVersion} > 0`),
   check('context_sources_availability_allowed', sql`${table.availabilityStatus} IN ('available', 'deleted', 'permission_lost', 'unknown')`),
+  check('context_sources_content_state_allowed', sql`${table.contentState} IN ('cleartext', 'redacted')`),
   uniqueIndex('context_sources_logical_hash_unique').on(table.logicalKey, table.contentHash),
   uniqueIndex('context_sources_logical_version_unique').on(table.logicalKey, table.sourceVersion)
 ]);

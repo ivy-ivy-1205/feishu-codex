@@ -9,6 +9,9 @@ import { canonicalJson, sha256, stableId } from '../services/canonical-json.js';
 import { validateContextEvidenceLocator } from '../services/context-evidence-locator.js';
 
 export type ContextSourceAvailability = 'available' | 'deleted' | 'permission_lost' | 'unknown';
+export type ContextSourceContentState = 'cleartext' | 'redacted';
+
+export const retentionRedactionPlaceholder = '[REDACTED:RETENTION_EXPIRED]';
 
 export interface SaveContextSourceInput {
   sourceSystem: string;
@@ -23,6 +26,7 @@ export interface SaveContextSourceInput {
   metadata: Record<string, unknown>;
   availabilityStatus: ContextSourceAvailability;
   capturedAt: Date;
+  rawTextExpiresAt?: Date | null;
 }
 
 export interface ContextSourceRecord {
@@ -41,6 +45,15 @@ export interface ContextSourceRecord {
   contentHash: string;
   availabilityStatus: ContextSourceAvailability;
   capturedAt: string;
+  rawTextExpiresAt: string | null;
+  contentState: ContextSourceContentState;
+  redactedAt: string | null;
+}
+
+export interface ExpiredRawTextPreview {
+  id: string;
+  sourceType: string;
+  rawTextExpiresAt: string;
 }
 
 export interface SaveEvidenceInput {
@@ -100,18 +113,20 @@ export class ContextSourceRepository {
         INSERT INTO context_sources (
           id, source_system, source_type, external_id, logical_key, source_version,
           occurred_at, authors_json, locator_uri, content_format, content_text,
-          metadata_json, content_hash, availability_status, captured_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          metadata_json, content_hash, availability_status, captured_at,
+          raw_text_expires_at, content_state, redacted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'cleartext', NULL)
       `).run(id, input.sourceSystem, input.sourceType, input.externalId, logicalKey,
         row.next_version, input.occurredAt, canonicalJson(input.authors), input.locatorUri,
         input.contentFormat, input.contentText, canonicalJson(input.metadata), contentHash,
-        input.availabilityStatus, input.capturedAt.toISOString());
+        input.availabilityStatus, input.capturedAt.toISOString(), input.rawTextExpiresAt?.toISOString() ?? null);
       return { created: true, source: this.getSourceOrThrow(id) };
     })();
   }
 
   saveEvidence(input: SaveEvidenceInput): { created: boolean; evidence: ContextEvidenceRecord } {
     const source = this.getSourceOrThrow(input.sourceId);
+    if (source.contentState === 'redacted') throw new Error('CONTEXT_SOURCE_RAW_TEXT_REDACTED');
     const excerpt = input.excerpt.trim();
     const locator = validateContextEvidenceLocator(source, excerpt, input.locator);
     const locatorJson = canonicalJson(locator);
@@ -142,6 +157,7 @@ export class ContextSourceRepository {
     const sorted = [...input.sources].sort((a, b) => a.id.localeCompare(b.id));
     for (const source of sorted) {
       const stored = this.getSourceOrThrow(source.id);
+      if (stored.contentState === 'redacted') throw new Error('CONTEXT_SOURCE_RAW_TEXT_REDACTED');
       if (stored.contentHash !== source.contentHash) throw new Error('source content hash mismatch');
     }
     const sourceSetHash = sha256(canonicalJson(sorted));
@@ -211,6 +227,103 @@ export class ContextSourceRepository {
       .map(toSourceRecord);
   }
 
+  previewExpiredRawText(input: { sourceIds: readonly string[]; asOf: Date }): ExpiredRawTextPreview[] {
+    const ids = uniqueSourceIds(input.sourceIds);
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => '?').join(', ');
+    const rows = this.client.prepare(`
+      SELECT id, source_type, raw_text_expires_at
+      FROM context_sources
+      WHERE id IN (${placeholders})
+        AND content_state = 'cleartext'
+        AND raw_text_expires_at IS NOT NULL
+        AND raw_text_expires_at <= ?
+      ORDER BY id
+    `).all(...ids, input.asOf.toISOString()) as Array<{
+      id: string; source_type: string; raw_text_expires_at: string;
+    }>;
+    return rows.map((row) => ({
+      id: row.id, sourceType: row.source_type, rawTextExpiresAt: row.raw_text_expires_at
+    }));
+  }
+
+  redactExpiredRawText(input: {
+    sourceIds: readonly string[];
+    asOf: Date;
+    redactedAt: Date;
+  }): { redactedSourceIds: string[] } {
+    if (input.sourceIds.length === 0 || new Set(input.sourceIds).size !== input.sourceIds.length) {
+      throw new Error('CONTEXT_SOURCE_RETENTION_SOURCE_SET_INVALID');
+    }
+    const ids = [...input.sourceIds].sort();
+    this.client.pragma('secure_delete = ON');
+    return this.client.transaction(() => {
+      const select = this.client.prepare(`
+        SELECT id, raw_text_expires_at, content_state
+        FROM context_sources WHERE id = ?
+      `);
+      for (const id of ids) {
+        const row = select.get(id) as {
+          id: string; raw_text_expires_at: string | null; content_state: ContextSourceContentState;
+        } | undefined;
+        if (!row) throw new Error('CONTEXT_SOURCE_RETENTION_SOURCE_NOT_FOUND');
+        if (row.content_state !== 'cleartext' || row.raw_text_expires_at === null ||
+          row.raw_text_expires_at > input.asOf.toISOString()) {
+          throw new Error('CONTEXT_SOURCE_RETENTION_NOT_DUE');
+        }
+      }
+      const requested = new Set(ids);
+      const activeJobs = this.client.prepare(`
+        SELECT payload FROM batch_jobs
+        WHERE status IN ('queued', 'retry', 'processing')
+          AND type IN ('capture_group_message', 'analyze_founder_stream_batch', 'extract_context_candidates')
+      `).all() as Array<{ payload: string }>;
+      for (const job of activeJobs) {
+        let payload: { sourceIds?: unknown; sourceId?: unknown };
+        try {
+          payload = JSON.parse(job.payload) as { sourceIds?: unknown; sourceId?: unknown };
+        } catch {
+          throw new Error('CONTEXT_SOURCE_RETENTION_ACTIVE_USE');
+        }
+        const referenced = [
+          ...(Array.isArray(payload.sourceIds) ? payload.sourceIds : []),
+          payload.sourceId
+        ];
+        if (referenced.some((id) => typeof id === 'string' && requested.has(id))) {
+          throw new Error('CONTEXT_SOURCE_RETENTION_ACTIVE_USE');
+        }
+      }
+      const activeRun = this.client.prepare(`
+        SELECT 1
+        FROM context_extraction_run_sources rs
+        INNER JOIN context_extraction_runs r ON r.id = rs.extraction_run_id
+        WHERE r.status = 'processing' AND rs.source_id IN (${ids.map(() => '?').join(', ')})
+        LIMIT 1
+      `).get(...ids);
+      if (activeRun) throw new Error('CONTEXT_SOURCE_RETENTION_ACTIVE_USE');
+      const update = this.client.prepare(`
+        UPDATE context_sources
+        SET content_text = ?, content_state = 'redacted', redacted_at = ?
+        WHERE id = ? AND content_state = 'cleartext'
+      `);
+      for (const id of ids) {
+        const evidenceRows = this.client.prepare(`
+          SELECT id FROM context_evidence WHERE source_id = ? ORDER BY id
+        `).all(id) as Array<{ id: string }>;
+        const redactEvidence = this.client.prepare(`
+          UPDATE context_evidence SET excerpt = ?, excerpt_hash = ? WHERE id = ?
+        `);
+        for (const evidence of evidenceRows) {
+          const excerpt = `[REDACTED:RETENTION_EXPIRED:${evidence.id}]`;
+          redactEvidence.run(excerpt, sha256(excerpt), evidence.id);
+        }
+        const result = update.run(retentionRedactionPlaceholder, input.redactedAt.toISOString(), id);
+        if (result.changes !== 1) throw new Error('CONTEXT_SOURCE_RETENTION_WRITE_CONFLICT');
+      }
+      return { redactedSourceIds: ids };
+    })();
+  }
+
   getEvidence(id: string): ContextEvidenceRecord | null {
     const row = this.client.prepare('SELECT * FROM context_evidence WHERE id = ?').get(id) as EvidenceRow | undefined;
     return row ? toEvidenceRecord(row) : null;
@@ -241,10 +354,14 @@ export class ContextSourceRepository {
   }
 }
 
-interface SourceRow { id: string; source_system: string; source_type: string; external_id: string; logical_key: string; source_version: number; occurred_at: string; authors_json: string; locator_uri: string | null; content_format: string; content_text: string; metadata_json: string; content_hash: string; availability_status: ContextSourceAvailability; captured_at: string }
+interface SourceRow { id: string; source_system: string; source_type: string; external_id: string; logical_key: string; source_version: number; occurred_at: string; authors_json: string; locator_uri: string | null; content_format: string; content_text: string; metadata_json: string; content_hash: string; availability_status: ContextSourceAvailability; captured_at: string; raw_text_expires_at: string | null; content_state: ContextSourceContentState; redacted_at: string | null }
 interface EvidenceRow { id: string; source_id: string; source_version: number; excerpt: string; locator_json: string; excerpt_hash: string; evidence_level: ContextEvidenceLevel; captured_at: string }
 interface RunRow { id: string; source_set_hash: string; extractor_name: string; extractor_version: string; prompt_version: string; status: ContextExtractionRunRecord['status']; error_code: string | null; started_at: string; completed_at: string | null }
 
-function toSourceRecord(row: SourceRow): ContextSourceRecord { return { id: row.id, sourceSystem: row.source_system, sourceType: row.source_type, externalId: row.external_id, logicalKey: row.logical_key, sourceVersion: row.source_version, occurredAt: row.occurred_at, authors: JSON.parse(row.authors_json) as Record<string, unknown>[], locatorUri: row.locator_uri, contentFormat: row.content_format, contentText: row.content_text, metadata: JSON.parse(row.metadata_json) as Record<string, unknown>, contentHash: row.content_hash, availabilityStatus: row.availability_status, capturedAt: row.captured_at }; }
+function toSourceRecord(row: SourceRow): ContextSourceRecord { return { id: row.id, sourceSystem: row.source_system, sourceType: row.source_type, externalId: row.external_id, logicalKey: row.logical_key, sourceVersion: row.source_version, occurredAt: row.occurred_at, authors: JSON.parse(row.authors_json) as Record<string, unknown>[], locatorUri: row.locator_uri, contentFormat: row.content_format, contentText: row.content_text, metadata: JSON.parse(row.metadata_json) as Record<string, unknown>, contentHash: row.content_hash, availabilityStatus: row.availability_status, capturedAt: row.captured_at, rawTextExpiresAt: row.raw_text_expires_at, contentState: row.content_state, redactedAt: row.redacted_at }; }
+
+function uniqueSourceIds(sourceIds: readonly string[]): string[] {
+  return [...new Set(sourceIds)].sort();
+}
 function toEvidenceRecord(row: EvidenceRow): ContextEvidenceRecord { return { id: row.id, sourceId: row.source_id, sourceVersion: row.source_version, excerpt: row.excerpt, locator: contextEvidenceLocatorSchema.parse(JSON.parse(row.locator_json)), excerptHash: row.excerpt_hash, evidenceLevel: row.evidence_level, capturedAt: row.captured_at }; }
 function toRunRecord(row: RunRow): ContextExtractionRunRecord { return { id: row.id, sourceSetHash: row.source_set_hash, extractorName: row.extractor_name, extractorVersion: row.extractor_version, promptVersion: row.prompt_version, status: row.status, errorCode: row.error_code, startedAt: row.started_at, completedAt: row.completed_at }; }

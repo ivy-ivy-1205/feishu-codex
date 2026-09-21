@@ -261,7 +261,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
       }
       const stamp = now();
       const groupSources = sources.listSources().filter(source => source.sourceType === 'group_message' &&
-        source.metadata.chatId === approvedGroup && source.metadata.senderType === 'user');
+        source.contentState === 'cleartext' && source.metadata.chatId === approvedGroup &&
+        source.metadata.senderType === 'user');
       const threadOf = (source:ContextSourceRecord) => String(source.metadata.threadId || source.metadata.rootId || '');
       const latestArrival = new Map<string,number>();
       for(const source of groupSources) latestArrival.set(threadOf(source),Math.max(latestArrival.get(threadOf(source))??0,Date.parse(source.capturedAt)));
@@ -297,7 +298,8 @@ export function buildFounderStreamInput(sources: ContextSourceRepository, topics
   const selected = new Map<string, ContextSourceRecord>();
   const trustedSource = (id: string) => {
     const source = sources.getSource(id);
-    if (!source || source.availabilityStatus !== 'available' || !['group_message','minute_transcript'].includes(source.sourceType) ||
+    if (!source || source.contentState !== 'cleartext' || source.availabilityStatus !== 'available' ||
+      !['group_message','minute_transcript'].includes(source.sourceType) ||
       (source.sourceType === 'group_message' && source.metadata.chatId !== chatId)) return null;
     if(source.sourceType==='minute_transcript' && !minuteEligible(source,chatId))return null;
     if (source.sourceType === 'group_message' && (source.metadata.senderType !== 'user' ||
@@ -311,6 +313,7 @@ export function buildFounderStreamInput(sources: ContextSourceRepository, topics
   };
   for (const id of sourceIds) {
     const source=sources.getSource(id);if(!source)throw new Error('FOUNDER_SOURCE_UNAVAILABLE');
+    if(source.contentState !== 'cleartext')throw new Error('FOUNDER_SOURCE_UNAVAILABLE');
     if(source.sourceType==='group_message' && (source.metadata.senderType!=='user' ||
       sources.client.prepare("SELECT 1 FROM outbox WHERE delivered_message_id=? AND status='delivered'").get(source.externalId))) continue;
     if(!include(id))throw new Error('FOUNDER_SOURCE_UNAVAILABLE');

@@ -38,7 +38,9 @@ describe('trusted evidence ordering',()=>{
   it('leaves an untimed meeting with unknown end open instead of inventing an ordering against a later group point',()=>{
     const h=setup(),old=h.source;
     const metadata={...old.metadata};delete metadata.endedAt;
-    const source=h.sources.saveSource({...old,externalId:'obcn_open',logicalKey:'open-minute',metadata,capturedAt:h.at}).source;
+    const {id:_id,sourceVersion:_sourceVersion,contentHash:_contentHash,contentState:_contentState,
+      rawTextExpiresAt:_rawTextExpiresAt,redactedAt:_redactedAt,capturedAt:_capturedAt,...oldInput}=old;
+    const source=h.sources.saveSource({...oldInput,externalId:'obcn_open',logicalKey:'open-minute',metadata,capturedAt:h.at}).source;
     const id=saveFounderEvidence(h.sources,source.id,'按 A 方案推进',h.at);
     const group=h.sources.saveSource(captureGroupMessageSource({chatId:'oc_test',messageId:'late_group',threadId:null,rootId:null,
       author:{openId:'ou_james',displayName:'James'},senderType:'user',messageType:'text',text:'同意按 A 方案推进',occurredAt:'2030-01-01T11:30:00Z'},h.at).source).source;

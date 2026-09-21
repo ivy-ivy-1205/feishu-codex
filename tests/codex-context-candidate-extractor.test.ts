@@ -13,7 +13,8 @@ const source = {
   contentText: 'Ivy [0-1000]: 决定周五上线，但目前还没有上线。',
   metadata: { segments: [{ segmentOrdinal: 0, speakerName: 'Ivy', startMs: 0, endMs: 1000 }] },
   contentHash: 'a'.repeat(64),
-  availabilityStatus: 'available' as const, capturedAt: '2026-08-03T00:00:00.000Z'
+  availabilityStatus: 'available' as const, capturedAt: '2026-08-03T00:00:00.000Z',
+  rawTextExpiresAt: null, contentState: 'cleartext' as const, redactedAt: null
 };
 const validCandidate = {
   candidateType: 'decision', scope: 'project', summary: '决定周五上线', subjectKey: 'release',

@@ -206,6 +206,9 @@ const migrationSql = `
     content_hash TEXT NOT NULL,
     availability_status TEXT NOT NULL CHECK(availability_status IN ('available', 'deleted', 'permission_lost', 'unknown')),
     captured_at TEXT NOT NULL,
+    raw_text_expires_at TEXT,
+    content_state TEXT NOT NULL DEFAULT 'cleartext' CHECK(content_state IN ('cleartext', 'redacted')),
+    redacted_at TEXT,
     UNIQUE(logical_key, content_hash),
     UNIQUE(logical_key, source_version)
   );
@@ -463,6 +466,21 @@ export function migrateDatabase(client: Database.Database): void {
   migrateTodoCapabilityColumn(client);
   migrateTodoProjectColumns(client);
   migrateProjectAuthorityColumns(client);
+  migrateContextSourceRetentionColumns(client);
+}
+
+function migrateContextSourceRetentionColumns(client: Database.Database): void {
+  const columns = client.prepare('PRAGMA table_info(context_sources)').all() as TableColumn[];
+  const additions = [
+    ['raw_text_expires_at', 'TEXT'],
+    ['content_state', "TEXT NOT NULL DEFAULT 'cleartext' CHECK(content_state IN ('cleartext', 'redacted'))"],
+    ['redacted_at', 'TEXT']
+  ] as const;
+  for (const [name, definition] of additions) {
+    if (!columns.some((column) => column.name === name)) {
+      client.exec(`ALTER TABLE context_sources ADD COLUMN ${name} ${definition}`);
+    }
+  }
 }
 
 function migrateProcessMinuteRetryPayloads(client: Database.Database): void {

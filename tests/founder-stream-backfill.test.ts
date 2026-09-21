@@ -110,6 +110,12 @@ describe('founder stream backfill', () => {
     expect(requests.every((value) => (value as { since: Date }).since.toISOString() === since)).toBe(true);
     const sources = deps.sourceRepository.listSources().filter((source) => source.sourceType === 'group_message');
     expect(sources).toHaveLength(5);
+    expect(sources.map((source) => source.rawTextExpiresAt)).toEqual(
+      Array(5).fill('2026-12-19T00:00:00.000Z')
+    );
+    expect(deps.sourceRepository.listSources()
+      .filter((source) => source.sourceType.startsWith('feishu_sync_'))
+      .every((source) => source.rawTextExpiresAt === null)).toBe(true);
     expect(sources.find((source) => source.externalId === 'reply2')).toMatchObject({
       authors: [{ openId: 'ou_ivy', displayName: null }], metadata: { threadId: 'thread1', rootId: 'root1', parentId: 'reply1', edited: true }
     });

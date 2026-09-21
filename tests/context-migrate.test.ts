@@ -112,6 +112,11 @@ describe('Phase 1E migration', () => {
     expect(outboxColumns).toEqual(expect.arrayContaining([
       'attempt_count', 'next_attempt_at', 'last_error_code', 'delivered_message_id'
     ]));
+    const sourceColumns = database.client.prepare('PRAGMA table_info(context_sources)').all()
+      .map((row) => (row as { name: string }).name);
+    expect(sourceColumns).toEqual(expect.arrayContaining([
+      'raw_text_expires_at', 'content_state', 'redacted_at'
+    ]));
   });
 
   it('enforces independent enums, confidence, record versions and project foreign keys', () => {
