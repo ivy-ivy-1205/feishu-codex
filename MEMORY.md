@@ -243,3 +243,4 @@
 - 2026-09-21 Task 13 对齐提醒复核：同一 topic 的不同决策共享一个提问名额，ready 与 asked 均阻挡第二个问题；准备投递时在同一 IMMEDIATE 事务内先关闭自然解决/过期问题，再检查占位、置 ready 和入 outbox，双进程竞争也只产生一条提醒。独立 topic 不互相阻挡，关闭后仍相关的候选可再评估。
 - 2026-09-21 提问占位复核补充：仅因同话题已有问题而延后的有效分歧，必须在同一事务保存为 candidate，不依赖 worker 预存；否则低打扰会变成静默丢失。未通过证据、行动或时窗验证的候选仍不入审计库，排队候选保持幂等并可在空位释放后重新评估。
 - 2026-09-21 Ivy 与 James 的群聊使用说明位于 `docs/founder-stream-group-guide.md`：两人继续在同一群自然讨论，不预先立项或分群；所有分类纠正和对齐回复必须绑定对应机器人卡片；“不用提醒”不等于达成共识；机器人只整理 Context，不自动执行任务。该交互目前只完成本地门禁，生产语义适配、开关与真实群投递仍需单独审批。
+- 2026-09-21 Founder Stream 本地最终审查报告与未执行的生产变更提案已归档到 `docs/reviews/2026-09-21-founder-stream-final-review.md` 和 `docs/founder-stream-production-change-sheet.md`；本地门禁通过不构成生产授权，真实 perspective/alignment adapter 完成独立审查前，analysis 与 group delivery 必须保持关闭。
