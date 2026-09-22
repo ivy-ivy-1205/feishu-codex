@@ -45,7 +45,6 @@ describe('CodexFounderStreamAnalyzer', () => {
     });
 
   it.each([
-    ['invented name', { displayName: 'OpenMontage' }],
     ['invented source', { sourceIds: ['not-supplied'] }],
     ['no source', { sourceIds: [] }],
     ['uncited listed source', { sourceIds: ['discussion', 'commitment', 'idea'] }],
@@ -72,6 +71,31 @@ describe('CodexFounderStreamAnalyzer', () => {
       evidenceExcerpts: [{ sourceId: 'idea', excerpt: ideaText }] };
     await expect(analyzer({ topics: [early] }).analyze(input()))
       .rejects.toMatchObject({ code: 'FOUNDER_STREAM_OUTPUT_INVALID' });
+  });
+
+  it('reports a safe reason category without echoing malformed model content', async () => {
+    await expect(analyzer({ topics: [{ ...proposal(), outcome: 'invented-secret-value' }] }).analyze(input()))
+      .rejects.toMatchObject({ code: 'FOUNDER_STREAM_OUTPUT_INVALID', reason: 'outcome_ungrounded' });
+  });
+
+  it('restores display-name-only formatting differences to the exact source text', async () => {
+    const result = await analyzer({ topics: [{ ...proposal(), displayName: '销售 助手' }] }).analyze(input());
+    expect(result.topics[0]?.displayName).toBe('销售助手');
+  });
+
+  it('replaces a semantic display-name rewrite with a deterministic source line', async () => {
+    const result=await analyzer({ topics: [{ ...proposal(), displayName: '智能销售助手' }] }).analyze(input());
+    expect(result.topics[0]?.displayName).toBe(discussionText);
+  });
+
+  it('retries one invalid model result with a safe validation reason', async () => {
+    const prompts:string[]=[];let calls=0;
+    const subject=new CodexFounderStreamAnalyzer({codex:{async executeJson(request){prompts.push(request.prompt);calls++;
+      return calls===1?{topics:[{...proposal(),outcome:'改写后的目标'}]}:{topics:[proposal()]};}}});
+    expect((await subject.analyze(input())).topics[0]?.displayName).toBe('销售助手');
+    expect(calls).toBe(2);
+    expect(prompts[1]).toContain('outcome_ungrounded');
+    expect(prompts[1]).not.toContain('改写后的目标');
   });
 
   it.each([null, '```json\n{}\n```', { topics: [], projectRegistry: [] }, { topics: Array(41).fill(proposal()) }])(

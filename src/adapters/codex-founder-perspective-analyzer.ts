@@ -49,7 +49,9 @@ export interface FounderPerspectiveResult {
 }
 
 export class FounderPerspectiveValidationError extends Error {
-  constructor(readonly code: 'FOUNDER_PERSPECTIVE_INPUT_INVALID' | 'FOUNDER_PERSPECTIVE_OUTPUT_INVALID') {
+  constructor(readonly code: 'FOUNDER_PERSPECTIVE_INPUT_INVALID' | 'FOUNDER_PERSPECTIVE_OUTPUT_INVALID',
+    readonly reason?:'schema_invalid'|'observation_out_of_scope'|'observation_ungrounded'|'duplicate_observation'|
+      'proposal_invalid_founder_evidence'|'proposal_ungrounded_consequence'|'proposal_ungrounded_horizon') {
     super(code);
     this.name = 'FounderPerspectiveValidationError';
   }
@@ -76,42 +78,50 @@ export class CodexFounderPerspectiveAnalyzer {
     const raw = await this.options.codex.executeJson({
       prompt: renderPrompt(supplied), outputSchema: founderPerspectiveOutputJsonSchema
     });
+    let output:z.infer<typeof modelOutputSchema>;
+    try { output=modelOutputSchema.parse(raw); }
+    catch { throw new FounderPerspectiveValidationError('FOUNDER_PERSPECTIVE_OUTPUT_INVALID','schema_invalid'); }
     try {
-      const output = modelOutputSchema.parse(raw);
       const evidence = new Map(supplied.evidence.map((item) => [item.id, item]));
       const topics = new Set(supplied.topicIds);
       const scoped = (topicId: string, evidenceId: string) => {
         const item = evidence.get(evidenceId);
-        if (!item || !topics.has(topicId) || !item.topicIds.includes(topicId)) throw new Error('out of scope');
+        if (!item || !topics.has(topicId) || !item.topicIds.includes(topicId)) fail('observation_out_of_scope');
         return item;
       };
       const observations = output.observations.map((item) => {
         const proof = scoped(item.topicId, item.evidenceId);
-        if (!proof.founder || !proof.excerpt.includes(item.statement)) throw new Error('ungrounded observation');
+        if (!proof.founder || !proof.excerpt.includes(item.statement)) fail('observation_ungrounded');
         return { ...item, observedAt: new Date(proof.occurredAt) };
       });
-      assertUnique(observations.map((item) => `${item.topicId}\0${item.evidenceId}\0${item.decisionKey ?? ''}`));
+      if(new Set(observations.map((item) => `${item.topicId}\0${item.evidenceId}\0${item.decisionKey ?? ''}`)).size!==observations.length)
+        fail('duplicate_observation');
       for (const proposal of output.alignmentProposals) {
         const ivy = scoped(proposal.topicId, proposal.ivy.evidenceId);
         const james = scoped(proposal.topicId, proposal.james.evidenceId);
         if (ivy.founder !== 'ivy' || james.founder !== 'james' || ivy.id === james.id ||
           !ivy.excerpt.includes(proposal.ivy.statement) || !james.excerpt.includes(proposal.james.statement)) {
-          throw new Error('invalid founder evidence');
+          fail('proposal_invalid_founder_evidence');
         }
         if (proposal.actionConsequence) {
           const proof = scoped(proposal.topicId, proposal.actionConsequence.evidenceId);
-          if (!proof.excerpt.includes(proposal.actionConsequence.excerpt)) throw new Error('ungrounded consequence');
+          if (!proof.excerpt.includes(proposal.actionConsequence.excerpt)) fail('proposal_ungrounded_consequence');
         }
         if (proposal.actionHorizon) {
           const proof = scoped(proposal.topicId, proposal.actionHorizon.evidenceId);
-          if (!proof.excerpt.includes(proposal.actionHorizon.excerpt)) throw new Error('ungrounded horizon');
+          if (!proof.excerpt.includes(proposal.actionHorizon.excerpt)) fail('proposal_ungrounded_horizon');
         }
       }
       return { observations, alignmentProposals: output.alignmentProposals };
-    } catch {
-      throw new FounderPerspectiveValidationError('FOUNDER_PERSPECTIVE_OUTPUT_INVALID');
+    } catch(error) {
+      if(error instanceof FounderPerspectiveValidationError)throw error;
+      throw new FounderPerspectiveValidationError('FOUNDER_PERSPECTIVE_OUTPUT_INVALID','schema_invalid');
     }
   }
+}
+
+function fail(reason:NonNullable<FounderPerspectiveValidationError['reason']>):never{
+  throw new FounderPerspectiveValidationError('FOUNDER_PERSPECTIVE_OUTPUT_INVALID',reason);
 }
 
 function renderPrompt(input: z.infer<typeof inputSchema>): string {

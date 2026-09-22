@@ -3,6 +3,7 @@ import { founderCard, founderSourceText, founderText, type FounderCardEvidence }
 
 export interface FounderWorkMapTopic extends Pick<CurrentTopic, 'id' | 'currentVersion' | 'displayName' | 'stage' | 'outcome'> {
   evidence: readonly FounderCardEvidence[];
+  supportingItems?: readonly {kind:'principle'|'artifact'|'research';displayName:string}[];
 }
 export interface FounderWorkMapInput {
   since: string;
@@ -51,7 +52,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
       throw new Error('valid work-map topic is required');
     }
     const suffix = topic.stage === 'paused' ? '（暂停）' : topic.stage === 'closed' ? '（已结束）' : '';
-    add(labels[topic.stage], `${founderText(topic.displayName, 80)}${suffix}${topic.outcome ? `\n目标：${founderText(topic.outcome, 160)}` : ''}${evidencePreview(topic.evidence)}`,
+    add(labels[topic.stage], `${founderText(topic.displayName, 80)}${suffix}${topic.outcome ? `\n目标：${founderText(topic.outcome, 160)}` : ''}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence)}`,
       { kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
   }
   for (const grouping of [...input.uncertainGrouping].sort(compareId)) {
@@ -83,6 +84,12 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     return { kind: 'founder_work_map', page: index + 1, totalPages: chunks.length,
       itemRefs: chunk.map((item) => item.ref), card: founderCard(`工作地图 · ${index + 1}/${chunks.length}`, lines) };
   });
+}
+
+function supportingPreview(items:readonly {kind:'principle'|'artifact'|'research';displayName:string}[]):string{
+  const labels={principle:'原则',artifact:'产物',research:'研究'} as const;
+  return [...items].sort((a,b)=>a.kind.localeCompare(b.kind)||a.displayName.localeCompare(b.displayName))
+    .map(item=>`\n${labels[item.kind]}：${founderText(item.displayName,120)}`).join('');
 }
 
 function evidencePreview(evidence: readonly FounderCardEvidence[]): string {

@@ -57,6 +57,13 @@ describe('CodexFounderPerspectiveAnalyzer', () => {
     await expect(subject.analyze(input)).rejects.toMatchObject({ code: 'FOUNDER_PERSPECTIVE_OUTPUT_INVALID' });
   });
 
+  it('reports a safe reason category without echoing invalid model text',async()=>{
+    const subject=new CodexFounderPerspectiveAnalyzer({codex:{async executeJson(){return{observations:[{
+      topicId:'topic_site',evidenceId:'ev_ivy',statement:'invented private sentence',speechAct:'view',decisionKey:null,confidence:0.8
+    }],alignmentProposals:[]}}}});
+    await expect(subject.analyze(input)).rejects.toMatchObject({code:'FOUNDER_PERSPECTIVE_OUTPUT_INVALID',reason:'observation_ungrounded'});
+  });
+
   it('passes only allowlisted evidence fields to Codex and emits a strict output schema', async () => {
     let captured: { prompt: string; outputSchema: Record<string, unknown> } | undefined;
     const subject = new CodexFounderPerspectiveAnalyzer({ codex: { async executeJson(request) {

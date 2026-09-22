@@ -5,6 +5,7 @@ import type { FounderStreamAnalyzer } from '../ports/founder-stream-analyzer.js'
 import { validateFounderStreamInput } from '../ports/founder-stream-analyzer.js';
 import { ContextSourceRepository, type ContextSourceRecord } from '../repositories/context-source-repository.js';
 import type { FounderPerspectiveAnalysisPort } from './founder-stream-worker.js';
+import { projectFounderWorkMap, type FounderWorkMapClassification, type FounderSupportingItem, type FounderDetachedItem } from './founder-work-map-classification.js';
 import { canonicalJson, stableId } from './canonical-json.js';
 import type { FounderCardEvidence } from './founder-card.js';
 import { renderFounderWorkMap, type FounderWorkMapCard } from './founder-work-map-renderer.js';
@@ -19,6 +20,7 @@ export interface FounderWorkMapPreviewInput {
   founderOpenIds: Record<FounderRole, string>;
   analyzer: FounderStreamAnalyzer;
   perspectiveAnalyzer: FounderPerspectiveAnalysisPort;
+  classifier?: { classify(analysis: Awaited<ReturnType<FounderStreamAnalyzer['analyze']>>): Promise<FounderWorkMapClassification> };
 }
 
 export interface FounderWorkMapPreviewResult {
@@ -31,6 +33,7 @@ export interface FounderWorkMapPreviewResult {
   evidence: Array<{ id:string;sourceId:string;topicIds:string[];messageId:string;threadId:string|null;
     excerpt:string;founder:FounderRole|null;occurredAt:string }>;
   cards: FounderWorkMapCard[];
+  classification: { supportingItems:FounderSupportingItem[];historyItems:FounderDetachedItem[];researchInbox:FounderDetachedItem[] };
 }
 
 export async function buildFounderWorkMapPreview(input: FounderWorkMapPreviewInput): Promise<FounderWorkMapPreviewResult> {
@@ -48,7 +51,8 @@ export async function buildFounderWorkMapPreview(input: FounderWorkMapPreviewInp
     availabilityStatus: 'available' as const
   })), currentTopics: [] });
   const analysis = await input.analyzer.analyze(immutableInput);
-  const plan = reconcileTopics(immutableInput, analysis);
+  const classified=input.classifier?projectFounderWorkMap(analysis,await input.classifier.classify(analysis)):{analysis,supportingItems:[],historyItems:[],researchInbox:[],supportingByDisplayName:{},canonicalNames:{}};
+  const plan = reconcileTopics(immutableInput, classified.analysis);
   const prepared = plan.topics.map((item) => ({ item,
     id: stableId('previewtopic', canonicalJson([input.since,input.until,item.proposalIndex,item.proposal.displayName])) }));
   const evidence = new Map<string, { id:string;sourceId:string;topicIds:string[];excerpt:string;
@@ -73,7 +77,7 @@ export async function buildFounderWorkMapPreview(input: FounderWorkMapPreviewInp
   const coverageGaps = Object.entries(gapsByCode).sort(([a],[b])=>a.localeCompare(b)).map(([code,count])=>({
     id:`gap:${code}`,summary:`${gapLabel(code)}：${count}`
   }));
-  const topics = prepared.map(({item,id}) => ({ id,displayName:item.proposal.displayName,stage:item.proposal.stage,
+  const topics = prepared.map(({item,id}) => ({ id,displayName:classified.canonicalNames[item.proposal.displayName]??item.proposal.displayName,stage:item.proposal.stage,
     outcome:item.proposal.outcome,currentAction:item.proposal.currentAction,
     perspectives:perspectiveResult.observations.filter((observation)=>observation.topicId===id).flatMap((observation)=>{
       const founder=evidence.get(observation.evidenceId)?.founder;
@@ -81,15 +85,17 @@ export async function buildFounderWorkMapPreview(input: FounderWorkMapPreviewInp
         decisionKey:observation.decisionKey,evidenceId:observation.evidenceId}] : [];
     }) }));
   const cards = renderFounderWorkMap({since:input.since,until:input.until,
-    topics:prepared.map(({item,id})=>({id,currentVersion:1,displayName:item.proposal.displayName,stage:item.proposal.stage,
-      outcome:item.proposal.outcome,evidence:[...evidence.values()].filter(value=>value.topicIds.includes(id)).map(value=>value.card)})),
+    topics:prepared.map(({item,id})=>({id,currentVersion:1,displayName:classified.canonicalNames[item.proposal.displayName]??item.proposal.displayName,stage:item.proposal.stage,
+      outcome:item.proposal.outcome,evidence:[...evidence.values()].filter(value=>value.topicIds.includes(id)).map(value=>value.card),
+      supportingItems:(classified.supportingByDisplayName[item.proposal.displayName]??[]).map(({kind,displayName})=>({kind,displayName}))})),
     uncertainGrouping:[],coverageGaps});
   const evidenceOutput=[...evidence.values()].map((item)=>({id:item.id,sourceId:item.sourceId,topicIds:[...item.topicIds],
     messageId:item.card.locator.kind==='group_message'?item.card.locator.messageId:'',
     threadId:item.card.locator.kind==='group_message'?item.card.locator.threadId:null,excerpt:item.excerpt,
     founder:item.founder,occurredAt:item.occurredAt}));
   return {window:{since:input.since,until:input.until},coverage:{status:coverageGaps.length?'partial':'complete',gapsByCode},
-    topics,alignmentProposals:perspectiveResult.alignmentProposals,evidence:evidenceOutput,cards};
+    topics,alignmentProposals:perspectiveResult.alignmentProposals,evidence:evidenceOutput,cards,
+    classification:{supportingItems:classified.supportingItems,historyItems:classified.historyItems,researchInbox:classified.researchInbox}};
 }
 
 function eligible(source: ContextSourceRecord | null, chatId: string, start: number, end: number): source is ContextSourceRecord {

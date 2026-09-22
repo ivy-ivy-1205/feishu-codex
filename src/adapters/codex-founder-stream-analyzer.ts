@@ -17,15 +17,68 @@ export class CodexFounderStreamAnalyzer implements FounderStreamAnalyzer {
 
   async analyze(input: FounderStreamInput): Promise<FounderStreamAnalysis> {
     const supplied = validateFounderStreamInput(input);
-    const output = await this.options.codex.executeJson({
-      prompt: renderPrompt(supplied),
-      outputSchema: founderStreamOutputJsonSchema
-    });
-    return validateFounderStreamAnalysis(output, supplied);
+    let validationFailure: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const output = await this.options.codex.executeJson({
+        prompt: renderPrompt(supplied, attempt === 0 ? null : safeReason(validationFailure)),
+        outputSchema: founderStreamOutputJsonSchema
+      });
+      try { return validateFounderStreamAnalysis(restoreDisplayNames(output), supplied); }
+      catch (error) {
+        validationFailure = error;
+        if (!(error instanceof Error) || !('code' in error) || error.code !== 'FOUNDER_STREAM_OUTPUT_INVALID') throw error;
+      }
+    }
+    throw validationFailure;
   }
 }
 
-function renderPrompt(input: FounderStreamInput): string {
+function safeReason(error: unknown): string {
+  return error && typeof error === 'object' && 'reason' in error && typeof error.reason === 'string'
+    ? error.reason : 'output_invalid';
+}
+
+function restoreDisplayNames(output: unknown): unknown {
+  if (!output || typeof output !== 'object' || !Array.isArray((output as { topics?: unknown }).topics)) return output;
+  return { ...(output as Record<string, unknown>), topics: (output as { topics: unknown[] }).topics.map((topic) => {
+    if (!topic || typeof topic !== 'object') return topic;
+    const value = topic as { displayName?: unknown; evidenceExcerpts?: unknown };
+    if (typeof value.displayName !== 'string' || !Array.isArray(value.evidenceExcerpts)) return topic;
+    const excerpts = value.evidenceExcerpts.flatMap((entry) => entry && typeof entry === 'object' &&
+      typeof (entry as { excerpt?: unknown }).excerpt === 'string' ? [(entry as { excerpt: string }).excerpt] : [])
+    const restored = excerpts.map((excerpt) => findFormattingEquivalent(excerpt, value.displayName as string)).find(Boolean)
+      ?? evidenceLabel(excerpts);
+    return restored ? { ...(topic as Record<string, unknown>), displayName: restored } : topic;
+  }) };
+}
+
+function evidenceLabel(excerpts: string[]): string | null {
+  for (const excerpt of excerpts) {
+    const line = excerpt.split(/\r?\n/).map((value) => value.trim()).find(Boolean);
+    if (line) return line;
+  }
+  return null;
+}
+
+function findFormattingEquivalent(source: string, candidate: string): string | null {
+  const normalizedCandidate = normalizeLabel(candidate);
+  if (!normalizedCandidate) return null;
+  for (let start = 0; start < source.length; start += 1) {
+    let normalized = '';
+    for (let end = start; end < source.length; end += 1) {
+      normalized += normalizeLabel(source[end]!);
+      if (normalized === normalizedCandidate) return source.slice(start, end + 1);
+      if (!normalizedCandidate.startsWith(normalized)) break;
+    }
+  }
+  return null;
+}
+
+function normalizeLabel(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase('en-US').replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
+function renderPrompt(input: FounderStreamInput, retryReason: string | null): string {
   return [
     '你是 Founder Stream 话题分析器。只输出严格符合 schema 的 JSON，不要 Markdown。',
     '项目没有预置名单。只使用下面提供的不可变群消息/妙记原文和有来源的当前话题。',
@@ -45,6 +98,7 @@ function renderPrompt(input: FounderStreamInput): string {
     'confidence 独立描述话题提取和 join/split 判断的置信度；不确定就降级。没有依据时 topics=[]。',
     '输出前逐项执行最终校验：displayName、非 null 的 outcome、非 null 的 currentAction，必须完整出现在至少一个 evidenceExcerpts[].excerpt 中。',
     '不要概括、补词、改写或组合这些字段；若原文没有可逐字复制的 outcome/currentAction，就返回 null，并相应降低 stage。',
+    ...(retryReason ? [`上一次输出未通过本地验证（${retryReason}）。请重新从 evidenceExcerpts 连续原文中逐字复制相关字段，不要复用上次措辞。`] : []),
     '如果字段来自某条 source 原文，evidenceExcerpts 必须包含覆盖该字段完整文字的连续原文片段；不能只引用同一消息里的另一段文字。',
     '每个 sourceIds 条目必须恰好在 evidenceExcerpts 中至少出现一次，evidenceExcerpts 也不得引用 sourceIds 之外的来源。',
     '', 'Supplied evidence JSON:', JSON.stringify(input)

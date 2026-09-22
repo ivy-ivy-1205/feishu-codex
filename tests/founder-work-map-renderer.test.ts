@@ -18,6 +18,14 @@ describe('founder work map cards', () => {
     expect(body).toContain('不代表完整同步');
   });
 
+  it('renders principles and research beneath their parent project instead of as separate numbered projects',()=>{
+    const [page]=renderFounderWorkMap({...window,topics:[{...topic('a'),supportingItems:[
+      {kind:'principle',displayName:'情绪价值'},{kind:'research',displayName:'PropHero 竞品研究'}]}],uncertainGrouping:[],coverageGaps:[]});
+    const body=JSON.stringify(page!.card);
+    expect(body).toContain('原则：情绪价值');expect(body).toContain('研究：PropHero 竞品研究');
+    expect(page!.itemRefs).toHaveLength(1);
+  });
+
   it('retains every lifecycle section, uncertain grouping and coverage gaps', () => {
     const pages = renderFounderWorkMap({ ...window,
       topics: ['active_project', 'project_candidate', 'exploring', 'idea', 'paused', 'closed'].map((stage, i) => topic(String(i), stage as FounderWorkMapTopic['stage'])),

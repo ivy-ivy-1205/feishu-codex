@@ -74,7 +74,7 @@ export interface FounderStreamAnalyzer {
 }
 
 export class FounderStreamValidationError extends Error {
-  constructor(readonly code: 'FOUNDER_STREAM_INPUT_INVALID' | 'FOUNDER_STREAM_OUTPUT_INVALID') {
+  constructor(readonly code: 'FOUNDER_STREAM_INPUT_INVALID' | 'FOUNDER_STREAM_OUTPUT_INVALID', readonly reason?: string) {
     super(code);
     this.name = 'FounderStreamValidationError';
   }
@@ -107,8 +107,13 @@ export function validateFounderStreamAnalysis(
   input: FounderStreamInput
 ): FounderStreamAnalysis {
   const supplied = validateFounderStreamInput(input);
+  let parsed: FounderStreamAnalysis;
   try {
-    const parsed = founderStreamAnalysisSchema.parse(output);
+    parsed = founderStreamAnalysisSchema.parse(output);
+  } catch {
+    throw new FounderStreamValidationError('FOUNDER_STREAM_OUTPUT_INVALID', 'schema_invalid');
+  }
+  try {
     const sources = new Map(supplied.sources.map((source) => [source.id, source]));
     const topics = new Map(supplied.currentTopics.map((topic) => [topic.id, topic]));
     for (const proposal of parsed.topics) {
@@ -116,9 +121,9 @@ export function validateFounderStreamAnalysis(
       assertExcerpts(proposal.evidenceExcerpts, sources);
       const cited = new Set(proposal.evidenceExcerpts.map((evidence) => evidence.sourceId));
       assert(cited.size === proposal.sourceIds.length && proposal.sourceIds.every((id) => cited.has(id)));
-      assertGrounded(proposal.displayName, proposal.evidenceExcerpts);
-      if (proposal.outcome !== null) assertGrounded(proposal.outcome, proposal.evidenceExcerpts);
-      if (proposal.currentAction !== null) assertGrounded(proposal.currentAction, proposal.evidenceExcerpts);
+      assertGrounded(proposal.displayName, proposal.evidenceExcerpts, 'display_name_ungrounded');
+      if (proposal.outcome !== null) assertGrounded(proposal.outcome, proposal.evidenceExcerpts, 'outcome_ungrounded');
+      if (proposal.currentAction !== null) assertGrounded(proposal.currentAction, proposal.evidenceExcerpts, 'current_action_ungrounded');
       if (proposal.stage === 'active_project') {
         assert(proposal.outcome !== null && proposal.currentAction !== null);
       }
@@ -131,8 +136,8 @@ export function validateFounderStreamAnalysis(
         const target = topics.get(join.topicId);
         assert(target !== undefined);
         for (const term of join.sharedTerms) {
-          assertGrounded(term, proposal.evidenceExcerpts);
-          assertGrounded(term, target.evidenceExcerpts);
+          assertGrounded(term, proposal.evidenceExcerpts, 'shared_term_ungrounded');
+          assertGrounded(term, target.evidenceExcerpts, 'shared_term_ungrounded');
         }
       }
       assertUnique(proposal.splitSuggestions.map((split) => split.topicId));
@@ -142,22 +147,27 @@ export function validateFounderStreamAnalysis(
       }
     }
     return parsed;
-  } catch {
+  } catch (error) {
     // Do not log or echo malformed output or source text in validation errors.
-    throw new FounderStreamValidationError('FOUNDER_STREAM_OUTPUT_INVALID');
+    const reason = error instanceof FounderEvidenceValidationError ? error.reason : 'evidence_invalid';
+    throw new FounderStreamValidationError('FOUNDER_STREAM_OUTPUT_INVALID', reason);
   }
 }
 
-function assert(value: unknown): asserts value {
-  if (!value) throw new Error('invalid founder stream evidence');
+class FounderEvidenceValidationError extends Error {
+  constructor(readonly reason: string) { super(reason); }
+}
+
+function assert(value: unknown, reason = 'evidence_invalid'): asserts value {
+  if (!value) throw new FounderEvidenceValidationError(reason);
 }
 
 function assertUnique(values: readonly string[]): void {
   assert(new Set(values).size === values.length);
 }
 
-function assertGrounded(value: string, excerpts: readonly FounderEvidenceExcerpt[]): void {
-  assert(excerpts.some((evidence) => evidence.excerpt.includes(value)));
+function assertGrounded(value: string, excerpts: readonly FounderEvidenceExcerpt[], reason = 'field_ungrounded'): void {
+  assert(excerpts.some((evidence) => evidence.excerpt.includes(value)), reason);
 }
 
 function assertExcerpts(
@@ -166,6 +176,6 @@ function assertExcerpts(
 ): void {
   for (const evidence of excerpts) {
     const source = sources.get(evidence.sourceId);
-    assert(source !== undefined && source.contentText.includes(evidence.excerpt));
+    assert(source !== undefined && source.contentText.includes(evidence.excerpt), 'excerpt_ungrounded');
   }
 }

@@ -80,5 +80,6 @@ async function main(){
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)void main().catch((error)=>{
-  const code=error instanceof Error&&/^[A-Z0-9_ :.-]{1,160}$/u.test(error.message)?error.message:'UNKNOWN';
+  const raw=error instanceof Error?`${error.message}${'reason' in error&&typeof error.reason==='string'?`:${error.reason}`:''}`:'UNKNOWN';
+  const code=/^[A-Za-z0-9_ :.-]{1,200}$/u.test(raw)?raw:'UNKNOWN';
   process.stderr.write(`File work map preview failed: ${code}. No source content logged.\n`);process.exitCode=1});
