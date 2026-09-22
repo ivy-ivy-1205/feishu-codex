@@ -23,6 +23,7 @@ const gapCodes = ['PAGINATION_CURSOR_REPEATED', 'PAGINATION_STATE_INVALID', 'ROO
   'MESSAGE_UNSUPPORTED', 'REFERENCED_FILES_UNAVAILABLE', 'FILE_REFERENCE_UNAVAILABLE', 'FILE_TEXT_UNREADABLE', 'MESSAGE_INVALID'];
 const jobStates = ['queued', 'retry', 'processing', 'completed', 'failed'];
 const outboxStates = ['pending', 'delivered', 'failed', 'cancelled'];
+const alignmentDimensions=['direction','next_action','owner','deadline','completion_standard'];
 
 /** Mirrors the existing aggregate /diag registration. Network access control is an operator prerequisite. */
 export function registerFounderStreamDiagnosticsRoute(app: FastifyInstance, client: Database.Database): void {
@@ -51,8 +52,10 @@ function collectDiagnostics(client: Database.Database) {
   const topicRows = client.prepare('SELECT v.stage AS label, COUNT(*) AS n FROM context_topics t JOIN context_topic_versions v ON v.topic_id=t.id AND v.version_number=t.current_version GROUP BY v.stage').all() as CountRow[];
   const issueRows = client.prepare("SELECT status AS label, COUNT(*) AS n FROM alignment_issues WHERE status IN ('candidate','ready','asked') GROUP BY status").all() as CountRow[];
   const issues = counts(issueRows, ['candidate', 'ready', 'asked'], true);
+  const shadowRows=client.prepare("SELECT dimension AS label,COUNT(*) AS n FROM alignment_issues WHERE status='candidate' GROUP BY dimension").all() as CountRow[];
+  const lastAnalysis=(client.prepare("SELECT MAX(updated_at) AS at FROM batch_jobs WHERE type='analyze_founder_stream_batch' AND status='completed'").get() as {at:string|null}).at;
   const jobs: Record<string, Record<string, number>> = {};
-  for (const type of ['capture_group_message', 'analyze_founder_stream_batch']) {
+  for (const type of ['capture_group_message','capture_founder_attachment', 'analyze_founder_stream_batch']) {
     jobs[type] = counts(client.prepare('SELECT status AS label, COUNT(*) AS n FROM batch_jobs WHERE type=? GROUP BY status').all(type) as CountRow[], jobStates, true);
   }
   const outbox = counts(client.prepare("SELECT status AS label, COUNT(*) AS n FROM outbox WHERE idempotency_key LIKE 'founder-%' OR idempotency_key LIKE 'alignment-%' GROUP BY status").all() as CountRow[], outboxStates);
@@ -65,6 +68,8 @@ function collectDiagnostics(client: Database.Database) {
         cursorState: cursorState(latest.value, latest.at.data) } : null },
     sources: { total: typeRows.reduce((sum, row) => sum + row.n, 0), byType: counts(typeRows, sourceTypes), byStatus: counts(statusRows, sourceStatuses) },
     topicsByStage: counts(topicRows, stages, true), openAlignmentIssues: { ...issues, total: issueRows.reduce((sum, row) => sum + row.n, 0) },
+    shadowCandidates:{total:shadowRows.reduce((sum,row)=>sum+row.n,0),byReason:counts(shadowRows,alignmentDimensions)},
+    lastAnalysisAt:instant.safeParse(lastAnalysis).success?lastAnalysis:null,
     gapsByCode, jobs, outbox
   };
 }

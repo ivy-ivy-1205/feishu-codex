@@ -4,6 +4,7 @@ import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
 import { JobRepository } from '../src/repositories/job-repository.js';
+import { TopicRepository } from '../src/repositories/topic-repository.js';
 import { runFounderStreamBackfill } from '../src/services/founder-stream-backfill.js';
 import * as health from '../src/routes/health.js';
 
@@ -22,6 +23,18 @@ function setup() {
   return { db, sources, jobs, app, logs };
 }
 describe('founder stream diagnostics', () => {
+  it('reports shadow candidate dimensions and the last completed analysis time without payloads',async()=>{
+    const h=setup(),topic=new TopicRepository(h.db.client).createTopic({displayName:'private topic',stage:'active_project',createdAt:at});
+    h.db.client.prepare(`INSERT INTO alignment_issues(id,topic_id,decision_key,dimension,evidence_set_hash,candidate_json,status,created_at,updated_at)
+      VALUES('issue-private',?,'decision-private','next_action','hash-private','{"private":"payload"}','candidate',?,?)`)
+      .run(topic.id,at.toISOString(),at.toISOString());
+    h.db.client.prepare(`INSERT INTO batch_jobs(id,type,stable_key,payload,status,created_at,updated_at)
+      VALUES('analysis-private','analyze_founder_stream_batch','analysis-private','{"private":"payload"}','completed',?,?)`)
+      .run(at.toISOString(),at.toISOString());
+    const response=await h.app.inject({url:'/diag/founder-stream'}),body=response.json();
+    expect(body).toMatchObject({shadowCandidates:{total:1,byReason:{next_action:1}},lastAnalysisAt:at.toISOString()});
+    expect(response.body).not.toMatch(/private|payload|decision-private|issue-private/);await h.app.close();
+  });
   it('projects aggregate coverage, cursor state and queue counts without source content or identifiers', async () => {
     const h = setup();
     await runFounderStreamBackfill({ chatId: chat, since: '2026-09-01T00:00:00.000Z', now: at, dryRun: false,
