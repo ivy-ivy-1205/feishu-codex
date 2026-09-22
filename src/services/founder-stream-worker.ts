@@ -178,6 +178,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           : { analysis, supportingByDisplayName: {} as Record<string, never[]>, canonicalNames: {} as Record<string,string> };
         failureStage = 'topic_reconciliation';
         const plan = reconcileTopics(input, classified.analysis);
+        failureStage = 'evidence_preparation';
         // The model can suggest a continuation, but it cannot revoke a founder's
         // accepted correction. Bind its evidence to the protected topic instead
         // of creating a renamed/reactivated duplicate.

@@ -72,6 +72,20 @@ describe('founder stream durable wiring', () => {
     expect(JSON.parse(payload)).toMatchObject({failureStage:'semantic_classification',failureCode:'codex_execution_failed'});
     expect(payload).not.toContain('private stderr');await h.app.close();h.db.close();
   });
+  it('separates evidence preparation failures from pure topic reconciliation',async()=>{
+    const h=harness();const saved=h.sources.saveSource({sourceSystem:'feishu',sourceType:'group_message',externalId:'om_bad_locator',
+      logicalKey:'bad-locator',occurredAt:start.toISOString(),capturedAt:start,authors:[],locatorUri:null,contentFormat:'text/plain',
+      contentText:'知识库',metadata:{chatId:chat,senderType:'user',threadId:42},availabilityStatus:'available'}).source;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>start,
+      analyzer:{async analyze(){return{topics:[{displayName:'知识库',stage:'idea',outcome:null,currentAction:null,confidence:'high',
+        sourceIds:[saved.id],evidenceExcerpts:[{sourceId:saved.id,excerpt:'知识库'}],
+        joinDecision:{kind:'new',topicId:null,confidence:'high',sharedTerms:[]},splitSuggestions:[]}]}}}});
+    const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[saved.id],capturedAt:start});
+    await runtime.runOnce();const payload=(h.db.client.prepare('SELECT payload FROM batch_jobs WHERE stable_key=?').get(queued.key) as {payload:string}).payload;
+    expect(JSON.parse(payload)).toMatchObject({failureStage:'evidence_preparation',failureCode:'unknown'});
+    await h.app.close();h.db.close();
+  });
   it('applies semantic classification before persisting the active project map', async () => {
     const h=harness();
     const rows=['AI native 房产业务','VibeVoice'].map((text,index)=>h.sources.saveSource(captureGroupMessageSource({chatId:chat,
