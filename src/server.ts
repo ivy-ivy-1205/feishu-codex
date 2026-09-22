@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { buildApp } from './app.js';
 import { CodexAuthProbe, CodexCliAdapter, NodeCodexProcessRunner } from './adapters/codex-cli.js';
-import { CodexFounderStreamAnalyzer } from './adapters/codex-founder-stream-analyzer.js';
+import { createFounderAnalysisAdapters } from './composition/founder-stream-analysis.js';
 import { createFounderStreamRuntime } from './services/founder-stream-worker.js';
 import { FeishuOAuthHttpClient, type FeishuOAuthSdkClientLike } from './adapters/feishu-oauth-client.js';
 import { createFeishuSdkClient } from './adapters/feishu-sdk.js';
@@ -110,14 +110,15 @@ const codexAuthProbe = new CodexAuthProbe({
   baseEnv: process.env,
   runner: new NodeCodexProcessRunner()
 });
+const founderAnalysis = config.founderStream.analysisEnabled ? createFounderAnalysisAdapters({
+  codex: new CodexCliAdapter({ command: config.codex.command, workdir: config.codex.workdir,
+    timeoutMs: config.codex.timeoutSeconds * 1000, baseEnv: process.env, runner: new NodeCodexProcessRunner() })
+}) : undefined;
 const founderRuntime = createFounderStreamRuntime({
   client: database.client, jobRepository, flags: config.founderStream,
   approvedChatIds: config.projectContext.approvedChatIds, ivyPrivateChatId: config.feishu.ivyPrivateChatId,
   intervalMs: config.worker.pollIntervalMs, delivery: feishuIntegration.delivery,
-  ...(config.founderStream.analysisEnabled ? { analyzer: new CodexFounderStreamAnalyzer({
-    codex: new CodexCliAdapter({ command: config.codex.command, workdir: config.codex.workdir,
-      timeoutMs: config.codex.timeoutSeconds * 1000, baseEnv: process.env, runner: new NodeCodexProcessRunner() })
-  }) } : {})
+  ...(founderAnalysis ?? {})
 });
 const workerRuntime = createWorkerRuntime(
   config.worker.enabled

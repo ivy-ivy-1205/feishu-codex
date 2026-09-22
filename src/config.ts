@@ -80,6 +80,13 @@ const envSchema = z.object({
       message: 'worker lease must be longer than the downstream timeout'
     });
   }
+  if (config.FOUNDER_STREAM_ANALYSIS_ENABLED && config.WORKER_LEASE_SECONDS <= config.CODEX_TIMEOUT_SECONDS * 2) {
+    context.addIssue({
+      code: 'custom',
+      path: ['WORKER_LEASE_SECONDS'],
+      message: 'founder analysis lease must outlive two sequential Codex calls'
+    });
+  }
   if (config.FEISHU_OAUTH_ENABLED && !config.FEISHU_OAUTH_REDIRECT_URI) {
     context.addIssue({
       code: 'custom',

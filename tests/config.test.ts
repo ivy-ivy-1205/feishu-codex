@@ -84,6 +84,15 @@ describe('loadConfig', () => {
     })).toThrow(/lease.*downstream timeout/i);
   });
 
+  it('requires a two-call lease budget when founder semantic analysis is enabled', () => {
+    expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED:'true',
+      FOUNDER_STREAM_ANALYSIS_ENABLED:'true', WORKER_LEASE_SECONDS:'240', CODEX_TIMEOUT_SECONDS:'120' }))
+      .toThrow(/two.*Codex/i);
+    expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED:'true',
+      FOUNDER_STREAM_ANALYSIS_ENABLED:'true', WORKER_LEASE_SECONDS:'241', CODEX_TIMEOUT_SECONDS:'120' })
+      .founderStream.analysisEnabled).toBe(true);
+  });
+
   it('keeps the Codex summarizer disabled unless explicitly configured', () => {
     expect(loadConfig(baseEnv).codex.summarizerMode).toBe('fake');
     expect(loadConfig({

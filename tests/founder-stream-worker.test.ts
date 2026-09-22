@@ -332,4 +332,22 @@ describe('founder stream durable wiring', () => {
     await h.runtime.runOnce(); expect(h.jobs.list().map(j => j.kind)).toEqual(['capture_group_message']);
     expect(h.calls()).toBe(0); await h.app.close(); h.db.close();
   });
+  it('passes immutable source occurrence time to the perspective analyzer', async () => {
+    const h = harness();
+    new AlignmentRepository(h.db.client).configureFounderIdentity({ founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:start });
+    const source = h.sources.saveSource(captureGroupMessageSource({ chatId:chat,messageId:'om_timed',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'知识库先从买家问答开始',
+      occurredAt:'2026-09-20T08:30:00.000Z' },start).source).source;
+    let evidence: readonly { occurredAt?: string }[] = [];
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},
+      approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>new Date(start.getTime()+600_000),
+      analyzer:{async analyze(input){return{topics:[{displayName:'知识库',stage:'exploring',outcome:null,currentAction:null,confidence:'high',
+        sourceIds:[source.id],evidenceExcerpts:[{sourceId:source.id,excerpt:'知识库先从买家问答开始'}],
+        joinDecision:{kind:'new',topicId:null,confidence:'high',sharedTerms:[]},splitSuggestions:[]}]}}},
+      perspectiveAnalyzer:{async analyze(input){evidence=input.evidence;return{observations:[],alignmentProposals:[]}}}});
+    h.jobs.enqueueFounderStreamBatch({chatId:chat,since:source.occurredAt,until:source.occurredAt,sourceIds:[source.id],capturedAt:start});
+    await runtime.runOnce();
+    expect(evidence).toEqual([expect.objectContaining({ sourceId:source.id,founder:'ivy',occurredAt:'2026-09-20T08:30:00.000Z' })]);
+    await h.app.close();h.db.close();
+  });
 });

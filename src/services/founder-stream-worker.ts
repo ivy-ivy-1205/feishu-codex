@@ -27,7 +27,8 @@ import type { FeishuContextGap } from './feishu-context-sync.js';
 
 export interface FounderPerspectiveAnalysisPort {
   analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[];
-    evidence: readonly { id: string; sourceId: string; topicIds: readonly string[]; excerpt: string; founder: 'ivy' | 'james' | null }[] }): Promise<{
+    evidence: readonly { id: string; sourceId: string; topicIds: readonly string[]; excerpt: string;
+      founder: 'ivy' | 'james' | null; occurredAt: string }[] }): Promise<{
     observations: readonly PerspectiveObservation[]; alignmentProposals: readonly AlignmentProposal[];
   }>;
 }
@@ -151,7 +152,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           ids: item.evidenceExcerpts.map(e => saveFounderEvidence(sources,e.sourceId,e.excerpt,plannedAt)) }));
         const byTopic = new Map<string, typeof prepared>();
         for(const row of prepared) byTopic.set(row.topicId,[...(byTopic.get(row.topicId) ?? []),row]);
-        const scopedEvidence = new Map<string, { id:string;sourceId:string;topicIds:string[];excerpt:string;founder:'ivy'|'james'|null }>();
+        const scopedEvidence = new Map<string, { id:string;sourceId:string;topicIds:string[];excerpt:string;
+          founder:'ivy'|'james'|null;occurredAt:string }>();
         for (const row of prepared) {
           const previous = input.currentTopics.find(t=>t.id===row.topicId)?.evidenceExcerpts ?? [];
           const ids = [...row.ids,...previous.map(e=>saveFounderEvidence(sources,e.sourceId,e.excerpt,plannedAt))];
@@ -159,7 +161,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
             const evidence=sources.getEvidence(id)!;
             const existing=scopedEvidence.get(id);
             if(existing) { if(!existing.topicIds.includes(row.topicId)) existing.topicIds.push(row.topicId); }
-            else scopedEvidence.set(id,{id,sourceId:evidence.sourceId,topicIds:[row.topicId],excerpt:evidence.excerpt,founder:perspectives.resolveFounderForEvidence(id)});
+            else scopedEvidence.set(id,{id,sourceId:evidence.sourceId,topicIds:[row.topicId],excerpt:evidence.excerpt,
+              founder:perspectives.resolveFounderForEvidence(id),occurredAt:sources.getSource(evidence.sourceId)!.occurredAt});
           }
         }
         const perspectiveResult = options.perspectiveAnalyzer && prepared.length ? await options.perspectiveAnalyzer.analyze({
