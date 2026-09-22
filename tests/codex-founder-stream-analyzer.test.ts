@@ -91,6 +91,8 @@ describe('CodexFounderStreamAnalyzer', () => {
     expect(captured?.prompt).toContain(ideaText);
     expect(captured?.prompt).not.toContain('legacy-secret-project');
     expect(captured?.prompt).not.toContain('never-send-token');
+    expect(captured?.prompt).toContain('逐项执行最终校验');
+    expect(captured?.prompt).toContain('必须完整出现在至少一个 evidenceExcerpts[].excerpt');
     function check(value: unknown): void {
       if (!value || typeof value !== 'object') return;
       const object = value as Record<string, unknown>;

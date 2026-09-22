@@ -43,6 +43,10 @@ function renderPrompt(input: FounderStreamInput): string {
     '延续目标只能引用 currentTopics 的 ID；sharedTerms 必须逐字出现在新旧双方 evidenceExcerpts 中。不能只凭相似主题自动合并。',
     'splitSuggestions 只建议拆分，必须引用已有 topicId 并由本 proposal 的原文支持；不自动执行拆分。',
     'confidence 独立描述话题提取和 join/split 判断的置信度；不确定就降级。没有依据时 topics=[]。',
+    '输出前逐项执行最终校验：displayName、非 null 的 outcome、非 null 的 currentAction，必须完整出现在至少一个 evidenceExcerpts[].excerpt 中。',
+    '不要概括、补词、改写或组合这些字段；若原文没有可逐字复制的 outcome/currentAction，就返回 null，并相应降低 stage。',
+    '如果字段来自某条 source 原文，evidenceExcerpts 必须包含覆盖该字段完整文字的连续原文片段；不能只引用同一消息里的另一段文字。',
+    '每个 sourceIds 条目必须恰好在 evidenceExcerpts 中至少出现一次，evidenceExcerpts 也不得引用 sourceIds 之外的来源。',
     '', 'Supplied evidence JSON:', JSON.stringify(input)
   ].join('\n');
 }
