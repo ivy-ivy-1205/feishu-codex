@@ -15,6 +15,7 @@ import { renderFounderWorkMap } from '../src/services/founder-work-map-renderer.
 import { applyTopicCorrection, type TopicCorrection } from '../src/services/topic-correction-service.js';
 import { FounderStreamValidationError } from '../src/ports/founder-stream-analyzer.js';
 import { CodexCliError } from '../src/adapters/codex-cli.js';
+import { sha256 } from '../src/services/canonical-json.js';
 
 const chat = 'oc_a84d5b6ca478220d0a37964b50776edb';
 const start = new Date('2026-09-21T00:00:00.000Z');
@@ -84,6 +85,29 @@ describe('founder stream durable wiring', () => {
     const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[saved.id],capturedAt:start});
     await runtime.runOnce();const payload=(h.db.client.prepare('SELECT payload FROM batch_jobs WHERE stable_key=?').get(queued.key) as {payload:string}).payload;
     expect(JSON.parse(payload)).toMatchObject({failureStage:'evidence_preparation',failureCode:'unknown'});
+    await h.app.close();h.db.close();
+  });
+  it('reuses immutable evidence when joining instead of rebuilding legacy minute locators',async()=>{
+    const h=harness();
+    const minute=h.sources.saveSource({sourceSystem:'feishu',sourceType:'minute_transcript',externalId:'minute_legacy',logicalKey:'minute_legacy',
+      occurredAt:start.toISOString(),capturedAt:start,authors:[],locatorUri:null,contentFormat:'text/plain',contentText:'知识库',
+      metadata:{founderStreamEligible:true,founderStreamChatId:chat},availabilityStatus:'available'}).source;
+    h.db.client.prepare(`INSERT INTO context_evidence(id,source_id,source_version,excerpt,locator_json,excerpt_hash,evidence_level,captured_at)
+      VALUES('ctxev_legacy',?,1,'知识库','{"kind":"minute_segment","segmentOrdinal":0,"sourceVersion":1,"contentHash":"${minute.contentHash}","speakerName":"Ivy","startMs":0,"endMs":1}',?,'primary_statement',?)`)
+      .run(minute.id,sha256('知识库'),start.toISOString());
+    const topic=h.topics.createTopic({displayName:'知识库',stage:'idea',evidenceIds:['ctxev_legacy'],createdAt:start});
+    const fresh=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_join',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'知识库',occurredAt:start.toISOString()},start).source).source;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>start,
+      analyzer:{async analyze(){return{topics:[{displayName:'知识库',stage:'idea',outcome:null,currentAction:null,confidence:'high',
+        sourceIds:[fresh.id],evidenceExcerpts:[{sourceId:fresh.id,excerpt:'知识库'}],
+        joinDecision:{kind:'exact_continuation',topicId:topic.id,confidence:'high',sharedTerms:['知识库']},splitSuggestions:[]}]}}}});
+    const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[fresh.id],capturedAt:start});
+    await runtime.runOnce();
+    const row=h.db.client.prepare('SELECT status,payload FROM batch_jobs WHERE stable_key=?').get(queued.key) as {status:string;payload:string};
+    expect(row.status).toBe('completed');
+    expect(h.topics.listCurrentTopics()[0]!.evidenceIds).toEqual(expect.arrayContaining(['ctxev_legacy']));
     await h.app.close();h.db.close();
   });
   it('applies semantic classification before persisting the active project map', async () => {

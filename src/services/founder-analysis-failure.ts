@@ -2,7 +2,7 @@ export const founderFailureStages = ['input','topic_analysis','semantic_classifi
 export type FounderFailureStage = typeof founderFailureStages[number];
 
 export const founderFailureCodes = ['input_invalid','schema_invalid','grounding_invalid','codex_auth_required',
-  'codex_output_invalid','codex_execution_failed','perspective_invalid','lease_lost','unknown'] as const;
+  'codex_output_invalid','codex_execution_failed','perspective_invalid','existing_evidence_missing','lease_lost','unknown'] as const;
 export type FounderFailureCode = typeof founderFailureCodes[number];
 
 /** Convert an arbitrary exception to closed, non-sensitive labels only. */
@@ -17,6 +17,7 @@ export function classifyFounderFailure(error: unknown): FounderFailureCode {
     return 'grounding_invalid';
   }
   if (value.code === 'FOUNDER_PERSPECTIVE_INPUT_INVALID' || value.code === 'FOUNDER_PERSPECTIVE_OUTPUT_INVALID') return 'perspective_invalid';
+  if (error instanceof Error && error.message === 'FOUNDER_EXISTING_EVIDENCE_MISSING') return 'existing_evidence_missing';
   if (value.code === 'LEASE_LOST') return 'lease_lost';
   return 'unknown';
 }
