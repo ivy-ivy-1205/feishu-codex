@@ -78,6 +78,28 @@ export interface FeishuSdkClientLike {
   };
 }
 
+export class FeishuSdkAttachmentReader {
+  constructor(readonly sdkClient:FeishuSdkClientLike,readonly maxBytes=80*1024*1024){}
+  async read(input:{messageId:string;fileKey:string;fileName:string}):Promise<{body:Buffer;mimeType:string}>{
+    const resource=this.sdkClient.im.v1?.messageResource;if(!resource)throw new Error('ATTACHMENT_RESOURCE_UNAVAILABLE');
+    const response=await resource.get({params:{type:'file'},path:{message_id:input.messageId,file_key:input.fileKey}});
+    const chunks:Buffer[]=[];let size=0;
+    for await(const chunk of response.getReadableStream()){
+      const buffer=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);size+=buffer.byteLength;
+      if(size>this.maxBytes)throw new Error('ATTACHMENT_TOO_LARGE');chunks.push(buffer);
+    }
+    const headers=response.headers??{};const raw=Object.entries(headers).find(([key])=>key.toLowerCase()==='content-type')?.[1];
+    return{body:Buffer.concat(chunks),mimeType:raw?.split(';')[0]?.trim()||mimeTypeFromName(input.fileName)};
+  }
+}
+
+function mimeTypeFromName(name:string):string{
+  const extension=name.toLowerCase().split('.').pop();
+  return extension==='md'?'text/markdown':extension==='txt'?'text/plain':extension==='html'||extension==='htm'?'text/html':
+    extension==='docx'?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+    extension==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':extension==='zip'?'application/zip':'application/octet-stream';
+}
+
 /**
  * Minimal official-SDK adapter for the explicit project-context sync boundary.
  * File bodies deliberately remain unavailable until an approved reader/parser is supplied;

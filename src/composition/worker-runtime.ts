@@ -65,7 +65,7 @@ export function createWorkerRuntime(
         ...(options.founder?.supportedKinds ?? [])]
     ),
     process: async (job) => {
-      if (job.kind === 'capture_group_message' || job.kind === 'analyze_founder_stream_batch') {
+      if (job.kind === 'capture_group_message' || job.kind === 'capture_founder_attachment' || job.kind === 'analyze_founder_stream_batch') {
         if (!options.founder) throw new Error('Founder job leased without runtime');
         return options.founder.process(job);
       }

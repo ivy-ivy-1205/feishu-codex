@@ -29,7 +29,13 @@ export interface FounderStreamJob {
   attempt: number;
   leaseExpiresAt?: string;
 }
-export type DurableJob = ProcessMinuteJob | ExtractContextCandidatesJob | FounderStreamJob;
+export interface FounderAttachmentJob {
+  kind: 'capture_founder_attachment'; key: string; chatId: string; messageId: string; fileKey: string;
+  fileName: string; threadId: string | null; occurredAt: string; authorOpenId: string | null;
+  attempt: number; leaseExpiresAt?: string;
+}
+export type FounderDurableJob = FounderStreamJob | FounderAttachmentJob;
+export type DurableJob = ProcessMinuteJob | ExtractContextCandidatesJob | FounderDurableJob;
 
 export type RetryErrorCode = 'MINUTE_NOT_READY' | 'RATE_LIMITED';
 
@@ -168,6 +174,16 @@ export class JobRepository {
     }).immediate();
   }
 
+  enqueueFounderAttachment(input: { messageId:string; chatId:string; fileKey:string; fileName:string; threadId:string|null;
+    occurredAt:string; authorOpenId:string|null; capturedAt:Date }): void {
+    const key=`capture_founder_attachment:${input.messageId}`;
+    const payload={chatId:input.chatId,messageId:input.messageId,fileKey:input.fileKey,fileName:input.fileName,
+      threadId:input.threadId,occurredAt:input.occurredAt,authorOpenId:input.authorOpenId,attempt:0};
+    this.client.prepare(`INSERT INTO batch_jobs (id,type,stable_key,payload,status,created_at,updated_at)
+      VALUES (?, 'capture_founder_attachment', ?, ?, 'queued', ?, ?) ON CONFLICT(stable_key) DO NOTHING`)
+      .run(key,key,JSON.stringify(payload),input.capturedAt.toISOString(),input.capturedAt.toISOString());
+  }
+
   debounceFounderStream(input: { chatId: string; sourceIds: string[]; threadId: string | null; now: Date }): string {
     return this.client.transaction(() => {
       const rows = this.client.prepare(`SELECT stable_key,payload FROM batch_jobs WHERE type='analyze_founder_stream_batch'
@@ -218,7 +234,7 @@ export class JobRepository {
   ): DurableJob | null {
     const kinds = [...new Set(supportedKinds)];
     if (kinds.length === 0) return null;
-    if (kinds.some((kind) => !['process_minute', 'extract_context_candidates', 'capture_group_message', 'analyze_founder_stream_batch'].includes(kind))) {
+    if (kinds.some((kind) => !['process_minute', 'extract_context_candidates', 'capture_group_message', 'capture_founder_attachment', 'analyze_founder_stream_batch'].includes(kind))) {
       throw new Error('unsupported durable job kind');
     }
     const leaseUntil = new Date(availableAt.getTime() + this.leaseDurationMs);
@@ -230,7 +246,7 @@ export class JobRepository {
         WHERE type IN (${placeholders})
           AND status IN ('queued', 'retry', 'processing')
           AND updated_at <= ?
-        ORDER BY CASE WHEN type='capture_group_message' THEN 0 ELSE 1 END, created_at ASC
+        ORDER BY CASE WHEN type IN ('capture_group_message','capture_founder_attachment') THEN 0 ELSE 1 END, created_at ASC
         LIMIT 1
       `).get(...kinds, availableAt.toISOString()) as JobRow | undefined;
       if (!row) {
@@ -379,7 +395,7 @@ export class JobRepository {
     assertLeaseMutation(result.changes, job.key);
   }
 
-  retryFounderStream(job: FounderStreamJob, now: Date): void {
+  retryFounderStream(job: FounderDurableJob, now: Date): void {
     const { kind: _kind, key: _key, leaseExpiresAt: _lease, ...payload } = job;
     const attempt = job.attempt + 1;
     const result = this.client.prepare(`UPDATE batch_jobs SET status=?,payload=?,updated_at=?
@@ -485,6 +501,18 @@ function serializeContextJobPayload(
 }
 
 function normalizeJobRow(row: JobRow): DurableJob | null {
+  if(row.type==='capture_founder_attachment'){
+    try{
+      const payload=JSON.parse(row.payload),allowed=['chatId','messageId','fileKey','fileName','threadId','occurredAt','authorOpenId','attempt','failureReason'];
+      if(!isRecord(payload)||Object.keys(payload).some(k=>!allowed.includes(k))||typeof payload.chatId!=='string'||!payload.chatId.trim()||
+        typeof payload.messageId!=='string'||!payload.messageId.trim()||typeof payload.fileKey!=='string'||!payload.fileKey.trim()||
+        typeof payload.fileName!=='string'||!payload.fileName.trim()||typeof payload.occurredAt!=='string'||!Number.isFinite(Date.parse(payload.occurredAt))||
+        (payload.attempt!==undefined&&!isRetryAttempt(payload.attempt)))return null;
+      return{kind:'capture_founder_attachment',key:row.stable_key,chatId:payload.chatId,messageId:payload.messageId,fileKey:payload.fileKey,
+        fileName:payload.fileName,threadId:typeof payload.threadId==='string'?payload.threadId:null,occurredAt:payload.occurredAt,
+        authorOpenId:typeof payload.authorOpenId==='string'?payload.authorOpenId:null,attempt:payload.attempt??0};
+    }catch{return null}
+  }
   if (row.type === 'capture_group_message' || row.type === 'analyze_founder_stream_batch') {
     try {
       const payload = JSON.parse(row.payload);

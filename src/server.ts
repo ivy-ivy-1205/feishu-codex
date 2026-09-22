@@ -117,7 +117,7 @@ const founderAnalysis = config.founderStream.analysisEnabled ? createFounderAnal
 const founderRuntime = createFounderStreamRuntime({
   client: database.client, jobRepository, flags: config.founderStream,
   approvedChatIds: config.projectContext.approvedChatIds, ivyPrivateChatId: config.feishu.ivyPrivateChatId,
-  intervalMs: config.worker.pollIntervalMs, delivery: feishuIntegration.delivery,
+  intervalMs: config.worker.pollIntervalMs, delivery: feishuIntegration.delivery,attachmentReader:feishuIntegration.attachmentReader,
   ...(founderAnalysis ?? {})
 });
 const workerRuntime = createWorkerRuntime(

@@ -16,7 +16,9 @@ import { applyTopicCorrection, type TopicCorrection } from '../src/services/topi
 
 const chat = 'oc_a84d5b6ca478220d0a37964b50776edb';
 const start = new Date('2026-09-21T00:00:00.000Z');
-function harness(flags = { captureEnabled: true, analysisEnabled: true, groupDeliveryEnabled: false }) {
+function harness(flags = { captureEnabled: true, analysisEnabled: true, groupDeliveryEnabled: false }, attachmentReader?: {
+  read(input:{messageId:string;fileKey:string;fileName:string}):Promise<{body:Buffer;mimeType:string}>
+}) {
   const db = createSqliteDatabase(':memory:'); migrateDatabase(db.client);
   const jobs = new JobRepository(db.client); const topics = new TopicRepository(db.client);
   const sources = new ContextSourceRepository(db.client);
@@ -24,7 +26,7 @@ function harness(flags = { captureEnabled: true, analysisEnabled: true, groupDel
   const inputs: FounderStreamInput[] = [];
   const runtime = createFounderStreamRuntime({ client: db.client, jobRepository: jobs, flags,
     approvedChatIds: [chat], ivyPrivateChatId: 'oc_private', now: () => now,
-    analyzer: { async analyze(input) { calls++; inputs.push(input); return { topics: [{
+    attachmentReader, analyzer: { async analyze(input) { calls++; inputs.push(input); return { topics: [{
       displayName: '知识库', stage: 'idea', outcome: null, currentAction: null, confidence: 'high',
       sourceIds: [input.sources[0]!.id], evidenceExcerpts: [{ sourceId: input.sources[0]!.id, excerpt: '知识库' }],
       joinDecision: input.currentTopics.length ? { kind: 'exact_continuation', topicId: input.currentTopics[0]!.id,
@@ -151,6 +153,42 @@ describe('founder stream durable wiring', () => {
     const diag=await h.app.inject({method:'GET',url:'/diag/founder-stream'});expect(diag.json().gapsByCode).toEqual({[code]:1});
     expect(diag.body).not.toContain('om_media');expect(JSON.stringify(sources)).not.toContain('secret_file_key');
     await h.runtime.runOnce();expect(h.calls()).toBe(0);expect(h.jobs.list()).toHaveLength(0);await h.app.close();h.db.close();
+  });
+  it('queues a file resource during webhook handling and persists only parsed text with 90-day retention in the worker',async()=>{
+    let reads=0;const h=harness(undefined,{async read(input){reads++;expect(input).toEqual({messageId:'om_file',fileKey:'secret_file_key',fileName:'brief.md'});
+      return{body:Buffer.from('# 方案\n合伙人对齐室'),mimeType:'text/markdown'}}});
+    const payload=event('om_file');Object.assign(payload.event.message,{message_type:'file',content:JSON.stringify({file_key:'secret_file_key',file_name:'brief.md'})});
+    const response=await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload});
+    expect(response.json()).toMatchObject({status:'attachment_queued'});expect(reads).toBe(0);
+    expect(h.jobs.list()).toEqual([expect.objectContaining({kind:'capture_founder_attachment',messageId:'om_file',fileName:'brief.md'})]);
+    await h.runtime.runOnce();expect(reads).toBe(1);
+    const parsed=h.sources.listSources().find(source=>source.externalId==='om_file:file');
+    expect(parsed).toMatchObject({sourceType:'group_message',contentText:'# 方案\n合伙人对齐室',availabilityStatus:'available',
+      rawTextExpiresAt:'2026-12-20T00:00:00.000Z',metadata:{chatId:chat,messageId:'om_file',messageType:'file',senderType:'user',attachmentTitle:'brief.md'}});
+    expect(JSON.stringify(h.sources.listSources())).not.toContain('secret_file_key');
+    expect(h.jobs.list()).toEqual(expect.arrayContaining([expect.objectContaining({kind:'capture_group_message',sourceIds:[parsed!.id]})]));
+    await h.app.close();h.db.close();
+  });
+  it('records a typed gap and completes an unsupported attachment without exposing its resource key',async()=>{
+    const h=harness(undefined,{async read(){return{body:Buffer.from('binary'),mimeType:'application/pdf'}}});
+    const payload=event('om_pdf');Object.assign(payload.event.message,{message_type:'file',content:JSON.stringify({file_key:'secret_pdf_key',file_name:'brief.pdf'})});
+    await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload});await h.runtime.runOnce();
+    const gap=h.sources.listSources().find(source=>source.sourceType==='feishu_sync_gap');
+    expect(JSON.parse(gap!.contentText)).toMatchObject({code:'FILE_TEXT_UNREADABLE',reason:'ATTACHMENT_TYPE_UNSUPPORTED'});
+    expect(JSON.stringify(h.sources.listSources())).not.toContain('secret_pdf_key');
+    expect(h.db.client.prepare("SELECT status FROM batch_jobs WHERE type='capture_founder_attachment'").get()).toEqual({status:'completed'});
+    await h.app.close();h.db.close();
+  });
+  it('bounds attachment read retries and records a safe terminal gap',async()=>{
+    const h=harness(undefined,{async read(){throw new Error('remote private failure')}}),payload=event('om_failed_file');
+    Object.assign(payload.event.message,{message_type:'file',content:JSON.stringify({file_key:'secret_failed_key',file_name:'brief.md'})});
+    await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload});
+    for(const offset of [0,30_000,60_000]){h.setNow(new Date(start.getTime()+offset));await h.runtime.runOnce()}
+    const gap=h.sources.listSources().find(source=>source.sourceType==='feishu_sync_gap');
+    expect(JSON.parse(gap!.contentText)).toMatchObject({code:'FILE_TEXT_UNREADABLE',reason:'ATTACHMENT_READ_FAILED'});
+    expect(JSON.stringify(h.sources.listSources())).not.toMatch(/secret_failed_key|remote private failure/);
+    expect(h.db.client.prepare("SELECT status FROM batch_jobs WHERE type='capture_founder_attachment'").get()).toEqual({status:'completed'});
+    await h.app.close();h.db.close();
   });
   it.each(['audio','voice'])('uses an existing platform %s text transcript without reading a media resource',async messageType=>{
     const h=harness();const payload=event();Object.assign(payload.event.message,{message_type:messageType,content:JSON.stringify({text:'知识库 语音转文字',file_key:'must_not_read'})});

@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import type { AppConfig } from '../config.js';
 import { ContextSourceRepository, type ContextSourceRecord } from '../repositories/context-source-repository.js';
-import { JobRepository, LeaseLostError, type FounderStreamJob } from '../repositories/job-repository.js';
+import { JobRepository, LeaseLostError, type FounderDurableJob, type FounderStreamJob } from '../repositories/job-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
 import { AlignmentRepository } from '../repositories/alignment-repository.js';
@@ -25,6 +25,7 @@ import { topicCorrectionSchema } from './topic-correction-service.js';
 import type { CurrentTopic, TopicVersion } from '../domain/topic.js';
 import type { FeishuContextGap } from './feishu-context-sync.js';
 import { projectFounderWorkMap, type FounderWorkMapClassification } from './founder-work-map-classification.js';
+import { parseFeishuAttachment } from './feishu-attachment-parser.js';
 
 export interface FounderPerspectiveAnalysisPort {
   analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[];
@@ -38,6 +39,7 @@ export interface FounderStreamOptions {
   client: Database.Database; jobRepository: JobRepository; flags: AppConfig['founderStream'];
   approvedChatIds: readonly string[]; ivyPrivateChatId: string; analyzer?: FounderStreamAnalyzer;
   classifier?: { classify(analysis: Awaited<ReturnType<FounderStreamAnalyzer['analyze']>>): Promise<FounderWorkMapClassification> };
+  attachmentReader?: { read(input:{messageId:string;fileKey:string;fileName:string}):Promise<{body:Buffer;mimeType:string}> };
   perspectiveAnalyzer?: FounderPerspectiveAnalysisPort;
   now?: () => Date; intervalMs?: number;
   policy?: Pick<AlignmentNotificationPolicy, 'reconcilePending'>;
@@ -74,6 +76,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
     return options.client.transaction(() => {
       if (options.client.prepare('SELECT 1 FROM founder_stream_events WHERE event_id=? OR message_id=?').get(header.event_id, message.message_id)) return { status: 'duplicate' };
       const stamp = now(), text = messageText(message.message_type, message.content);
+      const attachment=message.message_type==='file'?fileAttachment(message.content):null;
+      const attachmentQueued=event.sender.sender_type==='user'&&Boolean(attachment&&options.attachmentReader);
       let disposition = event.sender.sender_type !== 'user' ? 'bot_audit' : !text ? 'skipped_media' : 'captured';
       let decision: ReturnType<typeof routeFounderFeedback> | undefined;
       if (disposition === 'skipped_media') {
@@ -83,11 +87,14 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         const gapCode = liveGapCode(message.message_type);
         const source = sources.saveSource({ ...captured.source, availabilityStatus: 'unknown',
           metadata: { ...captured.source.metadata, gapCode } }).source;
-        sources.saveSource({ ...captured.source, sourceType: 'feishu_sync_gap',
+        if(!attachmentQueued)sources.saveSource({ ...captured.source, sourceType: 'feishu_sync_gap',
           logicalKey: `${captured.source.logicalKey}:gap:${gapCode}`, contentFormat: 'application/json',
           contentText: JSON.stringify({ code: gapCode, sourceRef: source.logicalKey,
             reason: 'No reliable text available; media was not downloaded or analyzed.' }),
           metadata: { chatId, messageId: message.message_id, sourceId: source.id, messageType: message.message_type } });
+        else options.jobRepository.enqueueFounderAttachment({messageId:message.message_id,chatId,fileKey:attachment!.fileKey,
+          fileName:attachment!.fileName,threadId:message.thread_id||message.root_id||null,occurredAt:at,
+          authorOpenId:event.sender.sender_id.open_id??null,capturedAt:stamp});
       }
       if (disposition === 'captured') {
         const replyTo = message.parent_id || message.root_id || null;
@@ -112,13 +119,38 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
       }
       options.client.prepare('INSERT INTO founder_stream_events(event_id,message_id,chat_id,disposition,received_at) VALUES(?,?,?,?,?)')
         .run(header.event_id, message.message_id, chatId, disposition, stamp.toISOString());
-      return decision ? { status: 'founder_feedback_decision', decision } : { status: disposition };
+      return decision ? { status: 'founder_feedback_decision', decision } : { status: attachmentQueued?'attachment_queued':disposition };
     }).immediate();
   } };
-  async function process(job: FounderStreamJob) {
+  async function process(job: FounderDurableJob) {
     try {
       if (!allowed(job.chatId)) throw new Error('unapproved founder group');
-      if (job.kind === 'capture_group_message') {
+      if(job.kind==='capture_founder_attachment'){
+        if(!options.attachmentReader)throw new Error('founder attachment reader unavailable');
+        const resource=await options.attachmentReader.read({messageId:job.messageId,fileKey:job.fileKey,fileName:job.fileName});
+        let text:string;
+        try{text=await parseFeishuAttachment(resource.body,resource.mimeType,job.fileName,{maxBytes:80*1024*1024,maxChars:180_000});}
+        catch(error){
+          const reason=error instanceof Error?error.message:'ATTACHMENT_PARSE_FAILED';
+          if(!reason.startsWith('ATTACHMENT_'))throw error;
+          options.client.transaction(()=>{
+            const stamp=now();if(!options.jobRepository.ownsLease(job,stamp))throw new LeaseLostError(job.key);
+            saveAttachmentGap(sources,job,reason,stamp);options.jobRepository.markCompleted(job,stamp);
+          }).immediate();return 'completed' as const;
+        }
+        if(!text.trim())throw new Error('ATTACHMENT_TEXT_UNAVAILABLE');
+        options.client.transaction(()=>{
+          const stamp=now();if(!options.jobRepository.ownsLease(job,stamp))throw new LeaseLostError(job.key);
+          const captured=captureGroupMessageSource({chatId:job.chatId,messageId:`${job.messageId}:file`,threadId:job.threadId,rootId:null,
+            author:{openId:job.authorOpenId,displayName:null},messageType:'file',senderType:'user',text,occurredAt:job.occurredAt},stamp);
+          captured.source.externalId=`${job.messageId}:file`;captured.source.logicalKey=`feishu:chat:${job.chatId}:message:${job.messageId}:file`;
+          captured.source.metadata={...captured.source.metadata,messageId:job.messageId,attachmentTitle:job.fileName,mimeType:resource.mimeType};
+          captured.source.rawTextExpiresAt=new Date(stamp.getTime()+90*24*60*60_000);
+          const source=sources.saveSource(captured.source).source;
+          options.jobRepository.enqueueGroupCapture({messageId:`${job.messageId}:file`,chatId:job.chatId,sourceIds:[source.id],threadId:job.threadId,capturedAt:stamp});
+          options.jobRepository.markCompleted(job,stamp);
+        }).immediate();
+      } else if (job.kind === 'capture_group_message') {
         options.client.transaction(() => {
           if (!options.jobRepository.ownsLease(job, now())) throw new LeaseLostError(job.key);
           if (options.flags.analysisEnabled) options.jobRepository.debounceFounderStream({ ...job, now: now() });
@@ -230,14 +262,19 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
       return 'completed' as const;
     } catch (error) {
       if (error instanceof LeaseLostError) return 'lost_lease' as const;
+      if(job.kind==='capture_founder_attachment'&&job.attempt>=2){
+        try{options.client.transaction(()=>{const stamp=now();if(!options.jobRepository.ownsLease(job,stamp))throw new LeaseLostError(job.key);
+          saveAttachmentGap(sources,job,'ATTACHMENT_READ_FAILED',stamp);options.jobRepository.markCompleted(job,stamp)}).immediate();return 'completed' as const;}
+        catch(failure){if(failure instanceof LeaseLostError)return 'lost_lease' as const;throw failure}
+      }
       try { options.jobRepository.retryFounderStream(job, now()); } catch (failure) {
         if (failure instanceof LeaseLostError) return 'lost_lease' as const; throw failure;
       }
       return 'retry' as const;
     }
   }
-  const supportedKinds: FounderStreamJob['kind'][] = !options.flags.captureEnabled ? [] : options.flags.analysisEnabled ?
-    ['capture_group_message','analyze_founder_stream_batch'] : ['capture_group_message'];
+  const supportedKinds: FounderDurableJob['kind'][] = !options.flags.captureEnabled ? [] : options.flags.analysisEnabled ?
+    ['capture_group_message','capture_founder_attachment','analyze_founder_stream_batch'] : ['capture_group_message','capture_founder_attachment'];
   const afterTick = async () => {
       if (!options.flags.analysisEnabled) return;
       if (allowed(approvedGroup)) recoverGroupAnalysis();
@@ -252,7 +289,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   };
   const consumer = new DurableJobConsumer({ now, intervalMs: options.intervalMs,
     leaseNext: at => options.jobRepository.leaseNextSupportedJob(at,supportedKinds),
-    process: job => process(job as FounderStreamJob), afterTick
+    process: job => process(job as FounderDurableJob), afterTick
   });
   function enqueueMinute(source: ContextSourceRecord) {
     return options.jobRepository.enqueueFounderStreamBatch({chatId:approvedGroup,sourceIds:[source.id],since:source.occurredAt,until:now().toISOString(),capturedAt:now()});
@@ -392,6 +429,19 @@ function liveGapCode(type:string):FeishuContextGap['code'] {
   if(type==='image')return 'IMAGE_SKIPPED';
   if(type==='text'||type==='post')return 'MESSAGE_TEXT_UNAVAILABLE';
   return 'MESSAGE_UNSUPPORTED';
+}
+function fileAttachment(content:string):{fileKey:string;fileName:string}|null{
+  try{const value=JSON.parse(content) as Record<string,unknown>;
+    return typeof value.file_key==='string'&&value.file_key.trim()&&typeof value.file_name==='string'&&value.file_name.trim()
+      ?{fileKey:value.file_key.trim(),fileName:value.file_name.trim()}:null;
+  }catch{return null}
+}
+function saveAttachmentGap(repository:ContextSourceRepository,job:Extract<FounderDurableJob,{kind:'capture_founder_attachment'}>,reason:string,stamp:Date):void{
+  repository.saveSource({sourceSystem:'feishu',sourceType:'feishu_sync_gap',externalId:`${job.messageId}:file-gap`,
+    logicalKey:`feishu:chat:${job.chatId}:message:${job.messageId}:file-gap`,occurredAt:job.occurredAt,
+    authors:[{openId:job.authorOpenId,displayName:null}],locatorUri:null,contentFormat:'application/json',
+    contentText:JSON.stringify({code:'FILE_TEXT_UNREADABLE',sourceRef:`feishu:chat:${job.chatId}:message:${job.messageId}`,reason}),
+    metadata:{chatId:job.chatId,messageId:job.messageId,messageType:'file',attachmentTitle:job.fileName},availabilityStatus:'unknown',capturedAt:stamp});
 }
 export function saveFounderEvidence(repository: ContextSourceRepository, sourceId: string, excerpt: string, capturedAt: Date): string {
   const source = repository.getSource(sourceId); if (!source) throw new Error('source missing');
