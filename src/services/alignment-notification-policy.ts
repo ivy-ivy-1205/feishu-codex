@@ -19,6 +19,17 @@ export class AlignmentNotificationPolicy {
     }
   }
 
+  recordShadowCandidate(candidate: AlignmentCandidate, now: Date): { recorded: boolean; reason: AlignmentNotificationDecision['reason'] } {
+    return this.issues.client.transaction(() => {
+      this.reconcilePending(now);
+      const decision = this.evaluate(candidate, now);
+      if (!decision.send) return { recorded: false, reason: decision.reason };
+      const existed = this.issues.get(candidate.id) !== null;
+      this.issues.saveCandidate(candidate, now);
+      return { recorded: !existed, reason: decision.reason };
+    }).immediate();
+  }
+
   evaluate(candidate: AlignmentCandidate, now: Date): AlignmentNotificationDecision {
     const reject = (reason: AlignmentNotificationDecision['reason']): AlignmentNotificationDecision => ({ send: false, reason });
     try {

@@ -120,6 +120,14 @@ function concurrentPrepare(filename: string, candidate: ReturnType<AlignmentDete
 }
 
 describe('AlignmentNotificationPolicy', () => {
+  it('records a valid shadow candidate without creating a deliverable outbox row', () => {
+    const h = setup();
+    expect(h.policy.recordShadowCandidate(h.candidate, now)).toEqual({ recorded: true, reason: 'action_divergence' });
+    expect(h.issues.get(h.candidate.id)?.status).toBe('candidate');
+    expect(h.outbox.listAll()).toHaveLength(0);
+    expect(h.outbox.listPendingAlignmentQuestions()).toHaveLength(0);
+  });
+
   it.each(['ready', 'asked'] as const)('holds a different decision on the same topic while its first question is %s', (status) => {
     const h = setup(); h.policy.prepare(h.candidate, h.message, now);
     if (status === 'asked') h.outbox.acknowledgeAlignmentQuestionDelivery({ issueId: h.candidate.id,

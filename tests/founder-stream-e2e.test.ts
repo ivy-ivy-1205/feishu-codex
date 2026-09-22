@@ -9,6 +9,7 @@ import { AlignmentRepository } from '../src/repositories/alignment-repository.js
 import { runFounderStreamBackfill } from '../src/services/founder-stream-backfill.js';
 import { createFounderStreamRuntime } from '../src/services/founder-stream-worker.js';
 import { FeishuMessageDeliveryAdapter } from '../src/adapters/feishu.js';
+import { captureGroupMessageSource } from '../src/services/group-message-source-capture.js';
 
 it('replays history through topics, dual perspectives, one group question, corrections and a resolved receipt', async () => {
   const db = createSqliteDatabase(':memory:'); migrateDatabase(db.client);
@@ -75,4 +76,29 @@ it('replays history through topics, dual perspectives, one group question, corre
     expect(diagnostics.statusCode).toBe(200);
     expect(diagnostics.json()).toMatchObject({ topicsByStage: { exploring: 1 }, openAlignmentIssues: { total: 0 }, outbox: { delivered: 3 } });
   } finally { await app.close(); db.close(); }
+});
+
+it('records an actionable divergence in shadow mode without creating anything deliverable', async () => {
+  const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+  const chat='oc_a84d5b6ca478220d0a37964b50776edb',at=new Date('2026-09-21T10:00:00.000Z');
+  const sources=new ContextSourceRepository(db.client),jobs=new JobRepository(db.client),alignment=new AlignmentRepository(db.client);
+  for(const founder of ['ivy','james'] as const)alignment.configureFounderIdentity({founder,sourceSystem:'feishu',externalAuthorId:`ou_${founder}`,configuredAt:at});
+  const saved=['ivy','james'].map((founder,index)=>sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:`om_${founder}`,
+    threadId:null,rootId:null,author:{openId:`ou_${founder}`,displayName:null},senderType:'user',messageType:'text',
+    text:`按 ${index===0?'A':'B'} 方案推进，今天开始实施网站`,occurredAt:'2026-09-21T09:00:00.000Z'},at).source).source);
+  const runtime=createFounderStreamRuntime({client:db.client,jobRepository:jobs,approvedChatIds:[chat],ivyPrivateChatId:'oc_private',
+    flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},now:()=>at,
+    analyzer:{async analyze(input){return{topics:[{displayName:'网站',stage:'exploring',outcome:null,currentAction:null,confidence:'high',
+      sourceIds:input.sources.map(s=>s.id),evidenceExcerpts:input.sources.map(s=>({sourceId:s.id,excerpt:s.contentText})),
+      joinDecision:{kind:'new',topicId:null,confidence:'high',sharedTerms:[]},splitSuggestions:[]}]}}},
+    perspectiveAnalyzer:{async analyze(input){const ivy=input.evidence.find(e=>e.founder==='ivy')!,james=input.evidence.find(e=>e.founder==='james')!,topicId=input.topicIds[0]!;
+      return{observations:[],alignmentProposals:[{topicId,decisionKey:'website',dimension:'direction',
+        ivy:{evidenceId:ivy.id,statement:'按 A 方案推进'},james:{evidenceId:james.id,statement:'按 B 方案推进'},
+        actionConsequence:{evidenceId:ivy.id,excerpt:'今天开始实施'},actionHorizon:{evidenceId:ivy.id,excerpt:'今天',
+          startsAt:'2026-09-21T00:00:00.000Z',endsAt:'2026-09-22T00:00:00.000Z'}}]}}}});
+  jobs.enqueueFounderStreamBatch({chatId:chat,since:saved[0]!.occurredAt,until:at.toISOString(),sourceIds:saved.map(s=>s.id),capturedAt:at});
+  await runtime.runOnce();
+  expect(db.client.prepare('SELECT status FROM alignment_issues').get()).toEqual({status:'candidate'});
+  expect(db.client.prepare("SELECT COUNT(*) n FROM outbox WHERE idempotency_key LIKE 'alignment-%'").get()).toEqual({n:0});
+  db.close();
 });

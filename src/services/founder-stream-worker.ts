@@ -210,7 +210,11 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
                 const e=sources.getEvidence(id)!,s=sources.getSource(e.sourceId)!;
                 return {...e,occurredAt:s.occurredAt,...(s.sourceType==='minute_transcript'?{minuteToken:s.externalId}:{})};
               })});
-            notificationPolicy.prepare(candidate,{targetChatId:job.chatId,card:card.card},stamp);
+            if (options.flags.groupDeliveryEnabled) {
+              notificationPolicy.prepare(candidate,{targetChatId:job.chatId,card:card.card},stamp);
+            } else {
+              notificationPolicy.recordShadowCandidate(candidate,stamp);
+            }
           }
           policy.reconcilePending(stamp);
           options.jobRepository.markCompleted(job, stamp);
