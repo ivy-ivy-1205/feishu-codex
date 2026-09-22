@@ -13,6 +13,8 @@ import { AlignmentRepository } from '../src/repositories/alignment-repository.js
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import { renderFounderWorkMap } from '../src/services/founder-work-map-renderer.js';
 import { applyTopicCorrection, type TopicCorrection } from '../src/services/topic-correction-service.js';
+import { FounderStreamValidationError } from '../src/ports/founder-stream-analyzer.js';
+import { CodexCliError } from '../src/adapters/codex-cli.js';
 
 const chat = 'oc_a84d5b6ca478220d0a37964b50776edb';
 const start = new Date('2026-09-21T00:00:00.000Z');
@@ -45,6 +47,31 @@ function event(id = 'om_1', eventId = `evt_${id}`, thread = '', sender = 'user',
       content: JSON.stringify({ text: `知识库 ${id}` }), create_time: String(start.getTime()) } } };
 }
 describe('founder stream durable wiring', () => {
+  it('persists only an allowlisted stage and code when topic analysis fails', async () => {
+    const h=harness();
+    const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_failure',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'private source text',occurredAt:start.toISOString()},start).source).source;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>start,
+      analyzer:{async analyze(){throw new FounderStreamValidationError('FOUNDER_STREAM_OUTPUT_INVALID','excerpt_ungrounded')}}});
+    const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[source.id],capturedAt:start});
+    await runtime.runOnce();
+    const row=h.db.client.prepare('SELECT payload,status FROM batch_jobs WHERE stable_key=?').get(queued.key) as {payload:string;status:string};
+    expect(row.status).toBe('retry');expect(JSON.parse(row.payload)).toMatchObject({failureStage:'topic_analysis',failureCode:'grounding_invalid'});
+    expect(row.payload).not.toContain('private source text');expect(row.payload).not.toContain('excerpt_ungrounded');
+    await h.app.close();h.db.close();
+  });
+  it('classifies classifier execution failures without persisting their message', async () => {
+    const h=harness();const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_classifier_failure',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'知识库',occurredAt:start.toISOString()},start).source).source;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>start,
+      analyzer:{async analyze(){return{topics:[]}}},classifier:{async classify(){throw new CodexCliError('CODEX_EXECUTION_FAILED','private stderr')}}});
+    const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[source.id],capturedAt:start});
+    await runtime.runOnce();const payload=(h.db.client.prepare('SELECT payload FROM batch_jobs WHERE stable_key=?').get(queued.key) as {payload:string}).payload;
+    expect(JSON.parse(payload)).toMatchObject({failureStage:'semantic_classification',failureCode:'codex_execution_failed'});
+    expect(payload).not.toContain('private stderr');await h.app.close();h.db.close();
+  });
   it('applies semantic classification before persisting the active project map', async () => {
     const h=harness();
     const rows=['AI native 房产业务','VibeVoice'].map((text,index)=>h.sources.saveSource(captureGroupMessageSource({chatId:chat,

@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { founderFailureCodes, founderFailureStages } from '../services/founder-analysis-failure.js';
 
 const instant = z.iso.datetime({ offset: true });
 const pageStatus = z.enum(['read', 'unavailable', 'cursor_repeated', 'pagination_invalid']);
@@ -58,6 +59,13 @@ function collectDiagnostics(client: Database.Database) {
   for (const type of ['capture_group_message','capture_founder_attachment', 'analyze_founder_stream_batch']) {
     jobs[type] = counts(client.prepare('SELECT status AS label, COUNT(*) AS n FROM batch_jobs WHERE type=? GROUP BY status').all(type) as CountRow[], jobStates, true);
   }
+  const failureRows=client.prepare(`SELECT json_extract(payload,'$.failureStage') AS stage,
+    json_extract(payload,'$.failureCode') AS code FROM batch_jobs
+    WHERE type='analyze_founder_stream_batch' AND status IN ('retry','failed')`).all() as {stage:string|null;code:string|null}[];
+  const failuresByStage:Record<string,number>={},failuresByCode:Record<string,number>={};
+  for(const row of failureRows){const stage=typeof row.stage==='string'&&founderFailureStages.includes(row.stage as never)?row.stage:'unknown';
+    const code=typeof row.code==='string'&&founderFailureCodes.includes(row.code as never)?row.code:'unknown';
+    failuresByStage[stage]=(failuresByStage[stage]??0)+1;failuresByCode[code]=(failuresByCode[code]??0)+1;}
   const outbox = counts(client.prepare("SELECT status AS label, COUNT(*) AS n FROM outbox WHERE idempotency_key LIKE 'founder-%' OR idempotency_key LIKE 'alignment-%' GROUP BY status").all() as CountRow[], outboxStates);
   return {
     scope: 'local_persisted_founder_stream_aggregates',
@@ -70,7 +78,7 @@ function collectDiagnostics(client: Database.Database) {
     topicsByStage: counts(topicRows, stages, true), openAlignmentIssues: { ...issues, total: issueRows.reduce((sum, row) => sum + row.n, 0) },
     shadowCandidates:{total:shadowRows.reduce((sum,row)=>sum+row.n,0),byReason:counts(shadowRows,alignmentDimensions)},
     lastAnalysisAt:instant.safeParse(lastAnalysis).success?lastAnalysis:null,
-    gapsByCode, jobs, outbox
+    gapsByCode, jobs, analysisFailures:{byStage:failuresByStage,byCode:failuresByCode}, outbox
   };
 }
 

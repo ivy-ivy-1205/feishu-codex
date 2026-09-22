@@ -27,12 +27,14 @@ export interface FounderStreamJob {
   threadId: string | null;
   windowKey: string;
   attempt: number;
+  failureStage?: string;
+  failureCode?: string;
   leaseExpiresAt?: string;
 }
 export interface FounderAttachmentJob {
   kind: 'capture_founder_attachment'; key: string; chatId: string; messageId: string; fileKey: string;
   fileName: string; threadId: string | null; occurredAt: string; authorOpenId: string | null;
-  attempt: number; leaseExpiresAt?: string;
+  attempt: number; failureStage?: string; failureCode?: string; leaseExpiresAt?: string;
 }
 export type FounderDurableJob = FounderStreamJob | FounderAttachmentJob;
 export type DurableJob = ProcessMinuteJob | ExtractContextCandidatesJob | FounderDurableJob;
@@ -395,12 +397,13 @@ export class JobRepository {
     assertLeaseMutation(result.changes, job.key);
   }
 
-  retryFounderStream(job: FounderDurableJob, now: Date): void {
+  retryFounderStream(job: FounderDurableJob, now: Date, failure?: { stage: string; code: string }): void {
     const { kind: _kind, key: _key, leaseExpiresAt: _lease, ...payload } = job;
     const attempt = job.attempt + 1;
     const result = this.client.prepare(`UPDATE batch_jobs SET status=?,payload=?,updated_at=?
       WHERE stable_key=? AND status='processing' AND updated_at=? AND updated_at>?`)
-      .run(attempt >= 3 ? 'failed' : 'retry', JSON.stringify({ ...payload, attempt, failureReason: 'FOUNDER_STREAM_PROCESSING_FAILED' }),
+      .run(attempt >= 3 ? 'failed' : 'retry', JSON.stringify({ ...payload, attempt, failureReason: 'FOUNDER_STREAM_PROCESSING_FAILED',
+          ...(failure ? { failureStage: failure.stage, failureCode: failure.code } : {}) }),
         new Date(now.getTime() + 30_000).toISOString(), job.key, requireLease(job), now.toISOString());
     assertLeaseMutation(result.changes, job.key);
   }
@@ -503,26 +506,30 @@ function serializeContextJobPayload(
 function normalizeJobRow(row: JobRow): DurableJob | null {
   if(row.type==='capture_founder_attachment'){
     try{
-      const payload=JSON.parse(row.payload),allowed=['chatId','messageId','fileKey','fileName','threadId','occurredAt','authorOpenId','attempt','failureReason'];
+      const payload=JSON.parse(row.payload),allowed=['chatId','messageId','fileKey','fileName','threadId','occurredAt','authorOpenId','attempt','failureReason','failureStage','failureCode'];
       if(!isRecord(payload)||Object.keys(payload).some(k=>!allowed.includes(k))||typeof payload.chatId!=='string'||!payload.chatId.trim()||
         typeof payload.messageId!=='string'||!payload.messageId.trim()||typeof payload.fileKey!=='string'||!payload.fileKey.trim()||
         typeof payload.fileName!=='string'||!payload.fileName.trim()||typeof payload.occurredAt!=='string'||!Number.isFinite(Date.parse(payload.occurredAt))||
         (payload.attempt!==undefined&&!isRetryAttempt(payload.attempt)))return null;
       return{kind:'capture_founder_attachment',key:row.stable_key,chatId:payload.chatId,messageId:payload.messageId,fileKey:payload.fileKey,
         fileName:payload.fileName,threadId:typeof payload.threadId==='string'?payload.threadId:null,occurredAt:payload.occurredAt,
-        authorOpenId:typeof payload.authorOpenId==='string'?payload.authorOpenId:null,attempt:payload.attempt??0};
+        authorOpenId:typeof payload.authorOpenId==='string'?payload.authorOpenId:null,attempt:payload.attempt??0,
+        ...(typeof payload.failureStage==='string'?{failureStage:payload.failureStage}:{}),
+        ...(typeof payload.failureCode==='string'?{failureCode:payload.failureCode}:{})};
     }catch{return null}
   }
   if (row.type === 'capture_group_message' || row.type === 'analyze_founder_stream_batch') {
     try {
       const payload = JSON.parse(row.payload);
-      const allowed = ['chatId','sourceIds','threadId','windowKey','attempt','failureReason','since','until'];
+      const allowed = ['chatId','sourceIds','threadId','windowKey','attempt','failureReason','failureStage','failureCode','since','until'];
       if (!isRecord(payload) || Object.keys(payload).some(k => !allowed.includes(k)) || typeof payload.chatId !== 'string' ||
         !payload.chatId.trim() || !isStringArray(payload.sourceIds) || !payload.sourceIds.length ||
         payload.sourceIds.some(id => !id.startsWith('ctxsrc_')) || (payload.attempt !== undefined && !isRetryAttempt(payload.attempt))) return null;
       return { kind: row.type, key: row.stable_key, chatId: payload.chatId, sourceIds: payload.sourceIds,
         threadId: typeof payload.threadId === 'string' ? payload.threadId : null,
-        windowKey: typeof payload.windowKey === 'string' ? payload.windowKey : row.stable_key, attempt: payload.attempt ?? 0 } as FounderStreamJob;
+        windowKey: typeof payload.windowKey === 'string' ? payload.windowKey : row.stable_key, attempt: payload.attempt ?? 0,
+        ...(typeof payload.failureStage==='string'?{failureStage:payload.failureStage}:{}),
+        ...(typeof payload.failureCode==='string'?{failureCode:payload.failureCode}:{}) } as FounderStreamJob;
     } catch { return null; }
   }
   if (row.type === 'process_minute') {

@@ -62,6 +62,16 @@ describe('founder stream diagnostics', () => {
       expect(response.body).not.toContain(secret); expect(h.logs.join('')).not.toContain(secret);
     }
   });
+  it('reports only allowlisted founder failure stage and code aggregates', async()=>{
+    const h=setup();
+    h.db.client.prepare(`INSERT INTO batch_jobs(id,type,stable_key,payload,status,created_at,updated_at) VALUES
+      ('a','analyze_founder_stream_batch','a','{"chatId":"private","sourceIds":["ctxsrc_x"],"threadId":null,"windowKey":"x","attempt":1,"failureStage":"topic_analysis","failureCode":"grounding_invalid"}','retry',?,?),
+      ('b','analyze_founder_stream_batch','b','{"failureStage":"private-stage","failureCode":"private-code"}','failed',?,?)`)
+      .run(at.toISOString(),at.toISOString(),at.toISOString(),at.toISOString());
+    const response=await h.app.inject({url:'/diag/founder-stream'});
+    expect(response.json()).toMatchObject({analysisFailures:{byStage:{topic_analysis:1,unknown:1},byCode:{grounding_invalid:1,unknown:1}}});
+    expect(response.body).not.toContain('private-stage');expect(response.body).not.toContain('private-code');await h.app.close();
+  });
   it('reports thread recovery state without revealing thread cursors and accepts each known gap code', async () => {
     const h = setup();
     await runFounderStreamBackfill({ chatId: chat, since: '2026-09-01T00:00:00.000Z', now: at, dryRun: false,

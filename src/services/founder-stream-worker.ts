@@ -26,6 +26,7 @@ import type { CurrentTopic, TopicVersion } from '../domain/topic.js';
 import type { FeishuContextGap } from './feishu-context-sync.js';
 import { projectFounderWorkMap, type FounderWorkMapClassification } from './founder-work-map-classification.js';
 import { parseFeishuAttachment } from './feishu-attachment-parser.js';
+import { classifyFounderFailure, type FounderFailureStage } from './founder-analysis-failure.js';
 
 export interface FounderPerspectiveAnalysisPort {
   analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[];
@@ -123,6 +124,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
     }).immediate();
   } };
   async function process(job: FounderDurableJob) {
+    let failureStage: FounderFailureStage = 'input';
     try {
       if (!allowed(job.chatId)) throw new Error('unapproved founder group');
       if(job.kind==='capture_founder_attachment'){
@@ -169,9 +171,12 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         }
         if (!options.analyzer) throw new Error('founder analyzer unavailable');
         const input = buildFounderStreamInput(sources, topics, job.sourceIds, job.chatId);
+        failureStage = 'topic_analysis';
         const analysis = input.sources.length ? await options.analyzer.analyze(input) : { topics: [] };
+        failureStage = 'semantic_classification';
         const classified = options.classifier ? projectFounderWorkMap(analysis, await options.classifier.classify(analysis))
           : { analysis, supportingByDisplayName: {} as Record<string, never[]>, canonicalNames: {} as Record<string,string> };
+        failureStage = 'topic_reconciliation';
         const plan = reconcileTopics(input, classified.analysis);
         // The model can suggest a continuation, but it cannot revoke a founder's
         // accepted correction. Bind its evidence to the protected topic instead
@@ -201,6 +206,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
               founder:perspectives.resolveFounderForEvidence(id),occurredAt:sources.getSource(evidence.sourceId)!.occurredAt});
           }
         }
+        failureStage = 'perspective_analysis';
         const perspectiveResult = options.perspectiveAnalyzer && prepared.length ? await options.perspectiveAnalyzer.analyze({
           sourceIds:input.sources.map(s=>s.id),topicIds:[...byTopic.keys()].sort(),evidence:[...scopedEvidence.values()]
         }) : { observations:[],alignmentProposals:[] };
@@ -208,6 +214,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           if(!prepared.some(p=>p.topicId===topicId) || evidenceIds.some(id=>!scopedEvidence.get(id)?.topicIds.includes(topicId)))
             throw new Error('FOUNDER_PERSPECTIVE_OUT_OF_SCOPE');
         };
+        failureStage = 'persistence';
         options.client.transaction(() => {
           const stamp = now(); if (!options.jobRepository.ownsLease(job, stamp)) throw new LeaseLostError(job.key);
           // One CAS/version per target. Several validated suggestions can point
@@ -267,7 +274,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           saveAttachmentGap(sources,job,'ATTACHMENT_READ_FAILED',stamp);options.jobRepository.markCompleted(job,stamp)}).immediate();return 'completed' as const;}
         catch(failure){if(failure instanceof LeaseLostError)return 'lost_lease' as const;throw failure}
       }
-      try { options.jobRepository.retryFounderStream(job, now()); } catch (failure) {
+      try { options.jobRepository.retryFounderStream(job, now(), { stage: failureStage, code: classifyFounderFailure(error) }); } catch (failure) {
         if (failure instanceof LeaseLostError) return 'lost_lease' as const; throw failure;
       }
       return 'retry' as const;
