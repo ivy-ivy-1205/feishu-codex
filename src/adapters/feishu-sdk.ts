@@ -46,6 +46,12 @@ export interface FeishuSdkClientLike {
           };
         }): Promise<unknown>;
       };
+      messageResource?: {
+        get(payload: { params: { type: 'file' }; path: { message_id: string; file_key: string } }): Promise<{
+          getReadableStream(): Readable;
+          headers?: Record<string,string>;
+        }>;
+      };
     };
   };
   minutes: {
