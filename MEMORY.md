@@ -1,5 +1,9 @@
 # MEMORY.md
 
+- 2026-09-22 Ivy 批准影子模式生产变更单，并明确停止策略：命中任一异常条件时先停止新的处理与发送、保留现场并只读诊断，不自动回滚 app/image/env 或数据库；任何回滚或快照恢复都需 Ivy 再次明确批准。若数据库完整性正在持续受损，可先隔离写入并停止 Bridge，但仍不得擅自恢复快照。
+
+- 2026-09-22 影子模式本地实现分支为 `codex/founder-alignment-shadow`：`8b9fbc5` 封闭 delivery=false 下的 future outbox，`b2095ad` 将语义分类接入常驻 worker，`15dc2d8` 增加文件消息异步读取、内存解析、90 天文本 retention、有界重试与 typed gap，`426c271` 增加不含正文和身份的影子候选、原因、附件 job 与最后分析时间聚合诊断。附件二进制不落盘，资源 key 仅存在 durable job payload，不进入来源或诊断；解析文本复用既有 group-message evidence 管线并用 attachment metadata 标识来源。全量 84 个测试文件 / 739 项测试、typecheck、build 和 diff check 通过；尚未执行本轮生产 Preflight 或部署。
+
 - 2026-09-22 首张真实 Founder Stream 工作地图预览已用服务器现有 Codex CLI 对批准群固定 20 天窗口的 14 条来源生成，未发飞书：动态归纳 4 个话题、10 条可追溯 evidence、0 个双方明确分歧；覆盖状态为 partial，缺口为文件正文不可读17、图片跳过1、媒体跳过1、删除消息2。真实语料暴露话题模型会把 displayName/outcome 改写或引用未覆盖该字段的 excerpt；保持逐字校验 fail closed，不降低标准，并在 `7aa173a` 加入输出前逐项 grounding checklist 后成功。review 还指出并修复了回填 gap 关联、两次串行 Codex 租约预算和预览 evidence 映射问题。预览只保存在本机私有临时文件 `/private/tmp/founder-work-map-preview-7aa173a.json` 供 Ivy review，不入 Git；服务器两套一次性镜像、构建目录、上传包与预览文件均已清理。生产 Founder job 仍为1条 queued，outbox仍为7，Bridge running/healthy、restart 0。
 
 - 2026-09-22 Founder Stream 已接入真实 Codex 话题分析与 Ivy/James 观点/分歧语义适配器，并新增严格只读的首张工作地图预览入口：只接受精确批准群、冻结时间窗、预期来源数与显式 founder identity；SQLite 以 readonly + query_only 打开，不 lease/消费队列、不持久化 topic/evidence/outbox、不调用飞书投递。模型观点必须逐字落在对应不可变 evidence，身份只能来自 open_id 映射，未知身份不生成观点，错误输出整批 fail closed。独立 review 发现并修复历史回填 gap 因采集时间晚于窗口而被误报 complete、两次串行 Codex 调用租约预算不足，以及预览临时 evidence 缺少完整来源映射；最终本地 80 个测试文件 / 715 项测试、typecheck、build 与 diff check 通过。真实 14 条来源只读核对为 Ivy 9 条、群内唯一另一位作者 5 条，queued job 未消费；本轮尚未把预览发群。

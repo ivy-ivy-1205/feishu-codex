@@ -34,11 +34,11 @@
 - Produces: `recordShadowCandidate(candidate, now)`，只保存 `alignment_issues.status='candidate'`，不创建 outbox。
 - Preserves: `prepare(candidate, message, now)` 仅供 delivery 已开启时创建 `ready + outbox`。
 
-- [ ] 写失败测试：`groupDeliveryEnabled=false` 时可保存候选 issue，但 Founder/Alignment outbox 增量必须为 0。
-- [ ] 写失败测试：之后把 delivery 切为 true，不得发送影子期创建的 candidate。
-- [ ] 实现独立影子记录路径；worker 根据 `groupDeliveryEnabled` 选择 shadow 或 delivery 路径。
-- [ ] 运行专项测试并确认无 outbox 可补发。
-- [ ] 提交：`fix: isolate founder shadow candidates from delivery`
+- [x] 写失败测试：`groupDeliveryEnabled=false` 时可保存候选 issue，但 Founder/Alignment outbox 增量必须为 0。
+- [x] 写失败测试：之后把 delivery 切为 true，不得发送影子期创建的 candidate。
+- [x] 实现独立影子记录路径；worker 根据 `groupDeliveryEnabled` 选择 shadow 或 delivery 路径。
+- [x] 运行专项测试并确认无 outbox 可补发。
+- [x] 提交：`fix: isolate founder shadow candidates from delivery`
 
 ### Task 2: 将语义分类接入常驻工作地图
 
@@ -54,11 +54,11 @@
 - Consumes: `classifier.classify(analysis)` 与 `projectFounderWorkMap(analysis, classification)`。
 - Produces: 只有 `project | idea` 进入活跃 topic 层；principle/artifact/research 作为项目支持项；completed artifact 进入历史。
 
-- [ ] 写失败测试，覆盖情绪价值、EP00、VibeVoice、PropHero 和合伙人对齐室的常驻分类。
-- [ ] 在 topic reconciliation 之前执行分类，事实校验仍使用原文名称，规范名称仅写入展示/别名层。
-- [ ] 保证人工纠正优先于后续模型建议。
-- [ ] 运行专项测试。
-- [ ] 提交：`feat: apply founder semantic classification in worker`
+- [x] 写失败测试，覆盖情绪价值、EP00、VibeVoice、PropHero 和合伙人对齐室的常驻分类。
+- [x] 在 topic reconciliation 之前执行分类，事实校验仍使用原文名称，规范名称仅写入展示/别名层。
+- [x] 保证人工纠正优先于后续模型建议。
+- [x] 运行专项测试。
+- [x] 提交：`feat: apply founder semantic classification in worker`
 
 ### Task 3: 为新附件增加异步文本采集
 
@@ -72,15 +72,15 @@
 
 **Interfaces:**
 - Produces: `capture_founder_attachment` durable job。
-- Persists: 有界 `feishu_file` 文本 source，`rawTextExpiresAt = capturedAt + 90 days`。
+- Persists: 可进入既有 group-message evidence 管线的有界文本 source，以 attachment metadata 标识文件来源，`rawTextExpiresAt = capturedAt + 90 days`。
 - Never persists: 原始附件二进制。
 
-- [ ] 写失败测试：文件消息先落审计记录并入队，不在 webhook 请求内下载。
-- [ ] 写失败测试：支持的 Markdown/HTML/DOCX/XLSX 只保存有界文本；ZIP 只保存安全目录；视频/音频跳过。
-- [ ] 写失败测试：下载、解析或权限失败形成 gap，不能伪装成完整读取。
-- [ ] 实现异步下载、内存解析、90 天 retention 元数据和幂等 stable key。
-- [ ] 运行专项测试。
-- [ ] 提交：`feat: capture founder attachment text asynchronously`
+- [x] 写失败测试：文件消息先落审计记录并入队，不在 webhook 请求内下载。
+- [x] 写失败测试：支持的 Markdown/HTML/DOCX/XLSX 只保存有界文本；ZIP 只保存安全目录；视频/音频跳过。
+- [x] 写失败测试：下载、解析或权限失败形成 gap，不能伪装成完整读取。
+- [x] 实现异步下载、内存解析、90 天 retention 元数据和幂等 stable key。
+- [x] 运行专项测试。
+- [x] 提交：`feat: capture founder attachment text asynchronously`
 
 ### Task 4: 固化影子诊断，不暴露正文
 
@@ -92,10 +92,10 @@
 - Produces aggregate fields: `shadowCandidates`, `shadowCandidatesByReason`, `lastAnalysisAt`, `sourcesByType`, `gapsByCode`。
 - Forbidden: 消息正文、附件正文、人员 ID、job/outbox payload。
 
-- [ ] 写失败测试验证聚合数字可见、正文和身份不可见。
-- [ ] 增加影子候选、最后分析时间、附件来源和缺口聚合。
-- [ ] 运行专项测试。
-- [ ] 提交：`feat: expose safe founder shadow diagnostics`
+- [x] 写失败测试验证聚合数字可见、正文和身份不可见。
+- [x] 增加影子候选、最后分析时间、附件来源和缺口聚合。
+- [x] 运行专项测试。
+- [x] 提交：`feat: expose safe founder shadow diagnostics`
 
 ### Task 5: 本地发布闸门
 
@@ -114,8 +114,8 @@ PROJECT_CONTEXT_CHAT_IDS=oc_a84d5b6ca478220d0a37964b50776edb
 ```
 
 - [ ] 若生产 `CODEX_TIMEOUT_SECONDS=300`，设置 `WORKER_LEASE_SECONDS=660`，满足 `lease > 2 × Codex timeout`；Preflight 若显示不同 timeout，则按同一公式计算，不猜测。
-- [ ] 运行全量测试、typecheck、build、`git diff --check`。
-- [ ] 确认镜像内 migration、retention CLI、Founder worker 和附件解析依赖齐全。
+- [x] 运行全量测试、typecheck、build、`git diff --check`。
+- [x] 确认镜像内 migration、retention CLI、Founder worker 和附件解析依赖齐全。
 - [ ] 建立本地审计 checkpoint commit。
 
 ### Task 6: D1 生产只读 Preflight
