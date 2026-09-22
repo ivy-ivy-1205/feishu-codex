@@ -1,5 +1,7 @@
 # MEMORY.md
 
+- 2026-09-22 一次性历史附件初始化入口已补齐：`backfill-founder-attachments` 只接受唯一批准群和显式固定窗口，读取历史消息用于附件前后上下文，支持的附件在内存解析后以既有 group-message evidence envelope 持久化，正文从实际初始化时刻保留90天；文件 token 和二进制不进入 source/job，重复执行不重复保存或入队。下载/解析不可用仅计入安全聚合，不输出正文。专项2项测试、全量86文件/742项测试通过，typecheck、build、diff check通过；尚未部署。
+
 - 2026-09-22 影子模式 D1 生产只读 Preflight 通过：Bridge 运行镜像 `sha256:5a4d3626...`（revision `41538d4`），容器 running/healthy、restart 0、512 MiB，真实宿主映射端口为 `127.0.0.1:3010`，内外 health/ready 均 200；SQLite 462848 bytes、600 lighthouse:lighthouse、integrity ok、retention 三列齐全且无外键异常；磁盘可用约 7.5 GiB。Codex 仍以 ChatGPT 登录。队列为 Founder analysis queued=1、其余仅历史 completed/failed，无 retry/processing、无活动 extraction/Todo；outbox 7 条均 delivered。Founder 三开关和批准群变量当前未写入生产，说明影子模式尚未启动。生产 timeout=300、lease=360，部署时必须将 lease 改为660；本轮 Preflight 未修改服务器。
 
 - 2026-09-22 Ivy 批准影子模式生产变更单，并明确停止策略：命中任一异常条件时先停止新的处理与发送、保留现场并只读诊断，不自动回滚 app/image/env 或数据库；任何回滚或快照恢复都需 Ivy 再次明确批准。若数据库完整性正在持续受损，可先隔离写入并停止 Bridge，但仍不得擅自恢复快照。
