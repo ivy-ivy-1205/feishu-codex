@@ -20,4 +20,13 @@ describe('founder attachment backfill',()=>{
       rawTextExpiresAt:'2026-12-21T00:00:00.000Z',metadata:{attachmentTitle:'brief.md',messageId:'om_file'}});
     expect(JSON.stringify(sources.listSources())).not.toContain('secret_file_key');expect(JSON.stringify(jobs.list())).not.toContain('secret_file_key');db.close();
   });
+  it('splits attachment analysis batches by bounded text size',async()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const sources=new ContextSourceRepository(db.client),jobs=new JobRepository(db.client);
+    const messages=Array.from({length:4},(_,index)=>({messageId:`om_${index}`,createdAt:`2026-09-1${index}T00:00:00.000Z`,text:null,
+      messageType:'file' as const,senderType:'user' as const,senderId:'ou_ivy',threadId:null,rootId:null}));
+    const files=messages.map((message,index)=>({messageId:message.messageId,fileToken:`secret_${index}`,title:`brief-${index}.md`,mimeType:'text/markdown',text:null}));
+    const result=await persistFounderAttachmentBackfill({chatId:chat,now,messages,files,read:async()=>Buffer.from('x'.repeat(12_000)),sourceRepository:sources,jobRepository:jobs});
+    expect(result).toMatchObject({sourcesCreated:4,jobsEnqueued:2});
+    expect(jobs.list().filter(job=>job.kind==='analyze_founder_stream_batch').map(job=>'sourceIds'in job?job.sourceIds.length:0)).toEqual([3,1]);db.close();
+  });
 });
