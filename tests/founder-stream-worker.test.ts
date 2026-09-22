@@ -43,6 +43,26 @@ function event(id = 'om_1', eventId = `evt_${id}`, thread = '', sender = 'user',
       content: JSON.stringify({ text: `知识库 ${id}` }), create_time: String(start.getTime()) } } };
 }
 describe('founder stream durable wiring', () => {
+  it('applies semantic classification before persisting the active project map', async () => {
+    const h=harness();
+    const rows=['AI native 房产业务','VibeVoice'].map((text,index)=>h.sources.saveSource(captureGroupMessageSource({chatId:chat,
+      messageId:`om_class_${index}`,threadId:null,rootId:null,author:{openId:'ou_ivy',displayName:null},senderType:'user',
+      messageType:'text',text,occurredAt:start.toISOString()},start).source).source);
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',
+      now:()=>new Date(start.getTime()+600_000),analyzer:{async analyze(){return{topics:rows.map((source,index)=>({
+        displayName:source.contentText,stage:'exploring' as const,outcome:null,currentAction:null,confidence:'high' as const,
+        sourceIds:[source.id],evidenceExcerpts:[{sourceId:source.id,excerpt:source.contentText}],
+        joinDecision:{kind:'new' as const,topicId:null,confidence:'high' as const,sharedTerms:[]},splitSuggestions:[]}))}}},
+      classifier:{async classify(){return{items:[
+        {proposalIndex:0,kind:'project' as const,lifecycle:'active' as const,parentProposalIndex:null},
+        {proposalIndex:1,kind:'research' as const,lifecycle:'unknown' as const,parentProposalIndex:null}
+      ]}}}});
+    h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:rows.map(r=>r.id),capturedAt:start});
+    await runtime.runOnce();
+    expect(h.topics.listCurrentTopics().map(topic=>topic.displayName)).toEqual(['AI native 房产业务']);
+    await h.app.close();h.db.close();
+  });
   it('aggregates every same-target protected proposal once with stable deduplicated evidence and suggestions',async()=>{
     const run=async(reverse:boolean)=>{
       const h=harness();new AlignmentRepository(h.db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:start});

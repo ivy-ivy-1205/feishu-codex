@@ -24,6 +24,7 @@ import { canonicalJson, stableId } from './canonical-json.js';
 import { topicCorrectionSchema } from './topic-correction-service.js';
 import type { CurrentTopic, TopicVersion } from '../domain/topic.js';
 import type { FeishuContextGap } from './feishu-context-sync.js';
+import { projectFounderWorkMap, type FounderWorkMapClassification } from './founder-work-map-classification.js';
 
 export interface FounderPerspectiveAnalysisPort {
   analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[];
@@ -36,6 +37,7 @@ export interface FounderStreamRoute { ingest(envelope: unknown): Record<string, 
 export interface FounderStreamOptions {
   client: Database.Database; jobRepository: JobRepository; flags: AppConfig['founderStream'];
   approvedChatIds: readonly string[]; ivyPrivateChatId: string; analyzer?: FounderStreamAnalyzer;
+  classifier?: { classify(analysis: Awaited<ReturnType<FounderStreamAnalyzer['analyze']>>): Promise<FounderWorkMapClassification> };
   perspectiveAnalyzer?: FounderPerspectiveAnalysisPort;
   now?: () => Date; intervalMs?: number;
   policy?: Pick<AlignmentNotificationPolicy, 'reconcilePending'>;
@@ -136,7 +138,9 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         if (!options.analyzer) throw new Error('founder analyzer unavailable');
         const input = buildFounderStreamInput(sources, topics, job.sourceIds, job.chatId);
         const analysis = input.sources.length ? await options.analyzer.analyze(input) : { topics: [] };
-        const plan = reconcileTopics(input, analysis);
+        const classified = options.classifier ? projectFounderWorkMap(analysis, await options.classifier.classify(analysis))
+          : { analysis, supportingByDisplayName: {} as Record<string, never[]>, canonicalNames: {} as Record<string,string> };
+        const plan = reconcileTopics(input, classified.analysis);
         // The model can suggest a continuation, but it cannot revoke a founder's
         // accepted correction. Bind its evidence to the protected topic instead
         // of creating a renamed/reactivated duplicate.
@@ -185,7 +189,10 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
               displayName:row.item.proposal.displayName,stage:row.item.proposal.stage,outcome:row.item.proposal.outcome,
               currentAction:row.item.proposal.currentAction,evidenceIds:[...new Set(row.ids)].sort(),
               evidenceAfterCorrection:row.item.proposal.evidenceExcerpts.every(e=>Date.parse(sources.getSource(e.sourceId)!.occurredAt)>Date.parse(authority.occurredAt))}))) : [];
-            const rationale = JSON.stringify({ origin: 'founder_stream', jobKey: job.key, needsConfirmation: stableUnique(rows.flatMap(row=>row.item.relations)),
+            const rationale = JSON.stringify({ origin: 'founder_stream', jobKey: job.key,
+              canonicalName: classified.canonicalNames[item.proposal.displayName] ?? null,
+              supportingItems: classified.supportingByDisplayName[item.proposal.displayName] ?? [],
+              needsConfirmation: stableUnique(rows.flatMap(row=>row.item.relations)),
               ...(authority ? { humanAuthority: { correctionId: authority.correctionId, evidenceId: authority.evidenceId,
                 occurredAt: authority.occurredAt }, suggestions,
                 ...(suggestions.length===1?{suggestion:suggestions[0]}:{}) } : {}) });
