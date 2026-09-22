@@ -1,5 +1,7 @@
 # MEMORY.md
 
+- 2026-09-22 影子模式 D1 生产只读 Preflight 通过：Bridge 运行镜像 `sha256:5a4d3626...`（revision `41538d4`），容器 running/healthy、restart 0、512 MiB，真实宿主映射端口为 `127.0.0.1:3010`，内外 health/ready 均 200；SQLite 462848 bytes、600 lighthouse:lighthouse、integrity ok、retention 三列齐全且无外键异常；磁盘可用约 7.5 GiB。Codex 仍以 ChatGPT 登录。队列为 Founder analysis queued=1、其余仅历史 completed/failed，无 retry/processing、无活动 extraction/Todo；outbox 7 条均 delivered。Founder 三开关和批准群变量当前未写入生产，说明影子模式尚未启动。生产 timeout=300、lease=360，部署时必须将 lease 改为660；本轮 Preflight 未修改服务器。
+
 - 2026-09-22 Ivy 批准影子模式生产变更单，并明确停止策略：命中任一异常条件时先停止新的处理与发送、保留现场并只读诊断，不自动回滚 app/image/env 或数据库；任何回滚或快照恢复都需 Ivy 再次明确批准。若数据库完整性正在持续受损，可先隔离写入并停止 Bridge，但仍不得擅自恢复快照。
 
 - 2026-09-22 影子模式本地实现分支为 `codex/founder-alignment-shadow`：`8b9fbc5` 封闭 delivery=false 下的 future outbox，`b2095ad` 将语义分类接入常驻 worker，`15dc2d8` 增加文件消息异步读取、内存解析、90 天文本 retention、有界重试与 typed gap，`426c271` 增加不含正文和身份的影子候选、原因、附件 job 与最后分析时间聚合诊断。附件二进制不落盘，资源 key 仅存在 durable job payload，不进入来源或诊断；解析文本复用既有 group-message evidence 管线并用 attachment metadata 标识来源。全量 84 个测试文件 / 739 项测试、typecheck、build 和 diff check 通过；尚未执行本轮生产 Preflight 或部署。

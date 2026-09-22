@@ -104,7 +104,7 @@
 - Test: `tests/config.test.ts`
 - Test: `tests/deploy-contract.test.ts`
 
-- [ ] 验证配置必须是：
+- [x] 验证配置必须是：
 
 ```dotenv
 FOUNDER_STREAM_CAPTURE_ENABLED=true
@@ -113,20 +113,20 @@ FOUNDER_STREAM_GROUP_DELIVERY_ENABLED=false
 PROJECT_CONTEXT_CHAT_IDS=oc_a84d5b6ca478220d0a37964b50776edb
 ```
 
-- [ ] 若生产 `CODEX_TIMEOUT_SECONDS=300`，设置 `WORKER_LEASE_SECONDS=660`，满足 `lease > 2 × Codex timeout`；Preflight 若显示不同 timeout，则按同一公式计算，不猜测。
+- [x] 生产 Preflight 确认为 `CODEX_TIMEOUT_SECONDS=300`；部署目标锁定 `WORKER_LEASE_SECONDS=660`，满足 `lease > 2 × Codex timeout`。
 - [x] 运行全量测试、typecheck、build、`git diff --check`。
 - [x] 确认镜像内 migration、retention CLI、Founder worker 和附件解析依赖齐全。
-- [ ] 建立本地审计 checkpoint commit。
+- [x] 建立本地审计 checkpoint commit：`65fa0c8`。
 
 ### Task 6: D1 生产只读 Preflight
 
 **Production writes:** 无。
 
-- [ ] 核对运行 commit/image、三个 Founder flags、`WORKER_ENABLED`、Codex timeout/lease、批准群白名单。
-- [ ] 核对 SQLite schema、`integrity_check`、数据库大小、磁盘余量。
-- [ ] 记录所有 job/outbox 状态；尤其记录现有 `queued/retry/processing`，不消费、不修复。
-- [ ] 核对 Codex 登录、`/health`、`/ready` 和 Bridge restart count。
-- [ ] 若存在 schema 不一致、磁盘不足 5 GiB、Codex 未登录、非预期活动任务或当前服务不健康，停止部署。
+- [x] 核对运行 commit/image、三个 Founder flags、`WORKER_ENABLED`、Codex timeout/lease、批准群白名单。
+- [x] 核对 SQLite schema、`integrity_check`、数据库大小、磁盘余量。
+- [x] 记录所有 job/outbox 状态；尤其记录现有 `queued/retry/processing`，不消费、不修复。
+- [x] 核对 Codex 登录、`/health`、`/ready` 和 Bridge restart count。
+- [x] 停止条件核对通过；已知的 1 个 Founder queued job 是首次持久化留下的待分析任务，不属于未知活动任务。
 
 ### Task 7: D2 一致性备份与关闭态部署
 
