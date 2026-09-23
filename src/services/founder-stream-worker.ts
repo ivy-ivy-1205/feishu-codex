@@ -189,6 +189,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           }
         }
         const plannedAt = now();
+        failureStage = 'new_evidence_persistence';
         const prepared = plan.topics.map(item => ({ item,
           topicId: item.topicId ?? stableId('topic', `${new Date(plannedAt.getTime()+item.proposalIndex).toISOString()}\n${item.proposal.displayName.trim()}`),
           ids: item.proposal.evidenceExcerpts.map(e => saveFounderEvidence(sources,e.sourceId,e.excerpt,plannedAt)) }));
@@ -196,6 +197,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         for(const row of prepared) byTopic.set(row.topicId,[...(byTopic.get(row.topicId) ?? []),row]);
         const scopedEvidence = new Map<string, { id:string;sourceId:string;topicIds:string[];excerpt:string;
           founder:'ivy'|'james'|null;occurredAt:string }>();
+        failureStage = 'inherited_evidence_resolution';
         for (const row of prepared) {
           const previous = input.currentTopics.find(t=>t.id===row.topicId)?.evidenceExcerpts ?? [];
           const current = row.topicId ? topics.listCurrentTopics().find(t=>t.id===row.topicId) : undefined;
@@ -206,11 +208,18 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           // Rebuilding it can reject valid legacy minute locators and is unnecessary.
           const ids = [...row.ids,...previousIds];
           for(const id of ids) {
-            const evidence=sources.getEvidence(id)!;
+            failureStage = 'evidence_record_loading';
+            const evidence=sources.getEvidence(id);if(!evidence)throw new Error('FOUNDER_EXISTING_EVIDENCE_MISSING');
             const existing=scopedEvidence.get(id);
             if(existing) { if(!existing.topicIds.includes(row.topicId)) existing.topicIds.push(row.topicId); }
-            else scopedEvidence.set(id,{id,sourceId:evidence.sourceId,topicIds:[row.topicId],excerpt:evidence.excerpt,
-              founder:perspectives.resolveFounderForEvidence(id),occurredAt:sources.getSource(evidence.sourceId)!.occurredAt});
+            else {
+              failureStage = 'founder_attribution';
+              const founder=perspectives.resolveFounderForEvidence(id);
+              failureStage = 'source_occurrence_lookup';
+              const source=sources.getSource(evidence.sourceId);if(!source)throw new Error('FOUNDER_SOURCE_UNAVAILABLE');
+              scopedEvidence.set(id,{id,sourceId:evidence.sourceId,topicIds:[row.topicId],excerpt:evidence.excerpt,
+                founder,occurredAt:source.occurredAt});
+            }
           }
         }
         failureStage = 'perspective_analysis';

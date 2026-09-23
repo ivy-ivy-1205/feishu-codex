@@ -1,4 +1,6 @@
-export const founderFailureStages = ['input','topic_analysis','semantic_classification','topic_reconciliation','evidence_preparation','perspective_analysis','persistence'] as const;
+export const founderFailureStages = ['input','topic_analysis','semantic_classification','topic_reconciliation','evidence_preparation',
+  'new_evidence_persistence','inherited_evidence_resolution','evidence_record_loading','founder_attribution','source_occurrence_lookup',
+  'perspective_analysis','persistence'] as const;
 export type FounderFailureStage = typeof founderFailureStages[number];
 
 export const founderFailureCodes = ['input_invalid','schema_invalid','grounding_invalid','codex_auth_required',

@@ -84,7 +84,7 @@ describe('founder stream durable wiring', () => {
         joinDecision:{kind:'new',topicId:null,confidence:'high',sharedTerms:[]},splitSuggestions:[]}]}}}});
     const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[saved.id],capturedAt:start});
     await runtime.runOnce();const payload=(h.db.client.prepare('SELECT payload FROM batch_jobs WHERE stable_key=?').get(queued.key) as {payload:string}).payload;
-    expect(JSON.parse(payload)).toMatchObject({failureStage:'evidence_preparation',failureCode:'unknown'});
+    expect(JSON.parse(payload)).toMatchObject({failureStage:'new_evidence_persistence',failureCode:'unknown'});
     await h.app.close();h.db.close();
   });
   it('reuses immutable evidence when joining instead of rebuilding legacy minute locators',async()=>{
