@@ -197,17 +197,11 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         for(const row of prepared) byTopic.set(row.topicId,[...(byTopic.get(row.topicId) ?? []),row]);
         const scopedEvidence = new Map<string, { id:string;sourceId:string;topicIds:string[];excerpt:string;
           founder:'ivy'|'james'|null;occurredAt:string }>();
-        failureStage = 'inherited_evidence_resolution';
         for (const row of prepared) {
-          const previous = input.currentTopics.find(t=>t.id===row.topicId)?.evidenceExcerpts ?? [];
-          const current = row.topicId ? topics.listCurrentTopics().find(t=>t.id===row.topicId) : undefined;
-          const previousIds = previous.map(item => current?.evidenceIds.map(id=>sources.getEvidence(id))
-            .find(evidence=>evidence?.sourceId===item.sourceId&&evidence.excerpt===item.excerpt)?.id)
-            .map(id=>{if(!id)throw new Error('FOUNDER_EXISTING_EVIDENCE_MISSING');return id});
-          // Existing evidence is immutable and already has its original locator.
-          // Rebuilding it can reject valid legacy minute locators and is unnecessary.
-          const ids = [...row.ids,...previousIds];
-          for(const id of ids) {
+          // Historical perspectives already live in the immutable repository.
+          // Re-analyzing inherited evidence creates duplicate observations and lets
+          // legacy locators block an otherwise valid new batch.
+          for(const id of row.ids) {
             failureStage = 'evidence_record_loading';
             const evidence=sources.getEvidence(id);if(!evidence)throw new Error('FOUNDER_EXISTING_EVIDENCE_MISSING');
             const existing=scopedEvidence.get(id);
