@@ -14,6 +14,21 @@ describe('applyFounderBaseline',()=>{
     expect(manifest.partOf).toHaveLength(3);
     expect(manifest.newTopics).toEqual([expect.objectContaining({name:'EP00《挺好》',stage:'closed'})]);
   });
+  it('locks the September 24 exact-name repair to two alignment-room duplicates only',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync(
+      'deploy/founder-baseline-v2-increment-20260924.manifest.json','utf8')));
+    expect(manifest.expected).toEqual({topics:31,perspectives:21,relations:25});
+    expect(manifest.groups).toEqual([expect.objectContaining({
+      canonical:expect.objectContaining({id:'topic_106cf9757e6cae55cbca67fa5e677cd7',version:2,
+        name:'AiJia Founder Alignment Room / AiJia 合伙人对齐室'}),
+      duplicates:[
+        {id:'topic_2a5ff198f40e93dbf62bf35df7e69484',version:1},
+        {id:'topic_28ad87447631a797a9562f069a4f711c',version:1}
+      ]
+    })]);
+    expect(manifest.partOf).toEqual([]);
+    expect(manifest.newTopics).toEqual([]);
+  });
   it('previews without writes and atomically appends canonical versions and relations',()=>{
     const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
     const at=new Date('2026-09-24T00:00:00Z');
