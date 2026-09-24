@@ -20,6 +20,13 @@ export async function parsePreviewAttachment(body:Buffer,mimeType:string,title:s
   catch(error){const reason=error instanceof Error?error.message:'ATTACHMENT_PARSE_FAILED';
     if(reason.startsWith('ATTACHMENT_'))return{status:'text_unavailable',reason};throw error}
 }
+export function safePreviewErrorCode(error:unknown):string{
+  if(!error||typeof error!=='object')return'UNKNOWN';
+  const value=error as{code?:unknown;reason?:unknown};
+  const code=typeof value.code==='string'&&/^[A-Z][A-Z0-9_]{1,79}$/u.test(value.code)?value.code:null;
+  const reason=typeof value.reason==='string'&&/^[a-z][a-z0-9_]{1,79}$/u.test(value.reason)?value.reason:null;
+  return code?`${code}${reason?`:${reason}`:''}`:'UNKNOWN';
+}
 export function parseFilePreviewArguments(args:readonly string[]):Arguments{
   const values=new Map<string,string>();for(let index=0;index<args.length;index+=2){const key=args[index],value=args[index+1];
     if(!key?.startsWith('--')||!value||values.has(key))throw new Error('FILE_PREVIEW_ARGUMENTS_INVALID');values.set(key,value)}
@@ -90,6 +97,5 @@ async function main(){
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)void main().catch((error)=>{
-  const raw=error instanceof Error?`${error.message}${'reason' in error&&typeof error.reason==='string'?`:${error.reason}`:''}`:'UNKNOWN';
-  const code=/^[A-Za-z0-9_ :.-]{1,200}$/u.test(raw)?raw:'UNKNOWN';
+  const code=safePreviewErrorCode(error);
   process.stderr.write(`File work map preview failed: ${code}. No source content logged.\n`);process.exitCode=1});
