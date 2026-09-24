@@ -13,6 +13,13 @@ import { buildFounderWorkMapPreview } from '../services/founder-work-map-preview
 import { captureGroupMessageSource } from '../services/group-message-source-capture.js';
 
 interface Arguments {chatId:string;since:string;until:string;ivyOpenId:string;jamesOpenId:string;output:string}
+export async function parsePreviewAttachment(body:Buffer,mimeType:string,title:string,maxBytes:number):Promise<
+  {status:'parsed';text:string}|{status:'text_unavailable';reason:string}
+>{
+  try{return{status:'parsed',text:await parseFeishuAttachment(body,mimeType,title,{maxBytes,maxChars:12_000})}}
+  catch(error){const reason=error instanceof Error?error.message:'ATTACHMENT_PARSE_FAILED';
+    if(reason.startsWith('ATTACHMENT_'))return{status:'text_unavailable',reason};throw error}
+}
 export function parseFilePreviewArguments(args:readonly string[]):Arguments{
   const values=new Map<string,string>();for(let index=0;index<args.length;index+=2){const key=args[index],value=args[index+1];
     if(!key?.startsWith('--')||!value||values.has(key))throw new Error('FILE_PREVIEW_ARGUMENTS_INVALID');values.set(key,value)}
@@ -59,7 +66,10 @@ async function main(){
     for(const file of files){const compressed=/\.(zip|docx|xlsx)$/iu.test(file.title)||['application/zip',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes(file.mimeType);
       const maxBytes=compressed?80*1024*1024:20*1024*1024;
-      const parsed=await parseFeishuAttachment(await download(sdk,file,maxBytes),file.mimeType,file.title,{maxBytes,maxChars:12_000});
+      const parsedResult=await parsePreviewAttachment(await download(sdk,file,maxBytes),file.mimeType,file.title,maxBytes);
+      if(parsedResult.status==='text_unavailable'){fileSources.push({sourceId:null,title:file.title,mimeType:file.mimeType,messageId:file.messageId,
+        contextMessageIds:[],parsedChars:0,truncated:false,status:parsedResult.status,reason:parsedResult.reason});continue}
+      const parsed=parsedResult.text;
       if(!parsed.trim()){fileSources.push({sourceId:null,title:file.title,mimeType:file.mimeType,messageId:file.messageId,
         contextMessageIds:[],parsedChars:0,truncated:false,status:'text_unavailable'});continue}
       const assembled=assembleFeishuFileContext({file:{messageId:file.messageId!,title:file.title,mimeType:file.mimeType,text:parsed},messages:contextMessages,maxChars:20_000});

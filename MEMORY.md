@@ -1,5 +1,7 @@
 # MEMORY.md
 
+- 2026-09-24 V2 Founder 工作地图隔离预览首次运行在附件解析阶段以 `ATTACHMENT_TYPE_UNSUPPORTED` 安全停止，未写生产数据库、未发群。根因是一次性 file-preview CLI 未复用生产附件管线的逐文件缺口隔离：单个不支持类型会中止整批。已按 TDD 将 `ATTACHMENT_*` 解析错误归为 `text_unavailable` 并继续，同时保留安全 reason code；专项测试及全量 86 文件/753 项测试、typecheck、build、diff check 均通过。生产 Bridge 全程 running/healthy、restart 0。
+
 - 2026-09-22 字符预算修复 `c68ea1e` 已在停止态部署：幂等附件初始化复用15个既有来源、未重复正文，创建4个小批（4/4/4/3），新容器一度 running/healthy、restart 0，outbox仍7条 delivered。随后前两个4来源小批的首次分析均进入 retry，证明失败不只由132k大批输入造成；为避免继续消耗 Codex 配额并遵守停止优先策略，Bridge 再次停止，当前运行镜像/数据库保留、未回滚。数据库 integrity ok，群发送开关仍false。下一步必须先把 Founder worker 的泛化 `FOUNDER_STREAM_PROCESSING_FAILED` 拆为安全阶段/错误类别（Codex执行、JSON/schema、grounding、classifier、perspective、持久化），再在只读/停止态定位根因；不得盲目继续重试。
 
 - 2026-09-22 首次影子部署提交 `e3de3f1` 完成关闭态切换并成功初始化历史附件：16个附件中15个形成90天 cleartext source、1个无可提取文字；新镜像启动健康、配置 capture/analysis=true、delivery=false、lease=660，outbox仍为7条 delivered。但15附件被合并为约132139字符的单一分析批次，连续3次 `FOUNDER_STREAM_PROCESSING_FAILED` 后终态 failed；命中停止条件后已停止 Bridge，未自动回滚，数据库 integrity ok、outbox无增量。根因是附件初始化仅按20条数量分批，未限制总字符。修复将同时按最多20条和最多40000字符分批，重复运行复用既有15个来源并创建新的小批 job，不删除或改写失败审计。
