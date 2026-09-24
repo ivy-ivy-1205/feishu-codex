@@ -1,5 +1,7 @@
 # MEMORY.md
 
+- 2026-09-24 固定窗口 `2026-08-31T20:04:00.338Z` 至 `2026-09-24T09:30:14.000Z` 的 V2 Founder 工作地图隔离预览完成：读取52条消息、发现23个附件，21个成功内存解析、1个空文本、1个PDF类型不支持；未挂载/写生产数据库、未发群。模型原始归纳为4个顶层主题、10条 evidence、0个显式分歧，但把“AI选房经验与知识库”折叠进 A 线母项目，展示与未来基线必须按 Ivy 已确认结构拆为子项目；附件缺口存在，因此不能把本次 coverage 表述为真正 complete。运行踩坑：Codex 0.144.6 即使 `--ephemeral` 也需要 `CODEX_HOME` 可写以初始化 app-server；AI sandbox 仍保持 read-only。隔离输出目录需预先归属容器非 root 用户，否则最终 writeFile 会 EACCES。三个一次性镜像、上传包和服务器构建/输出目录均已清理，生产 Bridge 全程 running/healthy、restart 0。
+
 - 2026-09-24 V2 Founder 工作地图隔离预览首次运行在附件解析阶段以 `ATTACHMENT_TYPE_UNSUPPORTED` 安全停止，未写生产数据库、未发群。根因是一次性 file-preview CLI 未复用生产附件管线的逐文件缺口隔离：单个不支持类型会中止整批。已按 TDD 将 `ATTACHMENT_*` 解析错误归为 `text_unavailable` 并继续，同时保留安全 reason code；专项测试及全量 86 文件/753 项测试、typecheck、build、diff check 均通过。生产 Bridge 全程 running/healthy、restart 0。
 
 - 2026-09-22 字符预算修复 `c68ea1e` 已在停止态部署：幂等附件初始化复用15个既有来源、未重复正文，创建4个小批（4/4/4/3），新容器一度 running/healthy、restart 0，outbox仍7条 delivered。随后前两个4来源小批的首次分析均进入 retry，证明失败不只由132k大批输入造成；为避免继续消耗 Codex 配额并遵守停止优先策略，Bridge 再次停止，当前运行镜像/数据库保留、未回滚。数据库 integrity ok，群发送开关仍false。下一步必须先把 Founder worker 的泛化 `FOUNDER_STREAM_PROCESSING_FAILED` 拆为安全阶段/错误类别（Codex执行、JSON/schema、grounding、classifier、perspective、持久化），再在只读/停止态定位根因；不得盲目继续重试。
