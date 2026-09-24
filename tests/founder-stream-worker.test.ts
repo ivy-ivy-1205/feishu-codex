@@ -165,6 +165,40 @@ describe('founder stream durable wiring', () => {
       displayName:'AiJia Founder Alignment Room / AiJia 合伙人对齐室'});
     await h.app.close();h.db.close();
   });
+  it('routes an explicit self-media script under the confirmed B-line parent',async()=>{
+    const h=harness();
+    const media=h.topics.createTopic({displayName:'自媒体生产线',stage:'active_project',outcome:'统一承接自媒体内容生产。',createdAt:start});
+    const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_media_script',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'新的自媒体口播稿已经完成 review',occurredAt:start.toISOString()},start).source).source;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>start,
+      analyzer:{async analyze(){return{topics:[{displayName:'新的自媒体口播稿',stage:'closed',outcome:null,currentAction:null,confidence:'high',
+        sourceIds:[source.id],evidenceExcerpts:[{sourceId:source.id,excerpt:'新的自媒体口播稿已经完成 review'}],
+        joinDecision:{kind:'new',topicId:null,confidence:'high',sharedTerms:[]},splitSuggestions:[]}]}}}});
+    h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[source.id],capturedAt:start});
+    await runtime.runOnce();
+    const child=h.topics.listCurrentTopics().find(topic=>topic.displayName==='新的自媒体口播稿')!;
+    expect(h.topics.listRelations()).toContainEqual(expect.objectContaining({fromTopicId:child.id,toTopicId:media.id,relationType:'part_of'}));
+    await h.app.close();h.db.close();
+  });
+  it('does not move an existing A-line project under B merely because its evidence mentions a short video',async()=>{
+    const h=harness();
+    const media=h.topics.createTopic({displayName:'自媒体生产线',stage:'active_project',createdAt:start});
+    const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_ai_video',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'AiJia AI Native 房产业务目标是交付服务，接下来制作短视频',occurredAt:start.toISOString()},start).source).source;
+    const ai=h.topics.createTopic({displayName:'AiJia AI Native 房产业务',stage:'active_project',
+      evidenceIds:[saveFounderEvidence(h.sources,source.id,'AiJia AI Native 房产业务',start)],createdAt:new Date(start.getTime()+1)});
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>start,
+      analyzer:{async analyze(){return{topics:[{displayName:'AiJia AI Native 房产业务',stage:'active_project',outcome:'交付服务',currentAction:'制作短视频',confidence:'high',
+        sourceIds:[source.id],evidenceExcerpts:[{sourceId:source.id,excerpt:'AiJia AI Native 房产业务目标是交付服务，接下来制作短视频'}],
+        joinDecision:{kind:'exact_continuation',topicId:ai.id,confidence:'high',sharedTerms:['AiJia AI Native 房产业务']},splitSuggestions:[]}]}}}});
+    const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[source.id],capturedAt:start});
+    await runtime.runOnce();
+    expect((h.db.client.prepare('SELECT status FROM batch_jobs WHERE stable_key=?').get(queued.key) as {status:string}).status).toBe('completed');
+    expect(h.topics.listRelations()).not.toContainEqual(expect.objectContaining({fromTopicId:ai.id,toTopicId:media.id,relationType:'part_of'}));
+    await h.app.close();h.db.close();
+  });
   it('applies semantic classification before persisting the active project map', async () => {
     const h=harness();
     const rows=['AI native 房产业务','VibeVoice'].map((text,index)=>h.sources.saveSource(captureGroupMessageSource({chatId:chat,

@@ -34,6 +34,16 @@ it('fails closed when model classification omits or duplicates a proposal',()=>{
     {proposalIndex:0,kind:'idea',lifecycle:'active',parentProposalIndex:null}]})).toThrow('FOUNDER_CLASSIFICATION_INVALID');
 });
 
+it('keeps explicit self-media scripts and video materials as routable child projects',()=>{
+  const script={...proposal('40 年房贷口播稿','s1'),stage:'closed' as const,
+    evidenceExcerpts:[{sourceId:'s1',excerpt:'这份自媒体口播稿已经完成 review'}]};
+  const result=projectFounderWorkMap({topics:[script]},{items:[{
+    proposalIndex:0,kind:'artifact',lifecycle:'completed',parentProposalIndex:null
+  }]});
+  expect(result.analysis.topics).toEqual([expect.objectContaining({displayName:'40 年房贷口播稿',stage:'closed'})]);
+  expect(result.historyItems).toEqual([]);
+});
+
 it('applies authoritative corrections to headings with markdown and document-title wrappers',()=>{
   const input:FounderStreamAnalysis={topics:[proposal('# AI native房产服务：产品系统与服务流程总纲','s1'),
     proposal('   情绪价值融入商业骨髓','s2'),proposal('# James与艾薇：低干扰自动沉淀与工作对齐 V0.2','s3'),

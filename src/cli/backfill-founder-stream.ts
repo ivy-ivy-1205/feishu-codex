@@ -8,18 +8,21 @@ import { JobRepository } from '../repositories/job-repository.js';
 import { runFounderStreamBackfill, validateFounderStreamWindow,
   type FounderStreamBackfillInput } from '../services/founder-stream-backfill.js';
 
-export function parseBackfillArguments(args: string[]): { chatId: string; since: string; until?: string; dryRun: boolean } {
+export function parseBackfillArguments(args: string[]): { chatId: string; since: string; until?: string; dryRun: boolean;enqueueAnalysis:boolean } {
   const { values } = parseArgs({ args: args[0] === '--' ? args.slice(1) : args, strict: true,
-    options: { 'chat-id': { type: 'string' }, since: { type: 'string' }, until: { type: 'string' }, 'dry-run': { type: 'boolean' }, persist: { type: 'boolean' } } });
-  if (!values['chat-id'] || !values.since || Boolean(values['dry-run']) === Boolean(values.persist)) {
-    throw new Error('require --chat-id <approved-id> --since <ISO> and exactly one of --dry-run or --persist');
+    options: { 'chat-id': { type: 'string' }, since: { type: 'string' }, until: { type: 'string' }, 'dry-run': { type: 'boolean' },
+      persist: { type: 'boolean' },'persist-sources-only':{type:'boolean'} } });
+  const modes=[values['dry-run'],values.persist,values['persist-sources-only']].filter(Boolean).length;
+  if (!values['chat-id'] || !values.since || modes!==1) {
+    throw new Error('require --chat-id <approved-id> --since <ISO> and exactly one explicit mode');
   }
   if (values.until !== undefined) {
     validateFounderStreamWindow(values['chat-id'], values.until, new Date(values.until));
     validateFounderStreamWindow(values['chat-id'], values.since, new Date(values.until));
     if (Date.parse(values.until) <= Date.parse(values.since)) throw new Error('FOUNDER_STREAM_RANGE_INVALID');
   }
-  return { chatId: values['chat-id'], since: values.since, ...(values.until === undefined ? {} : { until: values.until }), dryRun: values['dry-run'] === true };
+  return { chatId: values['chat-id'], since: values.since, ...(values.until === undefined ? {} : { until: values.until }),
+    dryRun: values['dry-run'] === true,enqueueAnalysis:values.persist===true };
 }
 
 type CliDependencies = Omit<FounderStreamBackfillInput, 'chatId' | 'since' | 'dryRun'> & { write: (line: string) => void };
@@ -45,7 +48,7 @@ export async function runBackfillCli(args: string[], dependencies: CliDependenci
     }
   }
   // Explicit whitelist: never serialize raw report, messages, IDs, cursors, errors or sources.
-  dependencies.write(JSON.stringify({ dryRun: report.dryRun, requestedRange: report.requestedRange,
+  dependencies.write(JSON.stringify({ dryRun: report.dryRun,enqueueAnalysis:options.enqueueAnalysis,requestedRange: report.requestedRange,
     coverageStatus: report.coverageStatus, coverage: report.coverage,
     messagesRead: report.messagesRead, sourcesCaptured: report.sourcesCaptured,
     sourcesCreated: report.sourcesCreated, jobsEnqueued: report.jobsEnqueued,

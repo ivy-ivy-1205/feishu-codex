@@ -134,6 +134,15 @@ describe('founder stream backfill', () => {
     expect(deps.db.client.prepare('SELECT * FROM batch_jobs').all()).toEqual([]);
   });
 
+  it('can persist an audited evidence window without enqueueing analysis', async () => {
+    const deps=repositories();
+    const report=await backfill.runFounderStreamBackfill({chatId,since,now,...fixture(),...deps,dryRun:false,enqueueAnalysis:false});
+    expect(report.sourcesCreated).toBe(5);
+    expect(report.jobsEnqueued).toBe(0);
+    expect(deps.sourceRepository.listSources().filter(source=>source.sourceType==='group_message')).toHaveLength(5);
+    expect(deps.db.client.prepare('SELECT * FROM batch_jobs').all()).toEqual([]);
+  });
+
   it('rejects another chat or a missing/invalid window before reads', async () => {
     const { feishu, requests } = fixture();
     await expect(backfill.runFounderStreamBackfill({ chatId: 'oc_other', since, now, feishu })).rejects.toMatchObject({ code: 'FEISHU_CHAT_NOT_APPROVED' });
@@ -159,7 +168,8 @@ describe('founder stream backfill', () => {
   });
 
   it('CLI requires a single explicit mode and prints aggregate counts without content or identifiers', async () => {
-    for (const args of [[], ['--chat-id', chatId, '--since', since], ['--chat-id', chatId, '--since', since, '--dry-run', '--persist']]) {
+    for (const args of [[], ['--chat-id', chatId, '--since', since], ['--chat-id', chatId, '--since', since, '--dry-run', '--persist'],
+      ['--chat-id',chatId,'--since',since,'--persist','--persist-sources-only']]) {
       expect(() => cli.parseBackfillArguments(args)).toThrow();
     }
     const lines: string[] = [];
@@ -169,6 +179,15 @@ describe('founder stream backfill', () => {
     expect(lines.join('')).not.toContain('PRIVATE CONTENT');
     expect(lines.join('')).not.toContain('reply1');
     expect(deps.sourceRepository.listSources()).toEqual([]);
+
+    expect(cli.parseBackfillArguments(['--chat-id',chatId,'--since',since,'--persist-sources-only']))
+      .toMatchObject({dryRun:false,enqueueAnalysis:false});
+    await cli.runBackfillCli(['--chat-id',chatId,'--since',since,'--persist-sources-only'],{
+      ...fixture(),...deps,now,write:line=>lines.push(line)
+    });
+    expect(JSON.parse(lines.at(-1)!)).toMatchObject({dryRun:false,enqueueAnalysis:false,jobsEnqueued:0});
+    expect(deps.sourceRepository.listSources().some(source=>source.sourceType==='group_message')).toBe(true);
+    expect(deps.db.client.prepare('SELECT * FROM batch_jobs').all()).toEqual([]);
   });
 
   it('reports a rejected Feishu history response by safe category and numeric code only', async () => {

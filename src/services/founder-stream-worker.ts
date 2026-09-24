@@ -24,7 +24,7 @@ import { canonicalJson, stableId } from './canonical-json.js';
 import { topicCorrectionSchema } from './topic-correction-service.js';
 import type { CurrentTopic, TopicVersion } from '../domain/topic.js';
 import type { FeishuContextGap } from './feishu-context-sync.js';
-import { projectFounderWorkMap, type FounderWorkMapClassification } from './founder-work-map-classification.js';
+import { isSelfMediaProposal, projectFounderWorkMap, type FounderWorkMapClassification } from './founder-work-map-classification.js';
 import { parseFeishuAttachment } from './feishu-attachment-parser.js';
 import { classifyFounderFailure, type FounderFailureStage } from './founder-analysis-failure.js';
 
@@ -183,6 +183,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         const canonicalByName = new Map(topics.listCanonicalTopics()
           .filter(topic => topic.stage !== 'closed')
           .map(topic => [normalizeTopicName(topic.displayName), topic]));
+        const mediaLine=canonicalByName.get(normalizeTopicName('自媒体生产线'));
         for (const item of plan.topics) {
           if (item.action !== 'create') continue;
           const exact = canonicalByName.get(normalizeTopicName(item.proposal.displayName));
@@ -266,6 +267,11 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
               evidenceIds, rationale, changedAt: stamp });
             else topics.createTopic({ displayName: item.proposal.displayName, stage: item.proposal.stage, outcome: item.proposal.outcome,
               evidenceIds, rationale, createdAt: new Date(plannedAt.getTime() + item.proposalIndex) });
+          }
+          if(mediaLine)for(const [topicId,rows] of byTopic){
+            if(topicId!==mediaLine.id&&rows.some(row=>row.item.action==='create'&&isSelfMediaProposal(row.item.proposal)))
+              topics.addRelation({fromTopicId:topicId,toTopicId:mediaLine.id,relationType:'part_of',
+                rationale:'Ivy confirmed self-media materials belong to the B-line production stream',createdAt:stamp});
           }
           for(const observation of perspectiveResult.observations) {
             assertScoped(observation.topicId,[observation.evidenceId]);

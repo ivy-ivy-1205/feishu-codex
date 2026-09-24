@@ -28,6 +28,8 @@ export function projectFounderWorkMap(input:FounderStreamAnalysis,raw:FounderWor
     set('PropHero',{kind:'research',lifecycle:'active',parentProposalIndex:ai})}
   const ep=find('EP00挺好');
   if(ep>=0)Object.assign(items[ep]!,{kind:'project',lifecycle:'completed',parentProposalIndex:null});
+  for(const item of items)if(isSelfMediaProposal(input.topics[item.proposalIndex]!))
+    Object.assign(item,{kind:'project',parentProposalIndex:null});
   set('低干扰自动沉淀与工作对齐',{kind:'project',lifecycle:'active',parentProposalIndex:null});
   set('VibeVoice',{kind:'research',lifecycle:'unknown',parentProposalIndex:null});
   for(const item of items){if(item.parentProposalIndex===item.proposalIndex||item.parentProposalIndex!==null&&items[item.parentProposalIndex]?.kind!=='project')
@@ -55,6 +57,11 @@ export function projectFounderWorkMap(input:FounderStreamAnalysis,raw:FounderWor
 }
 
 function semanticName(value:string):string{return value.normalize('NFKC').toLocaleLowerCase('en-US').replace(/[\s\p{P}\p{S}]+/gu,'')}
+
+export function isSelfMediaProposal(topic:TopicProposal):boolean{
+  const text=[topic.displayName,topic.outcome??'',topic.currentAction??'',...topic.evidenceExcerpts.map(item=>item.excerpt)].join('\n');
+  return /自媒体|口播稿|视频号|短视频|口播视频|内容生产线/u.test(text);
+}
 
 function unique(values:TopicProposal['evidenceExcerpts']):TopicProposal['evidenceExcerpts']{
   return [...new Map(values.map(value=>[JSON.stringify([value.sourceId,value.excerpt]),value])).values()];

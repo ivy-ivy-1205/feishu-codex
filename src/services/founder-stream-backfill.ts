@@ -14,6 +14,7 @@ export interface FounderStreamBackfillInput {
   sourceRepository?: ContextSourceRepository;
   jobRepository?: JobRepository;
   dryRun?: boolean;
+  enqueueAnalysis?: boolean;
 }
 
 export interface FounderStreamBackfillReport extends FeishuContextSyncReport {
@@ -72,7 +73,7 @@ export async function runFounderStreamBackfill(input: FounderStreamBackfillInput
     }
   });
   let jobsEnqueued = 0;
-  if (!dryRun && sourceIds.length > 0) {
+  if (!dryRun && (input.enqueueAnalysis ?? true) && sourceIds.length > 0) {
     const result = jobRepository!.enqueueFounderStreamBatch({ chatId: input.chatId,
       since: report.requestedRange.since, until: report.requestedRange.until, sourceIds, capturedAt: input.now });
     jobsEnqueued = result.created ? 1 : 0;
