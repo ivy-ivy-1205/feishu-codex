@@ -1,7 +1,7 @@
 # Founder 工作地图 V3 生产变更单
 
 日期：2026-09-24  
-状态：Ivy 已确认业务修正；本地实现与验证完成；生产尚未写入
+状态：已完成生产写入与恢复验证；群发送保持关闭
 
 ## 1. 本次修正
 
@@ -113,3 +113,15 @@
 - preview/apply 数字与预期不一致；
 - 出现多父级、错误 A/B 线归属或原历史对象缺失；
 - Bridge 恢复后不健康或出现新增失败任务。
+
+## 7. 生产执行结果（2026-09-25）
+
+- D1、精确一秒历史读取、关闭态一致性备份、来源持久化、baseline preview/apply 和 D3 均已完成。
+- preview/apply 结果均为：`canonicalUpdates=3`、`newTopics=2`、`partOf=3`、`sameAs=0`；preview 未写入，apply 已写入。
+- 来源持久化新增 1 条目标群消息来源，同时按同步审计合同新增 1 条 `feishu_sync_coverage` 来源；相对部署前备份来源总数为 `+2`。
+- baseline 写后结果：topics=33、perspectives=21、relations=30（`same_as=24`、`part_of=6`），数据库完整性正常、无外键违规。
+- `房产销售过程数据沉淀`、`Amy / Smart Listing L008｜27 Cecil Street 样板`、`自媒体生产线`、`EP00《挺好》` 和 `40 年超长期房贷` 的状态、目标与父子关系均通过精确断言。
+- Bridge 当前运行 revision `63c3985c0594dd811cfd6c244284c613b61079b7`，容器 running/healthy、restart count=0，本地及公网 health/ready 均为 200。
+- Bridge 恢复后自动处理 1 个正常增量批次并完成，持续沉淀后的当前计数为 topics=35、perspectives=25、relations=30；最终 active jobs=0、pending outbox=0，历史 failed 数仍为5，没有新增失败。
+- `FOUNDER_STREAM_GROUP_DELIVERY_ENABLED=false`，本次没有向群发送工作地图或提醒。
+- 已清理本轮可再生上传目录；保留数据库备份、旧应用 checkpoint、回滚镜像和审计日志。
