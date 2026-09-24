@@ -1,0 +1,27 @@
+FROM node:22-bookworm-slim AS build
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY tsconfig.json tsconfig.build.json ./
+COPY src ./src
+RUN pnpm build
+RUN pnpm prune --prod
+
+FROM node:22-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ARG SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.source-commit="${SOURCE_COMMIT}"
+LABEL ai.aijia.image-purpose="founder-work-map-v2-baseline"
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist/cli/apply-founder-baseline.js ./dist/cli/
+COPY --from=build /app/dist/services/founder-baseline.js ./dist/services/
+COPY --from=build /app/dist/services/canonical-json.js ./dist/services/
+COPY --from=build /app/dist/repositories/topic-repository.js ./dist/repositories/
+COPY --from=build /app/dist/domain/topic.js ./dist/domain/
+COPY --from=build /app/dist/db/client.js ./dist/db/
+COPY --from=build /app/dist/db/schema.js ./dist/db/
+USER node
+ENTRYPOINT ["node", "dist/cli/apply-founder-baseline.js"]
