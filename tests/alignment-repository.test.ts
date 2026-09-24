@@ -55,6 +55,16 @@ function saveGroupEvidence(
 }
 
 describe('AlignmentRepository', () => {
+  it('projects current perspectives across an explicit same_as component and keeps distinct decision keys', () => {
+    const { repository, sources, topic, database } = createHarness();
+    const duplicate = new TopicRepository(database.client).createTopic({displayName:'销售知识库副本',stage:'exploring',createdAt:new Date('2026-09-01T00:01:00Z')});
+    new TopicRepository(database.client).addRelation({fromTopicId:topic.id,toTopicId:duplicate.id,relationType:'same_as',rationale:'confirmed',createdAt:new Date('2026-09-01T00:02:00Z')});
+    const first=saveGroupEvidence(sources,{messageId:'om_a',openId:'ou_james',displayName:'James',text:'先整理销售方法',occurredAt:'2026-09-01T01:00:00Z'});
+    const later=saveGroupEvidence(sources,{messageId:'om_b',openId:'ou_james',displayName:'James',text:'先等判断语录',occurredAt:'2026-09-02T01:00:00Z'});
+    repository.savePerspective({topicId:topic.id,kind:'james_view',expectedVersion:0,statement:'先整理销售方法',confidence:1,evidenceIds:[first],decisionKey:'method',speechAct:'view',observedAt:new Date('2026-09-01T01:00:00Z')});
+    repository.savePerspective({topicId:duplicate.id,kind:'james_view',expectedVersion:0,statement:'先等判断语录',confidence:1,evidenceIds:[later],decisionKey:'next',speechAct:'view',observedAt:new Date('2026-09-02T01:00:00Z')});
+    expect(repository.listCanonicalPerspectives(topic.id).map(value=>value.decisionKey)).toEqual(['method','next']);
+  });
   it('attributes evidence only through configured immutable founder identities', () => {
     const { repository, sources } = createHarness();
     const ivyEvidenceId = saveGroupEvidence(sources, {

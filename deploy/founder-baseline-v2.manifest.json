@@ -1,0 +1,60 @@
+{
+  "expected": { "topics": 27, "perspectives": 18, "relations": 0 },
+  "groups": [
+    {
+      "canonical": { "id": "topic_0622155dc9cfbc4ae20c295b04312e99", "version": 1, "name": "AiJia AI Native 房产业务", "stage": "active_project", "outcome": "AiJia 当前工作的总项目，覆盖 AI Native 房产服务及其子项目。" },
+      "duplicates": [
+        { "id": "topic_aa211570d524c4cf256974f46ff90f60", "version": 3 },
+        { "id": "topic_92653eb184e561454f86a79f8148202a", "version": 1 },
+        { "id": "topic_91f9d6b1095fa1f5b1f2076f39b1f439", "version": 1 },
+        { "id": "topic_368864e16515614cb2fdc025ade55ca1", "version": 1 },
+        { "id": "topic_b74999db0fccddd9bcbdc7220a132e37", "version": 1 }
+      ]
+    },
+    {
+      "canonical": { "id": "topic_5606ca3835bf19372aff6ff4e39bb75d", "version": 1, "name": "Amy / Smart Listing", "stage": "active_project", "outcome": "一个 Amy 持续服务客户，按需要调用专业能力，并与 AI 选房项目共用底层知识库和数据库。" },
+      "duplicates": [
+        { "id": "topic_9cd3c8a93df5753a6f21d043ad9d038f", "version": 1 },
+        { "id": "topic_e7790856ff03212b8ec370ad5dbc648d", "version": 1 },
+        { "id": "topic_0c1a6e54d5b51c95d70d69dba5772325", "version": 1 },
+        { "id": "topic_adf38fa6a9e2e5f60c5d858ad8b11e67", "version": 4 },
+        { "id": "topic_97b76a1ffd927a516f9b62f235e69c74", "version": 1 },
+        { "id": "topic_5aed1d2cb6e269210dd2b31a0993681f", "version": 1 },
+        { "id": "topic_c9a2f9b23b990ed9e0802cef1c5450b5", "version": 1 }
+      ]
+    },
+    {
+      "canonical": { "id": "topic_1cc3409beb2d46176ecfbb76c440641f", "version": 1, "name": "AI 选房经验与知识库", "stage": "active_project", "outcome": "由 Ivy 综合 James/Jimmy 的销售经验和选房判断方法，进行分析和提炼，形成 AiJia 的选房知识库。" },
+      "duplicates": [
+        { "id": "topic_e2d38957c9b2a6b0f6dc179400af901f", "version": 1 },
+        { "id": "topic_45162539c27fd697c75b843f38967aa8", "version": 6 },
+        { "id": "topic_e8ef031d293abac31b91880a3badffe1", "version": 1 }
+      ]
+    },
+    {
+      "canonical": { "id": "topic_4d3df2c0792480acf4913b2fea8e42de", "version": 3, "name": "房产销售过程数据沉淀", "stage": "active_project", "outcome": "沉淀 Open Home 语音，以及 Open Inspection 和销售过程中的 CRM 客户记录与销售回填，不承诺所有场景全程、全量录音。" },
+      "duplicates": [
+        { "id": "topic_9a760431733ea7605d64d4d61e0fb698", "version": 2 },
+        { "id": "topic_454b56cd05313aa0d551eaa9286fb55f", "version": 1 }
+      ]
+    },
+    {
+      "canonical": { "id": "topic_106cf9757e6cae55cbca67fa5e677cd7", "version": 1, "name": "AiJia Founder Alignment Room / AiJia 合伙人对齐室", "stage": "active_project", "outcome": "让 Ivy 与 James 对同一场景、目标、方向和完成标准保持高度统一，及时暴露理解偏差并减少返工和额外沟通。" },
+      "duplicates": [
+        { "id": "topic_ec29ba250431d7645b17ebc482eaf820", "version": 1 },
+        { "id": "topic_c7b1e4de9fd103101b3f008ed0dfd591", "version": 1 },
+        { "id": "topic_68e4fe9d5b9a0c5164bb153a15addc62", "version": 1 },
+        { "id": "topic_32276d897fb093145913782dc74d9187", "version": 3 },
+        { "id": "topic_5d97a23870ba3cbda1c967e4b5e7d894", "version": 1 }
+      ]
+    }
+  ],
+  "partOf": [
+    { "childId": "topic_5606ca3835bf19372aff6ff4e39bb75d", "parentId": "topic_0622155dc9cfbc4ae20c295b04312e99" },
+    { "childId": "topic_1cc3409beb2d46176ecfbb76c440641f", "parentId": "topic_0622155dc9cfbc4ae20c295b04312e99" },
+    { "childId": "topic_4d3df2c0792480acf4913b2fea8e42de", "parentId": "topic_0622155dc9cfbc4ae20c295b04312e99" }
+  ],
+  "newTopics": [
+    { "name": "EP00《挺好》", "stage": "closed", "outcome": null, "sourceIds": ["ctxsrc_1596c44f6a15cc1c17e3f5e88ebfc75f"] }
+  ]
+}

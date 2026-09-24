@@ -1,5 +1,7 @@
 # MEMORY.md
 
+- 2026-09-24 Founder V2 baseline D0 本地实现完成：新增只读 `same_as` 连通分量观点投影，按 founder perspective kind + decision key 保留不同议题并以最新证据时间去重；新增强校验的一次性 baseline manifest/CLI，preview 零写入、apply 单事务，任何 topic/version/count/source 漂移整体 fail closed。已固化生产精确 manifest：预期27 topics、18 perspectives、0 relations，更新5个规范代表、新建1个 closed EP00、22 same_as、3 part_of；不会删除历史。全量88个测试文件/758项测试、typecheck、build、diff check通过；尚未上传、部署或修改生产。
+
 - 2026-09-24 Ivy 确认 V2 工作地图结构。生产只读映射确认现有27个话题可完整归入5个既有规范组：A线母项目6、Smart Listing 8、选房知识库4、销售过程数据沉淀3、合伙人对齐室6；EP00需作为第6个规范项目新建。生产还有18条 current perspective 分散在重复话题，基线不能只加 `same_as`，必须让规范地图沿 same_as 连通分量聚合观点并保留不同 decision key；原历史全部保留。精确变更单在 `docs/founder-work-map-v2-baseline-change-sheet.md`，计划新增22条 same_as、3条 part_of、更新5个规范代表、新建1个 closed EP00；尚未执行生产写入或开启群发送。
 
 - 2026-09-24 固定窗口 `2026-08-31T20:04:00.338Z` 至 `2026-09-24T09:30:14.000Z` 的 V2 Founder 工作地图隔离预览完成：读取52条消息、发现23个附件，21个成功内存解析、1个空文本、1个PDF类型不支持；未挂载/写生产数据库、未发群。模型原始归纳为4个顶层主题、10条 evidence、0个显式分歧，但把“AI选房经验与知识库”折叠进 A 线母项目，展示与未来基线必须按 Ivy 已确认结构拆为子项目；附件缺口存在，因此不能把本次 coverage 表述为真正 complete。运行踩坑：Codex 0.144.6 即使 `--ephemeral` 也需要 `CODEX_HOME` 可写以初始化 app-server；AI sandbox 仍保持 read-only。隔离输出目录需预先归属容器非 root 用户，否则最终 writeFile 会 EACCES。三个一次性镜像、上传包和服务器构建/输出目录均已清理，生产 Bridge 全程 running/healthy、restart 0。

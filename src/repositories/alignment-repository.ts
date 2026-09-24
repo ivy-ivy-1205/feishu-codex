@@ -235,6 +235,24 @@ export class AlignmentRepository {
       .filter(p=>p.kind!=='shared_decision'||this.isSharedDecisionEffective(p));
   }
 
+  /** Read-only projection across human-confirmed same_as relations. */
+  listCanonicalPerspectives(topicId:string):CurrentPerspective[]{
+    const relations=this.client.prepare("SELECT from_topic_id,to_topic_id FROM context_topic_relations WHERE relation_type='same_as'")
+      .all() as {from_topic_id:string;to_topic_id:string}[];
+    const ids=new Set([topicId]);let changed=true;
+    while(changed){changed=false;for(const relation of relations){
+      if(ids.has(relation.from_topic_id)&&!ids.has(relation.to_topic_id)){ids.add(relation.to_topic_id);changed=true}
+      if(ids.has(relation.to_topic_id)&&!ids.has(relation.from_topic_id)){ids.add(relation.from_topic_id);changed=true}
+    }}
+    const selected=new Map<string,CurrentPerspective>();
+    for(const id of ids)for(const perspective of this.listCurrentPerspectives(id)){
+      const key=`${perspective.kind}\n${perspective.decisionKey??''}`,existing=selected.get(key);
+      if(!existing||perspective.observedAt.localeCompare(existing.observedAt)>0||
+        perspective.observedAt===existing.observedAt&&perspective.id.localeCompare(existing.id)>0)selected.set(key,perspective);
+    }
+    return[...selected.values()].sort((a,b)=>(a.decisionKey??'').localeCompare(b.decisionKey??'')||a.kind.localeCompare(b.kind));
+  }
+
   listPerspectiveVersions(topicId: string, kind: PerspectiveKind): PerspectiveVersion[] {
     return (this.client.prepare(`
       SELECT p.topic_id, p.kind, v.*
