@@ -64,6 +64,28 @@ describe('CodexFounderPerspectiveAnalyzer', () => {
     await expect(subject.analyze(input)).rejects.toMatchObject({code:'FOUNDER_PERSPECTIVE_OUTPUT_INVALID',reason:'observation_ungrounded'});
   });
 
+  it('retries once with the safe validation reason and accepts a corrected grounded result', async () => {
+    const prompts: string[] = [];
+    const subject = new CodexFounderPerspectiveAnalyzer({ codex: { async executeJson(request) {
+      prompts.push(request.prompt);
+      if (prompts.length === 1) return { observations: [{
+        topicId: 'topic_site', evidenceId: 'ev_ivy', statement: 'invented private sentence',
+        speechAct: 'view', decisionKey: null, confidence: 0.8
+      }], alignmentProposals: [] };
+      return { observations: [{
+        topicId: 'topic_site', evidenceId: 'ev_ivy', statement: '先完成官网首页再做内容库',
+        speechAct: 'decision_proposal', decisionKey: 'execution-order', confidence: 0.9
+      }], alignmentProposals: [] };
+    } } });
+
+    const result = await subject.analyze(input);
+
+    expect(result.observations).toHaveLength(1);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('observation_ungrounded');
+    expect(prompts[1]).not.toContain('invented private sentence');
+  });
+
   it('passes only allowlisted evidence fields to Codex and emits a strict output schema', async () => {
     let captured: { prompt: string; outputSchema: Record<string, unknown> } | undefined;
     const subject = new CodexFounderPerspectiveAnalyzer({ codex: { async executeJson(request) {
