@@ -139,6 +139,32 @@ describe('founder stream durable wiring', () => {
       .toEqual(expect.arrayContaining([motherSource.id,duplicateSource.id]));
     await h.app.close();h.db.close();
   });
+  it('joins a cross-batch proposal to an exact normalized canonical name even when the model says new', async () => {
+    const h=harness();
+    const canonicalSource=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_alignment_original',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',
+      text:'AiJia Founder Alignment Room / AiJia 合伙人对齐室，减少返工',occurredAt:start.toISOString()},start).source).source;
+    const canonical=h.topics.createTopic({displayName:'AiJia Founder Alignment Room / AiJia 合伙人对齐室',stage:'active_project',
+      outcome:'减少返工',evidenceIds:[saveFounderEvidence(h.sources,canonicalSource.id,canonicalSource.contentText,start)],createdAt:start});
+    const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_alignment_again',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'：\nAiJia Founder Alignment Room / AiJia 合伙人对齐室，减少返工',
+      occurredAt:new Date(start.getTime()+1_000).toISOString()},start).source).source;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>new Date(start.getTime()+600_000),
+      analyzer:{async analyze(){return{topics:[{displayName:'：\nAiJia Founder Alignment Room / AiJia 合伙人对齐室',stage:'active_project',outcome:'减少返工',
+        currentAction:'减少返工',confidence:'high',sourceIds:[source.id],evidenceExcerpts:[{sourceId:source.id,excerpt:source.contentText}],
+        joinDecision:{kind:'new',topicId:null,confidence:'high',sharedTerms:[]},splitSuggestions:[]}]}}}});
+    const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:source.occurredAt,until:source.occurredAt,sourceIds:[source.id],capturedAt:start});
+
+    await runtime.runOnce();
+
+    expect(h.db.client.prepare('SELECT status FROM batch_jobs WHERE stable_key=?').get(queued.key))
+      .toEqual({status:'completed'});
+    expect(h.topics.listCurrentTopics()).toHaveLength(1);
+    expect(h.topics.listCurrentTopics()[0]).toMatchObject({id:canonical.id,currentVersion:2,
+      displayName:'AiJia Founder Alignment Room / AiJia 合伙人对齐室'});
+    await h.app.close();h.db.close();
+  });
   it('applies semantic classification before persisting the active project map', async () => {
     const h=harness();
     const rows=['AI native 房产业务','VibeVoice'].map((text,index)=>h.sources.saveSource(captureGroupMessageSource({chatId:chat,

@@ -179,6 +179,19 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           : { analysis, supportingByDisplayName: {} as Record<string, never[]>, canonicalNames: {} as Record<string,string> };
         failureStage = 'topic_reconciliation';
         const plan = reconcileTopics(input, classified.analysis);
+        const exactCanonicalNames = new Map<number, string>();
+        const canonicalByName = new Map(topics.listCanonicalTopics()
+          .filter(topic => topic.stage !== 'closed')
+          .map(topic => [normalizeTopicName(topic.displayName), topic]));
+        for (const item of plan.topics) {
+          if (item.action !== 'create') continue;
+          const exact = canonicalByName.get(normalizeTopicName(item.proposal.displayName));
+          if (!exact) continue;
+          item.action = 'join';
+          item.topicId = exact.id;
+          item.expectedVersion = exact.currentVersion;
+          exactCanonicalNames.set(item.proposalIndex, exact.displayName);
+        }
         failureStage = 'evidence_preparation';
         // The model can suggest a continuation, but it cannot revoke a founder's
         // accepted correction. Bind its evidence to the protected topic instead
@@ -247,7 +260,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
                 occurredAt: authority.occurredAt }, suggestions,
                 ...(suggestions.length===1?{suggestion:suggestions[0]}:{}) } : {}) });
             if (item.action === 'join') topics.appendVersion({ topicId: item.topicId!, expectedVersion: item.expectedVersion!,
-              displayName: authority?.snapshot.displayName ?? item.proposal.displayName,
+              displayName: authority?.snapshot.displayName ?? exactCanonicalNames.get(item.proposalIndex) ?? item.proposal.displayName,
               stage: authority?.snapshot.stage ?? item.proposal.stage,
               outcome: authority ? authority.snapshot.outcome : item.proposal.outcome,
               evidenceIds, rationale, changedAt: stamp });
@@ -512,6 +525,9 @@ async function deliverFounderMessages(options: FounderStreamOptions, outbox: Out
 function parseTime(value:string):string|null {
   const ms=/^\d+$/.test(value)? Number(value)*(value.length<=10?1000:1):Date.parse(value);
   return Number.isFinite(ms) && !Number.isNaN(new Date(ms).getTime())?new Date(ms).toISOString():null;
+}
+function normalizeTopicName(value:string):string {
+  return value.normalize('NFKC').toLocaleLowerCase('und').replace(/[\p{P}\p{S}\s]+/gu,'');
 }
 function messageText(type:string,content:string):string|null {
   try {
