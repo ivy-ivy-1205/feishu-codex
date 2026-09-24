@@ -1,5 +1,7 @@
 # MEMORY.md
 
+- 2026-09-24 Founder V2 baseline D1 即时只读确认：生产 Bridge running/healthy、restart 0、health/ready 200；capture/analysis/worker=true、group delivery=false。SQLite 27 topics 的全部 ID/version 与 manifest 逐项一致，18 perspectives、0 relations、active batch/extraction/Todo=0、pending outbox=0，EP00 指定来源存在，integrity=ok、无外键输出，数据库 1,142,784 bytes、600 lighthouse:lighthouse；D1 业务门通过。唯一部署阻断是根盘仅约3.74GiB可用、94%使用，低于6GiB安全余量；`/opt/feishu-codex`仅142MiB，不是主因。Docker 报告 build cache 7.841GB（约4.794GB可回收）、镜像19.66GB（约6.949GB可回收）。本轮严格只读，未清理、备份、上传、停服或写库；进入D2前应先单独批准清理 build cache 并复测磁盘。
+
 - 2026-09-24 Founder V2 baseline D0 本地实现完成：新增只读 `same_as` 连通分量观点投影，按 founder perspective kind + decision key 保留不同议题并以最新证据时间去重；新增强校验的一次性 baseline manifest/CLI，preview 零写入、apply 单事务，任何 topic/version/count/source 漂移整体 fail closed。已固化生产精确 manifest：预期27 topics、18 perspectives、0 relations，更新5个规范代表、新建1个 closed EP00、22 same_as、3 part_of；不会删除历史。全量88个测试文件/758项测试、typecheck、build、diff check通过；尚未上传、部署或修改生产。
 
 - 2026-09-24 Ivy 确认 V2 工作地图结构。生产只读映射确认现有27个话题可完整归入5个既有规范组：A线母项目6、Smart Listing 8、选房知识库4、销售过程数据沉淀3、合伙人对齐室6；EP00需作为第6个规范项目新建。生产还有18条 current perspective 分散在重复话题，基线不能只加 `same_as`，必须让规范地图沿 same_as 连通分量聚合观点并保留不同 decision key；原历史全部保留。精确变更单在 `docs/founder-work-map-v2-baseline-change-sheet.md`，计划新增22条 same_as、3条 part_of、更新5个规范代表、新建1个 closed EP00；尚未执行生产写入或开启群发送。
