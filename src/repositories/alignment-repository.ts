@@ -246,9 +246,12 @@ export class AlignmentRepository {
     }}
     const selected=new Map<string,CurrentPerspective>();
     for(const id of ids)for(const perspective of this.listCurrentPerspectives(id)){
-      const key=`${perspective.kind}\n${perspective.decisionKey??''}`,existing=selected.get(key);
-      if(!existing||perspective.observedAt.localeCompare(existing.observedAt)>0||
-        perspective.observedAt===existing.observedAt&&perspective.id.localeCompare(existing.id)>0)selected.set(key,perspective);
+      const key=`${perspective.kind}\n${normalizePerspectiveStatement(perspective.statement)}`,existing=selected.get(key);
+      if(!existing){selected.set(key,perspective);continue}
+      const evidenceIds=[...new Set([...existing.evidenceIds,...perspective.evidenceIds])].sort();
+      const usePerspective=perspective.observedAt.localeCompare(existing.observedAt)>0||
+        perspective.observedAt===existing.observedAt&&perspective.id.localeCompare(existing.id)>0;
+      selected.set(key,{...(usePerspective?perspective:existing),evidenceIds});
     }
     return[...selected.values()].sort((a,b)=>(a.decisionKey??'').localeCompare(b.decisionKey??'')||a.kind.localeCompare(b.kind));
   }
@@ -308,6 +311,10 @@ export class AlignmentRepository {
     if (!row) throw new Error('perspective version could not be read back');
     return toPerspectiveVersion(row);
   }
+}
+
+function normalizePerspectiveStatement(value:string):string{
+  return value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\p{P}\p{S}\s]+/gu,'');
 }
 
 interface FounderIdentityRow {

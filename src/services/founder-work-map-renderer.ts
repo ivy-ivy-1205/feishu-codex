@@ -3,6 +3,8 @@ import { founderCard, founderSourceText, founderText, type FounderCardEvidence }
 
 export interface FounderWorkMapTopic extends Pick<CurrentTopic, 'id' | 'currentVersion' | 'displayName' | 'stage' | 'outcome'> {
   evidence: readonly FounderCardEvidence[];
+  linkedSourceCount?: number;
+  perspectives?: readonly { founder:'Ivy'|'James'|'双方';status:'current'|'historical'|'unresolved';statement:string;observedAt:string }[];
   supportingItems?: readonly {kind:'principle'|'artifact'|'research';displayName:string}[];
 }
 export interface FounderWorkMapInput {
@@ -52,7 +54,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
       throw new Error('valid work-map topic is required');
     }
     const suffix = topic.stage === 'paused' ? '（暂停）' : topic.stage === 'closed' ? '（已结束）' : '';
-    add(labels[topic.stage], `${founderText(topic.displayName, 80)}${suffix}${topic.outcome ? `\n目标：${founderText(topic.outcome, 160)}` : ''}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence)}`,
+    add(labels[topic.stage], `${founderText(topic.displayName, 80)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 160)}` : ''}${perspectivePreview(topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}`,
       { kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
   }
   for (const grouping of [...input.uncertainGrouping].sort(compareId)) {
@@ -92,7 +94,17 @@ function supportingPreview(items:readonly {kind:'principle'|'artifact'|'research
     .map(item=>`\n${labels[item.kind]}：${founderText(item.displayName,120)}`).join('');
 }
 
-function evidencePreview(evidence: readonly FounderCardEvidence[]): string {
+function perspectivePreview(items:NonNullable<FounderWorkMapTopic['perspectives']>):string{
+  const order={current:0,unresolved:1,historical:2} as const;
+  const labels={current:'当前共识',unresolved:'待对齐',historical:'历史提议'} as const;
+  return [...items].sort((a,b)=>order[a.status]-order[b.status]||a.observedAt.localeCompare(b.observedAt)||a.founder.localeCompare(b.founder)||a.statement.localeCompare(b.statement))
+    .map(item=>{const at=new Date(item.observedAt);if(!Number.isFinite(at.getTime()))throw new Error('valid perspective time is required');
+      return `\n${labels[item.status]}（${item.founder}，${at.toISOString().slice(0,10)}）：${founderText(item.statement,180)}`}).join('');
+}
+
+function evidencePreview(evidence: readonly FounderCardEvidence[],linkedSourceCount=0): string {
   const first = [...evidence].sort(compareId)[0];
-  return first ? `\n${founderSourceText(first)}${evidence.length > 1 ? `\n另有 ${evidence.length - 1} 条来源，完整来源保留在记录中。` : ''}` : '\n来源：待补充（不作为已确认共识）';
+  if(first)return `\n${founderSourceText(first)}${evidence.length > 1 ? `\n另有 ${evidence.length - 1} 条来源，完整来源保留在记录中。` : ''}`;
+  if(!Number.isSafeInteger(linkedSourceCount)||linkedSourceCount<0)throw new Error('valid linked source count is required');
+  return linkedSourceCount>0?`\n来源：已关联 ${linkedSourceCount} 个来源，暂无可展示摘录。`:'\n来源：待补充（不作为已确认共识）';
 }

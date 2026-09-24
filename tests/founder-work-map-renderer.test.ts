@@ -26,6 +26,22 @@ describe('founder work map cards', () => {
     expect(page!.itemRefs).toHaveLength(1);
   });
 
+  it('separates the current direction from historical proposals and unresolved viewpoints', () => {
+    const [page] = renderFounderWorkMap({ ...window, topics: [{ ...topic('a', 'active_project'),
+      outcome: '不承诺全场景、全量录音。', linkedSourceCount: 3,
+      perspectives: [
+        { founder: 'James', status: 'historical', statement: '所有真实业务场景开启录音。', observedAt: '2026-09-07T10:04:30.000Z' },
+        { founder: 'Ivy', status: 'unresolved', statement: '先验证 Open Home 录音。', observedAt: '2026-09-24T09:00:00.000Z' }
+      ]
+    }], uncertainGrouping: [], coverageGaps: [] });
+    const body = JSON.stringify(page!.card);
+    expect(body).toContain('当前方向：不承诺全场景、全量录音。');
+    expect(body).toContain('历史提议（James，2026-09-07）');
+    expect(body).toContain('待对齐（Ivy，2026-09-24）');
+    expect(body).toContain('已关联 3 个来源');
+    expect(body).not.toContain('目标：不承诺全场景、全量录音。');
+  });
+
   it('retains every lifecycle section, uncertain grouping and coverage gaps', () => {
     const pages = renderFounderWorkMap({ ...window,
       topics: ['active_project', 'project_candidate', 'exploring', 'idea', 'paused', 'closed'].map((stage, i) => topic(String(i), stage as FounderWorkMapTopic['stage'])),
