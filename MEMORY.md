@@ -1,5 +1,7 @@
 # MEMORY.md
 
+- 2026-09-24 Ivy 批准并完成 Founder V2 baseline D2。先新增并审计 baseline-only 镜像合同提交 `6653105`：镜像约91MB、非root、唯一入口为 baseline CLI、无Codex/Bridge/端口；构建后生产即时门仍通过。维护窗中 Bridge 停止后以 SQLite backup API 创建 `/opt/feishu-codex/backups/bridge.pre-founder-baseline-20260924T133949Z.sqlite`，完整性/外键检查通过；preview 精确返回 canonicalUpdates=5、sameAs=22、partOf=3、newTopics=1、applied=false，随后单事务 apply 返回同计数且 applied=true。写后为28个原始topics、18 perspectives、22 same_as、3 part_of、0 active jobs、0 pending outbox，数据库 integrity=ok、无外键违规；5个既有规范代表名称/状态/目标正确，closed EP00已关联原始文件来源，18条观点全部可达。Bridge恢复后 running/healthy、restart 0、health/ready 200，group delivery仍false。一次性镜像、上传包和构建目录已清理，备份保留；根盘约6.33GiB可用，另有623.7MB构建缓存但不构成阻断，未扩大清理。
+
 - 2026-09-24 Ivy 批准并完成 D1 后唯一清理项 `docker builder prune -af`：Build Cache 从248项/7.841GB（约4.794GB可回收）降为0；根盘可用从3,924,120KiB（约3.74GiB、94%使用）增至6,923,772KiB（约6.60GiB、89%使用），越过D2的6GiB安全门槛。未删除镜像标签、容器、数据卷或应用文件，Bridge全程 running/healthy、restart 0、health/ready 200。下一步可提交D2关闭态备份与baseline写入的一次性授权请求。
 
 - 2026-09-24 Founder V2 baseline D1 即时只读确认：生产 Bridge running/healthy、restart 0、health/ready 200；capture/analysis/worker=true、group delivery=false。SQLite 27 topics 的全部 ID/version 与 manifest 逐项一致，18 perspectives、0 relations、active batch/extraction/Todo=0、pending outbox=0，EP00 指定来源存在，integrity=ok、无外键输出，数据库 1,142,784 bytes、600 lighthouse:lighthouse；D1 业务门通过。唯一部署阻断是根盘仅约3.74GiB可用、94%使用，低于6GiB安全余量；`/opt/feishu-codex`仅142MiB，不是主因。Docker 报告 build cache 7.841GB（约4.794GB可回收）、镜像19.66GB（约6.949GB可回收）。本轮严格只读，未清理、备份、上传、停服或写库；进入D2前应先单独批准清理 build cache 并复测磁盘。
