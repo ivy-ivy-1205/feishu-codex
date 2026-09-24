@@ -157,6 +157,28 @@ function concurrentAppendHandle(
 }
 
 describe('TopicRepository', () => {
+  it('collapses only human-confirmed same_as components while preserving part_of children', () => {
+    const database = createSqliteDatabase(':memory:'); migrateDatabase(database.client);
+    const topics = new TopicRepository(database.client);
+    const first = topics.createTopic({ displayName: 'AI Native 房产业务', stage: 'active_project',
+      evidenceIds: [insertEvidence(database, 'canonical').evidenceId], createdAt: new Date('2026-09-01T00:00:00.000Z') });
+    const duplicate = topics.createTopic({ displayName: 'AI Native 房产服务', stage: 'project_candidate',
+      evidenceIds: [insertEvidence(database, 'duplicate').evidenceId], createdAt: new Date('2026-09-02T00:00:00.000Z') });
+    const child = topics.createTopic({ displayName: 'Smart Listing', stage: 'active_project',
+      evidenceIds: [insertEvidence(database, 'child').evidenceId], createdAt: new Date('2026-09-03T00:00:00.000Z') });
+    topics.addRelation({ fromTopicId: first.id, toTopicId: duplicate.id, relationType: 'same_as',
+      rationale: 'Ivy confirmed same project', createdAt: new Date('2026-09-04T00:00:00.000Z') });
+    topics.addRelation({ fromTopicId: child.id, toTopicId: first.id, relationType: 'part_of',
+      rationale: 'Ivy confirmed child project', createdAt: new Date('2026-09-04T00:00:00.000Z') });
+
+    expect(topics.listCurrentTopics()).toHaveLength(3);
+    expect(topics.listCanonicalTopics()).toEqual([
+      expect.objectContaining({ id: first.id, displayName: 'AI Native 房产业务',
+        evidenceIds: expect.arrayContaining([...first.evidenceIds, ...duplicate.evidenceIds]) }),
+      expect.objectContaining({ id: child.id, displayName: 'Smart Listing' })
+    ]);
+    database.close();
+  });
   it('appends immutable versions and moves only the current pointer', () => {
     const { database, repository } = createHarness();
     const evidence = insertEvidence(database, '1');

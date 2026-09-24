@@ -6,20 +6,24 @@ const proposal=(displayName:string,sourceId:string):TopicProposal=>({displayName
   confidence:'high',sourceIds:[sourceId],evidenceExcerpts:[{sourceId,excerpt:`${displayName} evidence`}],
   joinDecision:{kind:'new',topicId:null,confidence:'high',sharedTerms:[]},splitSuggestions:[]});
 
-it('applies Ivy authoritative corrections and keeps principles, research and completed artifacts out of the project layer',()=>{
+it('keeps EP00 as a closed B-line project while principles and research stay out of the project layer',()=>{
   const input:FounderStreamAnalysis={topics:[proposal('AI native 房产业务','s1'),proposal('情绪价值','s2'),
     proposal('EP00《挺好》｜剧本 V1.4-R1 候选稿','s3'),proposal('低干扰自动沉淀与工作对齐','s4'),
     proposal('VibeVoice','s5'),proposal('PropHero｜独立竞品主报告（第一轮）','s6')]};
   const result=projectFounderWorkMap(input,{items:input.topics.map((_,proposalIndex)=>({proposalIndex,kind:'project',
     lifecycle:'active',parentProposalIndex:null}))});
-  expect(Object.values(result.canonicalNames)).toEqual(expect.arrayContaining(['AI native 房产业务','AiJia Founder Alignment Room / AiJia 合伙人对齐室']));
+  expect(Object.values(result.canonicalNames)).toEqual(expect.arrayContaining(['AI native 房产业务',
+    'AiJia Founder Alignment Room / AiJia 合伙人对齐室','EP00《挺好》']));
   expect(result.supportingItems).toEqual(expect.arrayContaining([
     expect.objectContaining({displayName:'情绪价值',kind:'principle',parentDisplayName:'AI native 房产业务'}),
     expect.objectContaining({displayName:'PropHero｜独立竞品主报告（第一轮）',kind:'research',parentDisplayName:'AI native 房产业务'})
   ]));
-  expect(result.historyItems).toEqual([expect.objectContaining({displayName:'EP00《挺好》｜剧本 V1.4-R1 候选稿',kind:'artifact',lifecycle:'completed'})]);
+  expect(result.historyItems).toEqual([]);
   expect(result.researchInbox).toEqual([expect.objectContaining({displayName:'VibeVoice',kind:'research'})]);
   expect(result.analysis.topics[0]!.sourceIds).toEqual(['s1','s2','s6']);
+  expect(result.analysis.topics).toEqual(expect.arrayContaining([
+    expect.objectContaining({displayName:'EP00《挺好》｜剧本 V1.4-R1 候选稿',stage:'closed'})
+  ]));
 });
 
 it('fails closed when model classification omits or duplicates a proposal',()=>{
@@ -38,6 +42,7 @@ it('applies authoritative corrections to headings with markdown and document-tit
     lifecycle:'active' as const,parentProposalIndex:null}))});
   expect(Object.values(result.canonicalNames)).toEqual(expect.arrayContaining(['AI native 房产业务','AiJia Founder Alignment Room / AiJia 合伙人对齐室']));
   expect(result.supportingItems.map(item=>item.kind)).toEqual(['principle','research']);
-  expect(result.historyItems).toEqual([expect.objectContaining({kind:'artifact',lifecycle:'completed'})]);
+  expect(result.historyItems).toEqual([]);
+  expect(result.analysis.topics).toEqual(expect.arrayContaining([expect.objectContaining({displayName:'# EP00《挺好',stage:'closed'})]));
   expect(result.researchInbox).toEqual([expect.objectContaining({kind:'research',lifecycle:'unknown'})]);
 });

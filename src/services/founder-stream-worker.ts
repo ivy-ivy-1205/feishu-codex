@@ -389,7 +389,7 @@ export function buildFounderStreamInput(sources: ContextSourceRepository, topics
   }
   if(selected.size===0)return {sources:[],currentTopics:[]};
   const currentTopics: FounderStreamCurrentTopic[] = [];
-  for (const topic of topics.listCurrentTopics().slice(-200)) {
+  for (const topic of topics.listCanonicalTopics().slice(-200)) {
     // Filter first: a legacy/unknown author on one evidence item must not hide
     // independently trusted evidence attached to the same topic.
     const full = topic.evidenceIds.map(id => sources.getEvidence(id)).filter(e => e !== null)

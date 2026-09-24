@@ -201,6 +201,39 @@ export class TopicRepository {
     return rows.map(toCurrentTopic);
   }
 
+  /** Collapse only explicit same_as components; directional part_of relations remain visible. */
+  listCanonicalTopics(): CurrentTopic[] {
+    const topics = this.listCurrentTopics();
+    const byId = new Map(topics.map((topic) => [topic.id, topic]));
+    const parent = new Map(topics.map((topic) => [topic.id, topic.id]));
+    const find = (id: string): string => {
+      const current = parent.get(id)!;
+      if (current === id) return id;
+      const root = find(current); parent.set(id, root); return root;
+    };
+    const join = (left: string, right: string) => {
+      const a = find(left), b = find(right);
+      if (a === b) return;
+      const first = byId.get(a)!, second = byId.get(b)!;
+      const canonical = first.createdAt.localeCompare(second.createdAt) <= 0 ? a : b;
+      parent.set(canonical === a ? b : a, canonical);
+    };
+    for (const relation of this.listRelations()) {
+      if (relation.relationType === 'same_as' && byId.has(relation.fromTopicId) && byId.has(relation.toTopicId)) {
+        join(relation.fromTopicId, relation.toTopicId);
+      }
+    }
+    const components = new Map<string, CurrentTopic[]>();
+    for (const topic of topics) {
+      const root = find(topic.id);
+      components.set(root, [...(components.get(root) ?? []), topic]);
+    }
+    return topics.filter((topic) => find(topic.id) === topic.id).map((canonical) => {
+      const component = components.get(canonical.id) ?? [canonical];
+      return { ...canonical, evidenceIds: [...new Set(component.flatMap((topic) => topic.evidenceIds))] };
+    });
+  }
+
   listVersions(topicId: string): TopicVersion[] {
     return (this.client.prepare(`
       SELECT * FROM context_topic_versions

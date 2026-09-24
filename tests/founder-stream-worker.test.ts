@@ -113,6 +113,32 @@ describe('founder stream durable wiring', () => {
     expect(perspectiveEvidenceIds).not.toContain('ctxev_legacy');
     await h.app.close();h.db.close();
   });
+  it('supplies one canonical topic per confirmed same_as component and keeps part_of children separate', async () => {
+    const h = harness();
+    const capture = (id:string,text:string) => h.sources.saveSource(captureGroupMessageSource({ chatId:chat,
+      messageId:id,threadId:null,rootId:null,author:{openId:'ou_ivy',displayName:null},senderType:'user',
+      messageType:'text',text,occurredAt:start.toISOString() },start).source).source;
+    const motherSource=capture('om_mother','AI Native 房产业务');
+    const duplicateSource=capture('om_duplicate','AI Native 房产服务');
+    const childSource=capture('om_child','Smart Listing');
+    const fresh=capture('om_fresh','继续推进 Smart Listing');
+    const mother=h.topics.createTopic({displayName:'AI Native 房产业务',stage:'active_project',
+      evidenceIds:[saveFounderEvidence(h.sources,motherSource.id,motherSource.contentText,start)],createdAt:start});
+    const duplicate=h.topics.createTopic({displayName:'AI Native 房产服务',stage:'active_project',
+      evidenceIds:[saveFounderEvidence(h.sources,duplicateSource.id,duplicateSource.contentText,start)],createdAt:new Date(start.getTime()+1)});
+    const child=h.topics.createTopic({displayName:'Smart Listing',stage:'active_project',
+      evidenceIds:[saveFounderEvidence(h.sources,childSource.id,childSource.contentText,start)],createdAt:new Date(start.getTime()+2)});
+    h.topics.addRelation({fromTopicId:mother.id,toTopicId:duplicate.id,relationType:'same_as',rationale:'confirmed',createdAt:start});
+    h.topics.addRelation({fromTopicId:child.id,toTopicId:mother.id,relationType:'part_of',rationale:'confirmed',createdAt:start});
+
+    const built=buildFounderStreamInput(h.sources,h.topics,[fresh.id],chat);
+
+    expect(built.currentTopics).toHaveLength(2);
+    expect(built.currentTopics.map(topic=>topic.id)).toEqual([mother.id,child.id]);
+    expect(built.currentTopics.find(topic=>topic.id===mother.id)?.evidenceExcerpts.map(item=>item.sourceId))
+      .toEqual(expect.arrayContaining([motherSource.id,duplicateSource.id]));
+    await h.app.close();h.db.close();
+  });
   it('applies semantic classification before persisting the active project map', async () => {
     const h=harness();
     const rows=['AI native 房产业务','VibeVoice'].map((text,index)=>h.sources.saveSource(captureGroupMessageSource({chatId:chat,
