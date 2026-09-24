@@ -72,11 +72,16 @@ function validateGroupMessageEvidenceLocator(
   const storedMessageId = typeof source.metadata.messageId === 'string'
     ? source.metadata.messageId
     : source.externalId;
+  const attachmentTitle = typeof source.metadata.attachmentTitle === 'string'
+    ? source.metadata.attachmentTitle.trim()
+    : '';
+  const legacyAttachmentIdentity = Boolean(attachmentTitle) && locator.messageId === source.externalId &&
+    (source.externalId === `${storedMessageId}:file` || source.externalId.startsWith(`${storedMessageId}:file:`));
   const authorMatches = source.authors?.some((author) =>
     (typeof author.openId === 'string' ? author.openId : null) === locator.authorOpenId
   ) ?? false;
   if (source.sourceType !== 'group_message' || source.metadata.chatId !== locator.chatId ||
-    storedMessageId !== locator.messageId || source.externalId !== locator.messageId ||
+    (!legacyAttachmentIdentity && storedMessageId !== locator.messageId) || source.externalId !== locator.messageId ||
     storedThreadId !== locator.threadId || source.occurredAt !== locator.occurredAt ||
     !authorMatches || !excerpt.trim() || !source.contentText.includes(excerpt)) {
     throw new Error('CONTEXT_EVIDENCE_LOCATOR_INVALID');

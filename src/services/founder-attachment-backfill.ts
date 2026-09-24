@@ -26,7 +26,7 @@ export async function persistFounderAttachmentBackfill(input:FounderAttachmentBa
       const suffix=sha256(`${file.messageId}\n${file.title}`).slice(0,16),externalId=`${file.messageId}:file:${suffix}`;
       const captured=captureGroupMessageSource({chatId:input.chatId,messageId:externalId,threadId:anchor.threadId??null,rootId:anchor.rootId??null,
         author:{openId:anchor.senderId??null,displayName:null},senderType:'user',messageType:'file',text:assembled.contentText,occurredAt:anchor.createdAt},input.now);
-      captured.source.metadata={...captured.source.metadata,messageId:file.messageId,attachmentTitle:file.title,mimeType:file.mimeType,
+      captured.source.metadata={...captured.source.metadata,sourceMessageId:file.messageId,attachmentTitle:file.title,mimeType:file.mimeType,
         contextMessageIds:assembled.contextMessageIds};captured.source.rawTextExpiresAt=new Date(input.now.getTime()+90*24*60*60_000);
       const saved=input.sourceRepository.saveSource(captured.source);if(saved.created)sourcesCreated++;
       parsedSources.push({id:saved.source.id,chars:saved.source.contentText.length});filesParsed++;

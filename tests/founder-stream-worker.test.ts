@@ -232,7 +232,8 @@ describe('founder stream durable wiring', () => {
     await h.runtime.runOnce();expect(reads).toBe(1);
     const parsed=h.sources.listSources().find(source=>source.externalId==='om_file:file');
     expect(parsed).toMatchObject({sourceType:'group_message',contentText:'# 方案\n合伙人对齐室',availabilityStatus:'available',
-      rawTextExpiresAt:'2026-12-20T00:00:00.000Z',metadata:{chatId:chat,messageId:'om_file',messageType:'file',senderType:'user',attachmentTitle:'brief.md'}});
+      rawTextExpiresAt:'2026-12-20T00:00:00.000Z',metadata:{chatId:chat,messageId:'om_file:file',sourceMessageId:'om_file',
+        messageType:'file',senderType:'user',attachmentTitle:'brief.md'}});
     expect(JSON.stringify(h.sources.listSources())).not.toContain('secret_file_key');
     expect(h.jobs.list()).toEqual(expect.arrayContaining([expect.objectContaining({kind:'capture_group_message',sourceIds:[parsed!.id]})]));
     await h.app.close();h.db.close();

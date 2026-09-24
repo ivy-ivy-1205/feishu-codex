@@ -62,6 +62,16 @@ describe('context evidence locators', () => {
     expect(validateContextEvidenceLocator(groupSource, '页面预览', groupLocator)).toEqual(groupLocator);
   });
 
+  it('accepts the legacy attachment source/message identity split only for a bound attachment source', () => {
+    const source = { ...groupSource, externalId: 'om_1:file:abc123',
+      metadata: { ...groupSource.metadata, attachmentTitle: 'brief.docx' } };
+    const locator = { ...groupLocator, messageId: source.externalId };
+
+    expect(validateContextEvidenceLocator(source, '页面预览', locator)).toEqual(locator);
+    expect(() => validateContextEvidenceLocator({ ...source, externalId: 'unrelated' }, '页面预览', locator))
+      .toThrow('CONTEXT_EVIDENCE_LOCATOR_INVALID');
+  });
+
   it.each([
     ['source version', { sourceVersion: 2 }],
     ['content hash', { contentHash: 'f'.repeat(64) }],

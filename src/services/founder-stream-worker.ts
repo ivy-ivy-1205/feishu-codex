@@ -146,7 +146,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           const captured=captureGroupMessageSource({chatId:job.chatId,messageId:`${job.messageId}:file`,threadId:job.threadId,rootId:null,
             author:{openId:job.authorOpenId,displayName:null},messageType:'file',senderType:'user',text,occurredAt:job.occurredAt},stamp);
           captured.source.externalId=`${job.messageId}:file`;captured.source.logicalKey=`feishu:chat:${job.chatId}:message:${job.messageId}:file`;
-          captured.source.metadata={...captured.source.metadata,messageId:job.messageId,attachmentTitle:job.fileName,mimeType:resource.mimeType};
+          captured.source.metadata={...captured.source.metadata,sourceMessageId:job.messageId,
+            attachmentTitle:job.fileName,mimeType:resource.mimeType};
           captured.source.rawTextExpiresAt=new Date(stamp.getTime()+90*24*60*60_000);
           const source=sources.saveSource(captured.source).source;
           options.jobRepository.enqueueGroupCapture({messageId:`${job.messageId}:file`,chatId:job.chatId,sourceIds:[source.id],threadId:job.threadId,capturedAt:stamp});
