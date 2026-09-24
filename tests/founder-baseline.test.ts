@@ -37,11 +37,14 @@ describe('applyFounderBaseline',()=>{
       expect.objectContaining({canonical:expect.objectContaining({id:'topic_4d3df2c0792480acf4913b2fea8e42de',version:4,
         outcome:expect.stringContaining('全程、全量、清晰录音')})}),
       expect.objectContaining({canonical:expect.objectContaining({id:'topic_ecedcaad5562d2e3c4da11ffe7644897',version:2,
-        name:'Amy / Smart Listing L008｜27 Cecil Street 样板'})})
+        name:'Amy / Smart Listing L008｜27 Cecil Street 样板'})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_b444894dc07610a23c731278cdd958f1',version:1,
+        name:'EP00《挺好》',stage:'closed',outcome:expect.stringContaining('已经发布')})})
     ]));
     expect(manifest.newTopics).toEqual(expect.arrayContaining([
       expect.objectContaining({key:'media_line',name:'自媒体生产线',stage:'active_project'}),
-      expect.objectContaining({key:'mortgage_40',name:'40 年房贷口播稿',stage:'closed',
+      expect.objectContaining({key:'mortgage_40',name:'40 年超长期房贷',stage:'active_project',
+        outcome:expect.stringMatching(/可发布状态.*尚未发布/u),
         sourceIds:['ctxsrc_21d5148d3f1b42b9019a15a3a62c3fac']})
     ]));
     expect(manifest.newPartOf).toHaveLength(2);

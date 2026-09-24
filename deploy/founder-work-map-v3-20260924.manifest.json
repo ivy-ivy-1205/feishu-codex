@@ -20,6 +20,16 @@
         "outcome": "作为 Amy / Smart Listing 的 L008 样板，使用 27 Cecil Street 验证空间浏览、Amy 陪看与真实房源资料协作。"
       },
       "duplicates": []
+    },
+    {
+      "canonical": {
+        "id": "topic_b444894dc07610a23c731278cdd958f1",
+        "version": 1,
+        "name": "EP00《挺好》",
+        "stage": "closed",
+        "outcome": "EP00《挺好》已经发布，本内容项目已关闭。"
+      },
+      "duplicates": []
     }
   ],
   "partOf": [
@@ -38,9 +48,9 @@
     },
     {
       "key": "mortgage_40",
-      "name": "40 年房贷口播稿",
-      "stage": "closed",
-      "outcome": "围绕澳洲 40 年房贷的口播稿已完成并完成 review。",
+      "name": "40 年超长期房贷",
+      "stage": "active_project",
+      "outcome": "相关内容已经完成并达到可发布状态，但尚未发布；下一步是完成发布。",
       "sourceIds": ["ctxsrc_21d5148d3f1b42b9019a15a3a62c3fac"]
     }
   ],

@@ -1,7 +1,7 @@
 # Founder 工作地图 V3 生产变更单
 
 日期：2026-09-24  
-状态：Ivy 已确认业务修正；本地实现与验证进行中；生产尚未写入
+状态：Ivy 已确认业务修正；本地实现与验证完成；生产尚未写入
 
 ## 1. 本次修正
 
@@ -16,8 +16,8 @@
 ### B 线：自媒体生产线
 
 - 新建顶层 `自媒体生产线`，状态为 `active_project`。
-- `EP00《挺好》` 保持 `closed`，增加 `part_of → 自媒体生产线`。
-- 新建 `40 年房贷口播稿`，状态为 `closed`，增加 `part_of → 自媒体生产线`。
+- `EP00《挺好》` 保持 `closed`，明确记录为“已经发布”，增加 `part_of → 自媒体生产线`。
+- 新建 `40 年超长期房贷`，状态为 `active_project`：内容已经完成并达到可发布状态，但尚未发布；增加 `part_of → 自媒体生产线`。
 - 后续明确属于自媒体的口播稿、视频号/短视频内容和内容生产素材，作为 B 线子项目处理；不归入 A 线房产业务。
 
 ### Amy / Smart Listing L008
@@ -34,7 +34,7 @@
 - 2026-08-21 08:02:20Z，Ivy 分享 SBS 中文“40 年超长期房贷”选题链接并明确其自媒体地产内容方向；消息 ID：`om_x100b67b42e0a3cb0c3756e6ece67c14`。
 - 2026-08-21 16:16:41Z，James 在同一群的回复中给出完成 review 的 40 年房贷口播稿；消息 ID：`om_x100b67b3d05feca4b25037e0475f92c`。
 
-生产只需持久化第一条 Ivy 原始选题消息作为该 closed 子项目的可追溯来源；不需要把 2026 年全部 1,956 条历史重新写入数据库。
+生产只需持久化第一条 Ivy 原始选题消息作为该 active 子项目的可追溯来源；不需要把 2026 年全部 1,956 条历史重新写入数据库。
 
 ## 3. 本地实现边界
 
@@ -59,8 +59,8 @@
 
 计划写入：
 
-- 追加 2 个规范版本：销售过程数据沉淀、27 Cecil Street。
-- 新建 2 个项目：自媒体生产线、40 年房贷口播稿。
+- 追加 3 个规范版本：销售过程数据沉淀、27 Cecil Street、EP00《挺好》（明确已经发布）。
+- 新建 2 个项目：自媒体生产线、40 年超长期房贷。
 - 新增 3 条 `part_of`：27 Cecil → Amy；EP00 → 自媒体生产线；40 年房贷 → 自媒体生产线。
 - 0 删除、0 `same_as`、0 观点改写、0 群消息发送。
 
@@ -88,7 +88,7 @@
    - 不调用 Codex；
    - 不发送群消息。
 4. 验证目标来源 ID 为 `ctxsrc_21d5148d3f1b42b9019a15a3a62c3fac`，原文保留期为 90 天。
-5. 运行 V3 baseline `--preview`，预期：canonicalUpdates=2、newTopics=2、partOf=3、sameAs=0、applied=false。
+5. 运行 V3 baseline `--preview`，预期：canonicalUpdates=3、newTopics=2、partOf=3、sameAs=0、applied=false。
 6. 再运行 `--apply`，所有变更在一个事务中完成。
 
 ### D3：写后验证与恢复
@@ -98,7 +98,7 @@
 - active jobs = 0，pending outbox = 0。
 - 旧 topic/version/evidence/perspective 均存在。
 - A 线、B 线、合伙人对齐室三条顶层结构正确。
-- `27 Cecil Street` 只归属 Amy / Smart Listing；EP00 与 40 年房贷只归属自媒体生产线。
+- `27 Cecil Street` 只归属 Amy / Smart Listing；已发布且 closed 的 EP00 与尚未发布且 active 的 40 年超长期房贷只归属自媒体生产线。
 - 群发送仍为 false。
 - 恢复 Bridge 后检查 health/ready、restart count 和短时稳定性。
 
@@ -113,4 +113,3 @@
 - preview/apply 数字与预期不一致；
 - 出现多父级、错误 A/B 线归属或原历史对象缺失；
 - Bridge 恢复后不健康或出现新增失败任务。
-
