@@ -1,5 +1,7 @@
 # MEMORY.md
 
+- 2026-09-24 Ivy 批准并完成 D1 后唯一清理项 `docker builder prune -af`：Build Cache 从248项/7.841GB（约4.794GB可回收）降为0；根盘可用从3,924,120KiB（约3.74GiB、94%使用）增至6,923,772KiB（约6.60GiB、89%使用），越过D2的6GiB安全门槛。未删除镜像标签、容器、数据卷或应用文件，Bridge全程 running/healthy、restart 0、health/ready 200。下一步可提交D2关闭态备份与baseline写入的一次性授权请求。
+
 - 2026-09-24 Founder V2 baseline D1 即时只读确认：生产 Bridge running/healthy、restart 0、health/ready 200；capture/analysis/worker=true、group delivery=false。SQLite 27 topics 的全部 ID/version 与 manifest 逐项一致，18 perspectives、0 relations、active batch/extraction/Todo=0、pending outbox=0，EP00 指定来源存在，integrity=ok、无外键输出，数据库 1,142,784 bytes、600 lighthouse:lighthouse；D1 业务门通过。唯一部署阻断是根盘仅约3.74GiB可用、94%使用，低于6GiB安全余量；`/opt/feishu-codex`仅142MiB，不是主因。Docker 报告 build cache 7.841GB（约4.794GB可回收）、镜像19.66GB（约6.949GB可回收）。本轮严格只读，未清理、备份、上传、停服或写库；进入D2前应先单独批准清理 build cache 并复测磁盘。
 
 - 2026-09-24 Founder V2 baseline D0 本地实现完成：新增只读 `same_as` 连通分量观点投影，按 founder perspective kind + decision key 保留不同议题并以最新证据时间去重；新增强校验的一次性 baseline manifest/CLI，preview 零写入、apply 单事务，任何 topic/version/count/source 漂移整体 fail closed。已固化生产精确 manifest：预期27 topics、18 perspectives、0 relations，更新5个规范代表、新建1个 closed EP00、22 same_as、3 part_of；不会删除历史。全量88个测试文件/758项测试、typecheck、build、diff check通过；尚未上传、部署或修改生产。
