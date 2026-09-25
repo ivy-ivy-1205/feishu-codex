@@ -60,4 +60,11 @@ describe('current founder work map publisher',()=>{
     expect(()=>buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-09-24T00:00:00Z',approvedChatIds:[],expectedCanonicalTopicCount:2})).toThrow(/CHAT_NOT_APPROVED/);
     expect(()=>buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-09-24T00:00:00Z',approvedChatIds:[chatId],expectedCanonicalTopicCount:9})).toThrow(/TOPIC_COUNT_MISMATCH/);
   });
+  it('refuses a manual publish while another delivery is pending',()=>{
+    const h=fixture();
+    h.db.client.prepare(`INSERT INTO outbox(id,destination,payload,idempotency_key,status,created_at)
+      VALUES('pending-fixture',?,'{}','pending-fixture','pending','2026-09-24T00:00:00Z')`).run(chatId);
+    expect(()=>enqueueCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-09-24T00:00:00Z',
+      approvedChatIds:[chatId],expectedCanonicalTopicCount:2,confirmedChatId:chatId,groupDeliveryEnabled:true})).toThrow(/QUEUE_NOT_IDLE/);
+  });
 });

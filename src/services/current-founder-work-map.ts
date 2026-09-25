@@ -55,6 +55,9 @@ export function enqueueCurrentFounderWorkMap(input:CurrentFounderWorkMapInput&{
 }):CurrentFounderWorkMapResult&{created:number}{
   if(!input.groupDeliveryEnabled)throw new Error('FOUNDER_WORK_MAP_DELIVERY_DISABLED');
   if(input.confirmedChatId!==input.chatId)throw new Error('FOUNDER_WORK_MAP_TARGET_NOT_CONFIRMED');
+  const pending=(input.client.prepare("SELECT count(*) AS count FROM outbox WHERE status='pending'").get() as {count:number}).count;
+  const active=(input.client.prepare("SELECT count(*) AS count FROM batch_jobs WHERE status IN ('queued','retry','processing')").get() as {count:number}).count;
+  if(pending!==0||active!==0)throw new Error('FOUNDER_WORK_MAP_QUEUE_NOT_IDLE');
   const result=buildCurrentFounderWorkMap(input),outbox=new OutboxRepository(input.client);
   const created=input.client.transaction(()=>result.cards.reduce((count,card)=>count+Number(outbox.enqueueFounderWorkMap({
     ...card,mapId:result.mapId,targetChatId:input.chatId
