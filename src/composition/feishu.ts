@@ -7,6 +7,7 @@ import {
   createFeishuSdkClient,
   FeishuSdkApiClient,
   FeishuSdkAttachmentReader,
+  FeishuSdkContextClient,
   type FeishuSdkClientLike,
   type FeishuSdkClientOptions
 } from '../adapters/feishu-sdk.js';
@@ -22,6 +23,7 @@ export interface FeishuIntegration {
   reader: FeishuMinutesReaderAdapter;
   delivery: FeishuMessageDeliveryAdapter;
   attachmentReader: FeishuSdkAttachmentReader;
+  contextClient: FeishuSdkContextClient;
 }
 
 export interface CreateFeishuIntegrationOptions {
@@ -63,12 +65,14 @@ export function createFeishuIntegration(
   });
   const delivery = new FeishuMessageDeliveryAdapter(apiClient);
   const attachmentReader = new FeishuSdkAttachmentReader(sdkClient);
+  const contextClient = new FeishuSdkContextClient(sdkClient);
 
   if (options.exposeInternalsForTest) {
     return {
       reader,
       delivery,
       attachmentReader,
+      contextClient,
       sdkClient,
       apiClient
     };
@@ -77,6 +81,7 @@ export function createFeishuIntegration(
   return {
     reader,
     delivery,
-    attachmentReader
+    attachmentReader,
+    contextClient
   };
 }

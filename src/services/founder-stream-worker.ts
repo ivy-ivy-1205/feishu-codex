@@ -38,13 +38,15 @@ export interface FounderPerspectiveAnalysisPort {
 }
 export interface FounderStreamRoute { ingest(envelope: unknown): Record<string, unknown> | null }
 export interface FounderStreamOptions {
-  client: Database.Database; jobRepository: JobRepository; flags: Omit<AppConfig['founderStream'],'manualQueryEnabled'> & {manualQueryEnabled?:boolean};
+  client: Database.Database; jobRepository: JobRepository; flags: Omit<AppConfig['founderStream'],'manualQueryEnabled'|'dailyReconciliationEnabled'> &
+    {manualQueryEnabled?:boolean;dailyReconciliationEnabled?:boolean};
   approvedChatIds: readonly string[]; ivyPrivateChatId: string; analyzer?: FounderStreamAnalyzer;
   classifier?: { classify(analysis: Awaited<ReturnType<FounderStreamAnalyzer['analyze']>>): Promise<FounderWorkMapClassification> };
   attachmentReader?: { read(input:{messageId:string;fileKey:string;fileName:string}):Promise<{body:Buffer;mimeType:string}> };
   perspectiveAnalyzer?: FounderPerspectiveAnalysisPort;
   now?: () => Date; intervalMs?: number;
   policy?: Pick<AlignmentNotificationPolicy, 'reconcilePending'>;
+  dailyReconciliation?:{run(input:{since:string;until:string;now:Date}):Promise<unknown>};
   delivery?: { sendTextMessage(input: { chatId: string; text: string; idempotencyKey?: string }): Promise<{ messageId: string }>;
     sendInteractiveCard(input: { chatId: string; card: Record<string, unknown>; idempotencyKey?: string }): Promise<{ messageId: string }> };
 }
@@ -61,6 +63,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   if (options.flags.analysisEnabled && !options.flags.captureEnabled) throw new Error('analysis requires capture');
   if (options.flags.groupDeliveryEnabled && (!options.flags.captureEnabled || !options.flags.analysisEnabled)) throw new Error('delivery requires capture and analysis');
   if (options.flags.manualQueryEnabled && (!options.flags.captureEnabled || !options.flags.analysisEnabled)) throw new Error('manual query requires capture and analysis');
+  if (options.flags.dailyReconciliationEnabled && !options.dailyReconciliation) throw new Error('daily reconciliation runner is required');
   const now = options.now ?? (() => new Date());
   const sources = new ContextSourceRepository(options.client), topics = new TopicRepository(options.client);
   const outbox = new OutboxRepository(options.client);
@@ -68,6 +71,9 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   const perspectiveReconciler = new PerspectiveReconciler(perspectives);
   const notificationPolicy = new AlignmentNotificationPolicy(new AlignmentIssueRepository(options.client), perspectives, outbox);
   const policy = options.policy ?? new AlignmentNotificationPolicy(new AlignmentIssueRepository(options.client), new AlignmentRepository(options.client), outbox);
+  const dayMs=24*60*60*1_000;
+  const latestAudit=latestGroupCoverageAt(options.client,approvedGroup);
+  let nextDailyReconciliationAt=latestAudit===undefined?now().getTime():latestAudit+dayMs;
   const allowed = (chatId: string) => chatId === approvedGroup && options.approvedChatIds.includes(chatId);
   const route: FounderStreamRoute = { ingest(raw) {
     const chatId = (raw as { event?: { message?: { chat_id?: string } } })?.event?.message?.chat_id;
@@ -327,6 +333,11 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   const supportedKinds: FounderDurableJob['kind'][] = !options.flags.captureEnabled ? [] : options.flags.analysisEnabled ?
     ['capture_group_message','capture_founder_attachment','analyze_founder_stream_batch'] : ['capture_group_message','capture_founder_attachment'];
   const afterTick = async () => {
+      if(options.flags.dailyReconciliationEnabled&&options.dailyReconciliation&&now().getTime()>=nextDailyReconciliationAt){
+        const stamp=now();nextDailyReconciliationAt=stamp.getTime()+dayMs;
+        try{await options.dailyReconciliation.run({since:new Date(stamp.getTime()-dayMs).toISOString(),until:stamp.toISOString(),now:stamp})}
+        catch{/* A failed daily audit waits until the next daily window; history reads persist their own safe gaps. */}
+      }
       if (!options.flags.analysisEnabled) return;
       if (allowed(approvedGroup)) recoverGroupAnalysis();
       // The immutable source survives an enqueue failure. Stable source-set keys
@@ -566,6 +577,14 @@ function parseTime(value:string):string|null {
 }
 function normalizeTopicName(value:string):string {
   return value.normalize('NFKC').toLocaleLowerCase('und').replace(/[\p{P}\p{S}\s]+/gu,'');
+}
+function latestGroupCoverageAt(client:Database.Database,chatId:string):number|undefined{
+  const rows=client.prepare("SELECT captured_at,metadata_json FROM context_sources WHERE source_type='feishu_sync_coverage' ORDER BY captured_at DESC")
+    .all() as {captured_at:string;metadata_json:string}[];
+  for(const row of rows)try{if((JSON.parse(row.metadata_json) as {chatId?:unknown}).chatId===chatId){
+    const value=Date.parse(row.captured_at);if(Number.isFinite(value))return value;
+  }}catch{/* Malformed audit metadata cannot suppress a future reconciliation. */}
+  return undefined;
 }
 function messageText(type:string,content:string):string|null {
   try {

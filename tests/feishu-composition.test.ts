@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FeishuMessageDeliveryAdapter, FeishuMinutesReaderAdapter } from '../src/adapters/feishu.js';
-import { FeishuSdkApiClient, type FeishuSdkClientLike } from '../src/adapters/feishu-sdk.js';
+import { FeishuSdkApiClient, FeishuSdkContextClient, type FeishuSdkClientLike } from '../src/adapters/feishu-sdk.js';
 import { createFeishuIntegration } from '../src/composition/feishu.js';
 
 const baseConfig = {
@@ -31,6 +31,7 @@ describe('createFeishuIntegration', () => {
     expect(stack.reader).toBeInstanceOf(FeishuMinutesReaderAdapter);
     expect(stack.delivery).toBeInstanceOf(FeishuMessageDeliveryAdapter);
     expect(stack.apiClient).toBeInstanceOf(FeishuSdkApiClient);
+    expect(stack.contextClient).toBeInstanceOf(FeishuSdkContextClient);
     expect(stack.sdkClient).toBe(sdkClient);
   });
 
@@ -42,6 +43,7 @@ describe('createFeishuIntegration', () => {
 
     expect(integration.reader).toBeInstanceOf(FeishuMinutesReaderAdapter);
     expect(integration.delivery).toBeInstanceOf(FeishuMessageDeliveryAdapter);
+    expect(integration.contextClient).toBeInstanceOf(FeishuSdkContextClient);
     expect('apiClient' in integration).toBe(false);
     expect('sdkClient' in integration).toBe(false);
   });

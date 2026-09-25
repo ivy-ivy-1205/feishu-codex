@@ -99,6 +99,23 @@ describe('founder stream backfill', () => {
     await backfill.runFounderStreamBackfill({ chatId, since, now, feishu, ...deps, dryRun: false });
     expect(deps.sourceRepository.listSources().filter((source) => source.sourceType === 'group_message')).toHaveLength(2);
   });
+  it('daily reconciliation only queues sources that were not already captured by webhook or an earlier audit',async()=>{
+    const deps=repositories();
+    const make=(items:unknown[])=>sdkHistoryFixture({has_more:false,items});
+    const first={message_id:'already_seen',msg_type:'text',create_time:String(Date.parse('2026-09-01T00:00:00.000Z')),
+      sender:{id:'ou_ivy',id_type:'open_id'},body:{content:JSON.stringify({text:'already persisted'})}};
+    await backfill.runFounderStreamBackfill({chatId,since,now,feishu:make([first]),...deps,dryRun:false});
+    const second={message_id:'missed_webhook',msg_type:'text',create_time:String(Date.parse('2026-09-02T00:00:00.000Z')),
+      sender:{id:'ou_james',id_type:'open_id'},body:{content:JSON.stringify({text:'newly recovered'})}};
+    const report=await backfill.runFounderStreamBackfill({chatId,since,now:new Date('2026-09-20T00:01:00.000Z'),
+      feishu:make([first,second]),...deps,dryRun:false});
+    expect(report.sourcesCreated).toBe(1);
+    const jobs=deps.db.client.prepare("SELECT payload FROM batch_jobs WHERE type='analyze_founder_stream_batch' ORDER BY created_at").all() as {payload:string}[];
+    expect(jobs).toHaveLength(2);
+    const latest=JSON.parse(jobs[1]!.payload) as {sourceIds:string[]};
+    expect(latest.sourceIds).toHaveLength(1);
+    expect(deps.sourceRepository.getSource(latest.sourceIds[0]!)?.externalId).toBe('missed_webhook');
+  });
   it('requires an explicit exact window, pages roots and threads, deduplicates and persists immutable sources', async () => {
     const deps = repositories();
     const { feishu, requests } = fixture();

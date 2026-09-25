@@ -42,6 +42,7 @@ describe('founder manual queries',()=>{
     const payload=JSON.parse(row.payload);
     expect(payload.kind).toBe('founder_manual_query');
     expect(JSON.stringify(payload.card)).toContain('处理状态');
+    expect(JSON.stringify(payload.card)).toContain('最后防漏复核');
     expect(JSON.stringify(payload.card)).toContain('待处理');
     expect(JSON.stringify(payload.card)).toContain('未补偿失败');
     db.close();
@@ -96,8 +97,8 @@ describe('founder manual queries',()=>{
     const message=buildFounderManualQueryMessages({client:db.client,query:{kind:'topic_alignment',topicName:'Smart Listing'},
       queryMessageId:'om_q',chatId,approvedChatIds:[chatId],now:at})[0]!;
     const body=JSON.stringify(message.card);
-    expect(body).toContain('Ivy 的理解');
-    expect(body).toContain('缺少 James 的明确表达');
+    expect(body).toContain('Ivy 的当前个人理解');
+    expect(body).toContain('缺少 James 的当前表达');
     expect(body).toContain('暂无双方明确确认的共识');
     expect(body).not.toContain('当前共识：先验证房源页面');
     db.close();
@@ -108,7 +109,37 @@ describe('founder manual queries',()=>{
     new TopicRepository(db.client).createTopic({displayName:'空白项目',stage:'idea',createdAt:at});
     const body=JSON.stringify(buildFounderManualQueryMessages({client:db.client,query:{kind:'topic_alignment',topicName:'空白项目'},
       queryMessageId:'om_empty',chatId,approvedChatIds:[chatId],now:at})[0]!.card);
-    expect(body).toContain('缺少双方的明确表达');
+    expect(body).toContain('缺少双方的当前表达');
+    db.close();
+  });
+
+  it('treats an Ivy-confirmed baseline as confirmed structure and an older founder statement as history',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    const topics=new TopicRepository(db.client),alignment=new AlignmentRepository(db.client),sources=new ContextSourceRepository(db.client);
+    alignment.configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:at});
+    alignment.configureFounderIdentity({founder:'james',sourceSystem:'feishu',externalAuthorId:'ou_james',configuredAt:at});
+    const old=captureGroupMessageSource({chatId,messageId:'om_old_status',threadId:null,rootId:null,
+      author:{openId:'ou_james',displayName:null},senderType:'user',messageType:'text',text:'未接入账号，未部署。',
+      occurredAt:'2026-09-10T00:00:00.000Z'},new Date('2026-09-10T00:00:00.000Z'));
+    const source=sources.saveSource(old.source).source;
+    const evidence=sources.saveEvidence({sourceId:source.id,excerpt:'未接入账号，未部署。',locator:{...old.messageLocator,
+      sourceVersion:source.sourceVersion,contentHash:source.contentHash},evidenceLevel:'primary_statement',capturedAt:new Date('2026-09-10T00:00:00.000Z')}).evidence.id;
+    const topic=topics.createTopic({displayName:'AiJia 合伙人对齐室',stage:'active_project',outcome:'系统已经进入影子运行',
+      rationale:'Ivy confirmed Founder work map baseline',evidenceIds:[evidence],createdAt:new Date('2026-09-24T00:00:00.000Z')});
+    alignment.savePerspective({topicId:topic.id,kind:'james_view',expectedVersion:0,statement:'未接入账号，未部署。',confidence:1,
+      evidenceIds:[evidence],decisionKey:'status',speechAct:'view',observedAt:new Date('2026-09-10T00:00:00.000Z')});
+    const body=JSON.stringify(buildFounderManualQueryMessages({client:db.client,query:{kind:'topic_alignment',topicName:'AiJia 合伙人对齐室'},
+      queryMessageId:'om_baseline',chatId,approvedChatIds:[chatId],now:at})[0]!.card);
+    expect(body).toContain('已确认项目结构／目标（Ivy 确认）');
+    expect(body).toContain('系统已经进入影子运行');
+    expect(body).toContain('James 的历史表达');
+    expect(body).toContain('未接入账号，未部署。');
+    expect(body).toContain('缺少 James 的当前表达');
+    expect(body).not.toContain('James 的理解\n- 未接入账号，未部署。');
+    const overview=JSON.stringify(buildFounderManualQueryMessages({client:db.client,query:{kind:'open_alignment'},
+      queryMessageId:'om_overview',chatId,approvedChatIds:[chatId],now:at})[0]!.card);
+    expect(overview).toContain('AiJia 合伙人对齐室：缺少 James 的当前表达');
+    expect(overview).not.toContain('缺少 Ivy 的明确表达');
     db.close();
   });
 
@@ -118,6 +149,9 @@ describe('founder manual queries',()=>{
     sources.saveSource({sourceSystem:'feishu',sourceType:'feishu_sync_coverage',externalId:'coverage-1',logicalKey:'coverage-1',
       occurredAt:at.toISOString(),authors:[],locatorUri:null,contentFormat:'application/json',contentText:JSON.stringify({
         gaps:[{code:'FILE_TEXT_UNREADABLE',sourceRef:'file-1',reason:'unreadable'}]}),metadata:{chatId},availabilityStatus:'available',capturedAt:at});
+    sources.saveSource({sourceSystem:'feishu',sourceType:'feishu_sync_gap',externalId:'gap-duplicate',logicalKey:'gap-duplicate',
+      occurredAt:at.toISOString(),authors:[],locatorUri:null,contentFormat:'application/json',contentText:JSON.stringify({
+        code:'FILE_TEXT_UNREADABLE',sourceRef:'file-1',reason:'same gap persisted separately'}),metadata:{chatId},availabilityStatus:'available',capturedAt:at});
     const topics=new TopicRepository(db.client);
     const topic=topics.createTopic({displayName:'大量分歧项目',stage:'active_project',createdAt:at});
     for(let index=0;index<100;index++)db.client.prepare(`INSERT INTO alignment_issues

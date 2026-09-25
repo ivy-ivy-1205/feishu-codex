@@ -77,16 +77,23 @@ function buildTopicAlignment(input:{client:Database.Database;now:Date},name:stri
       `“${founderText(name,100)}”对应多个项目，暂不自动猜测。`],'orange');
   const topic=matches[0]!,perspectives=new AlignmentRepository(input.client).listCanonicalPerspectives(topic.id);
   const shared=perspectives.filter(item=>item.kind==='shared_decision');
-  const ivy=perspectives.filter(item=>item.kind==='ivy_view');
-  const james=perspectives.filter(item=>item.kind==='james_view');
+  const ivy=perspectives.filter(item=>item.kind==='ivy_view'&&item.observedAt>=topic.changedAt);
+  const james=perspectives.filter(item=>item.kind==='james_view'&&item.observedAt>=topic.changedAt);
+  const ivyHistory=perspectives.filter(item=>item.kind==='ivy_view'&&item.observedAt<topic.changedAt);
+  const jamesHistory=perspectives.filter(item=>item.kind==='james_view'&&item.observedAt<topic.changedAt);
+  const ivyConfirmedBaseline=topic.rationale==='Ivy confirmed Founder work map baseline';
   const issues=new AlignmentIssueRepository(input.client).listForTopic(topic.id)
     .filter(item=>['candidate','ready','asked'].includes(item.status));
-  const lines=[`项目：${founderText(topic.displayName,120)}`,`当前目标：${topic.outcome?founderText(topic.outcome,500):'尚未形成明确目标。'}`,
+  const lines=[`项目：${founderText(topic.displayName,120)}`,
+    `${ivyConfirmedBaseline?'已确认项目结构／目标（Ivy 确认）':'当前项目目标'}：${topic.outcome?founderText(topic.outcome,500):'尚未形成明确目标。'}`,
     section('已确认共识',shared.map(item=>item.statement),'暂无双方明确确认的共识；沉默不代表同意。'),
-    section('Ivy 的理解',ivy.map(item=>item.statement),'暂无 Ivy 的明确表达。'),
-    section('James 的理解',james.map(item=>item.statement),'暂无 James 的明确表达。')];
-  if(ivy.length===0||james.length===0){const missing=ivy.length===0&&james.length===0?'双方':ivy.length===0?'Ivy':'James';
-    lines.push(`缺少另一方表达：缺少${missing==='双方'?'双方':` ${missing} `}的明确表达。`)}
+    section('Ivy 的当前个人理解',ivy.map(item=>item.statement),ivyConfirmedBaseline?'已通过上方项目结构／目标表达当前确认。':'暂无 Ivy 的当前表达。'),
+    section('James 的当前个人理解',james.map(item=>item.statement),'暂无 James 的当前表达。'),
+    ...(ivyHistory.length?[section('Ivy 的历史表达',ivyHistory.map(item=>dated(item.statement,item.observedAt)),'')]:[]),
+    ...(jamesHistory.length?[section('James 的历史表达',jamesHistory.map(item=>dated(item.statement,item.observedAt)),'')]:[])];
+  const ivyCurrent=ivyConfirmedBaseline||ivy.length>0;
+  if(!ivyCurrent||james.length===0){const missing=!ivyCurrent&&james.length===0?'双方':!ivyCurrent?'Ivy':'James';
+    lines.push(`缺少另一方表达：缺少${missing==='双方'?'双方':` ${missing} `}的当前表达。`)}
   else lines.push('缺少另一方表达：双方均已有个人表达，但这不自动等于已达成共识。');
   const displayedIssues=issues.slice(0,8);
   lines.push(issues.length?`真实分歧：${issues.length} 项有双方证据且会影响行动。\n${displayedIssues.map(issue=>
@@ -102,8 +109,10 @@ function buildOpenAlignment(input:{client:Database.Database}):Record<string,unkn
   const missing:string[]=[];
   for(const topic of topicList){
     const views=alignment.listCanonicalPerspectives(topic.id);
-    const ivy=views.some(item=>item.kind==='ivy_view'),james=views.some(item=>item.kind==='james_view');
-    if(ivy!==james)missing.push(`${topic.displayName}：缺少 ${ivy?'James':'Ivy'} 的明确表达`);
+    const ivy=topic.rationale==='Ivy confirmed Founder work map baseline'||
+      views.some(item=>item.kind==='ivy_view'&&item.observedAt>=topic.changedAt);
+    const james=views.some(item=>item.kind==='james_view'&&item.observedAt>=topic.changedAt);
+    if(ivy!==james)missing.push(`${topic.displayName}：缺少 ${ivy?'James':'Ivy'} 的当前表达`);
   }
   const open=topicList.flatMap(topic=>issues.listForTopic(topic.id))
     .filter(item=>['candidate','ready','asked'].includes(item.status));
@@ -126,7 +135,15 @@ function processingStatus(client:Database.Database,chatId:string):string{
   const pending=scoped.filter(row=>['queued','retry','processing'].includes(row.status)).length;
   const unresolvedFailures=scoped.filter(row=>row.status==='failed'&&(row.sourceIds.length===0||row.sourceIds.some(id=>!completedSources.has(id)))).length;
   const gaps=countPersistedGaps(client,chatId);
-  return `处理状态\n最后收到：${received.value??'尚无记录'}\n最后完成分析：${analyzedAt??'尚无完成记录'}\n待处理：${pending}；未补偿失败：${unresolvedFailures}；不可读/跳过缺口：${gaps}\n“待处理为 0”只证明已入库任务没有积压；缺口会单独显示，不把未读取内容算作已覆盖。`;
+  const audit=latestCoverageAudit(client,chatId);
+  return `处理状态\n最后收到：${received.value??'尚无记录'}\n最后完成分析：${analyzedAt??'尚无完成记录'}\n最后防漏复核：${audit??'尚无记录'}\n待处理：${pending}；未补偿失败：${unresolvedFailures}；不可读/跳过缺口：${gaps}\n“待处理为 0”只证明已入库任务没有积压；缺口会单独显示，不把未读取内容算作已覆盖。`;
+}
+
+function latestCoverageAudit(client:Database.Database,chatId:string):string|null{
+  const rows=client.prepare("SELECT captured_at,metadata_json FROM context_sources WHERE source_type='feishu_sync_coverage' ORDER BY captured_at DESC")
+    .all() as {captured_at:string;metadata_json:string}[];
+  for(const row of rows)try{if((JSON.parse(row.metadata_json) as {chatId?:unknown}).chatId===chatId)return row.captured_at}catch{}
+  return null;
 }
 
 function withProcessingStatus(card:Record<string,unknown>,status:string):Record<string,unknown>{
@@ -139,20 +156,27 @@ function withProcessingStatus(card:Record<string,unknown>,status:string):Record<
 function countPersistedGaps(client:Database.Database,chatId:string):number{
   const rows=client.prepare("SELECT source_type,content_text,metadata_json FROM context_sources WHERE source_type IN ('feishu_sync_gap','feishu_sync_coverage')")
     .all() as {source_type:string;content_text:string;metadata_json:string}[];
-  let count=0;
+  const unique=new Set<string>();
+  const remember=(value:unknown)=>{if(typeof value!=='object'||value===null)return;
+    const gap=value as {code?:unknown;sourceRef?:unknown};
+    if(typeof gap.code==='string'&&typeof gap.sourceRef==='string')unique.add(`${gap.code}\n${gap.sourceRef}`)};
   for(const row of rows)try{
     const metadata=JSON.parse(row.metadata_json) as {chatId?:unknown;gaps?:unknown};
     if(metadata.chatId!==chatId)continue;
-    if(row.source_type==='feishu_sync_gap'){count++;continue}
+    if(row.source_type==='feishu_sync_gap'){remember(JSON.parse(row.content_text));continue}
     const content=JSON.parse(row.content_text) as {gaps?:unknown};
     const gaps=Array.isArray(content.gaps)?content.gaps:Array.isArray(metadata.gaps)?metadata.gaps:[];
-    count+=gaps.length;
+    gaps.forEach(remember);
   }catch{/* Malformed audit rows are not treated as readable coverage. */}
-  return count;
+  return unique.size;
 }
 
 function section(title:string,values:readonly string[],empty:string):string{
   return `${title}\n${values.length?values.map(value=>`- ${founderText(value,260)}`).join('\n'):empty}`;
+}
+
+function dated(statement:string,observedAt:string):string{
+  return `${observedAt.slice(0,10)}｜${statement}`;
 }
 
 function normalize(value:string):string{return value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\p{P}\p{S}\s]+/gu,'')}

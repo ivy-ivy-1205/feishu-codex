@@ -60,8 +60,10 @@ export async function runFounderStreamBackfill(input: FounderStreamBackfillInput
       captured.source.rawTextExpiresAt = addDays(input.now, 90);
       if (!dryRun) {
         const saved = sourceRepository!.saveSource(captured.source);
-        sourceIds.push(saved.source.id);
-        if (saved.created) sourcesCreated += 1;
+        if (saved.created) {
+          sourceIds.push(saved.source.id);
+          sourcesCreated += 1;
+        }
       }
     },
     saveSnapshot: async (snapshot) => {

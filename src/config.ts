@@ -18,6 +18,7 @@ const envSchema = z.object({
   FOUNDER_STREAM_ANALYSIS_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
   FOUNDER_STREAM_GROUP_DELIVERY_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
   FOUNDER_STREAM_MANUAL_QUERY_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().trim().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -64,6 +65,12 @@ const envSchema = z.object({
   }
   if (config.FOUNDER_STREAM_MANUAL_QUERY_ENABLED && (!config.FOUNDER_STREAM_CAPTURE_ENABLED || !config.FOUNDER_STREAM_ANALYSIS_ENABLED)) {
     context.addIssue({ code: 'custom', message: 'Founder manual query requires capture and analysis' });
+  }
+  if (config.FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED && !config.FOUNDER_STREAM_CAPTURE_ENABLED) {
+    context.addIssue({ code: 'custom', message: 'Founder daily reconciliation requires capture' });
+  }
+  if (config.FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED && !config.PROJECT_CONTEXT_CHAT_IDS.includes(approvedProjectContextChatId)) {
+    context.addIssue({ code:'custom',message:'Founder daily reconciliation requires the approved project context chat' });
   }
   if (
     config.NODE_ENV !== 'test' &&
@@ -125,7 +132,8 @@ const envSchema = z.object({
 type DatabaseKind = 'postgresql' | 'sqlite';
 
 export interface AppConfig {
-  founderStream: { captureEnabled: boolean; analysisEnabled: boolean; groupDeliveryEnabled: boolean; manualQueryEnabled: boolean };
+  founderStream: { captureEnabled: boolean; analysisEnabled: boolean; groupDeliveryEnabled: boolean; manualQueryEnabled: boolean;
+    dailyReconciliationEnabled: boolean };
   environment: 'development' | 'test' | 'production';
   host: string;
   port: number;
@@ -201,7 +209,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     environment: parsed.NODE_ENV,
     founderStream: { captureEnabled: parsed.FOUNDER_STREAM_CAPTURE_ENABLED, analysisEnabled: parsed.FOUNDER_STREAM_ANALYSIS_ENABLED,
       groupDeliveryEnabled: parsed.FOUNDER_STREAM_GROUP_DELIVERY_ENABLED,
-      manualQueryEnabled: parsed.FOUNDER_STREAM_MANUAL_QUERY_ENABLED },
+      manualQueryEnabled: parsed.FOUNDER_STREAM_MANUAL_QUERY_ENABLED,
+      dailyReconciliationEnabled: parsed.FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED },
     host: parsed.HOST,
     port: parsed.PORT,
     database: {

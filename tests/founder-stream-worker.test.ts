@@ -545,6 +545,20 @@ describe('founder stream durable wiring', () => {
     await h.runtime.runOnce(); expect(h.jobs.list().map(j => j.kind)).toEqual(['capture_group_message']);
     expect(h.calls()).toBe(0); await h.app.close(); h.db.close();
   });
+  it('runs one bounded 24-hour reconciliation per day and never on every worker tick',async()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const jobs=new JobRepository(db.client);
+    let now=new Date('2026-09-25T00:00:00.000Z');const windows:{since:string;until:string}[]=[];
+    const runtime=createFounderStreamRuntime({client:db.client,jobRepository:jobs,
+      flags:{captureEnabled:true,analysisEnabled:false,groupDeliveryEnabled:false,dailyReconciliationEnabled:true},
+      approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>now,
+      dailyReconciliation:{async run(window){windows.push({since:window.since,until:window.until})}}});
+    await runtime.afterTick();await runtime.afterTick();
+    expect(windows).toEqual([{since:'2026-09-24T00:00:00.000Z',until:'2026-09-25T00:00:00.000Z'}]);
+    now=new Date('2026-09-25T23:59:59.999Z');await runtime.afterTick();expect(windows).toHaveLength(1);
+    now=new Date('2026-09-26T00:00:00.000Z');await runtime.afterTick();
+    expect(windows[1]).toEqual({since:'2026-09-25T00:00:00.000Z',until:'2026-09-26T00:00:00.000Z'});
+    db.close();
+  });
   it('passes immutable source occurrence time to the perspective analyzer', async () => {
     const h = harness();
     new AlignmentRepository(h.db.client).configureFounderIdentity({ founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:start });

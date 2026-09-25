@@ -17,11 +17,13 @@ import { MeetingRepository } from './repositories/meeting-repository.js';
 import { OAuthTokenRepository } from './repositories/oauth-token-repository.js';
 import { OutboxRepository } from './repositories/outbox-repository.js';
 import { ProjectRepository } from './repositories/project-repository.js';
+import { ContextSourceRepository } from './repositories/context-source-repository.js';
 import { createPipelineReadiness } from './routes/health.js';
 import { FeishuOAuthService, InMemoryOAuthStateStore } from './services/feishu-oauth.js';
 import { ingestMinuteGenerated } from './services/minute-ingestion.js';
 import { TokenCrypto } from './services/oauth-token-crypto.js';
 import { routeReply } from './services/reply-router.js';
+import { runFounderStreamBackfill } from './services/founder-stream-backfill.js';
 
 const config = loadConfig(process.env);
 if (config.database.kind !== 'sqlite') {
@@ -118,6 +120,11 @@ const founderRuntime = createFounderStreamRuntime({
   client: database.client, jobRepository, flags: config.founderStream,
   approvedChatIds: config.projectContext.approvedChatIds, ivyPrivateChatId: config.feishu.ivyPrivateChatId,
   intervalMs: config.worker.pollIntervalMs, delivery: feishuIntegration.delivery,attachmentReader:feishuIntegration.attachmentReader,
+  ...(config.founderStream.dailyReconciliationEnabled?{dailyReconciliation:{async run(window:{since:string;until:string;now:Date}){
+    await runFounderStreamBackfill({chatId:config.projectContext.approvedChatIds[0]!,since:window.since,until:window.until,
+      now:window.now,feishu:feishuIntegration.contextClient,sourceRepository:new ContextSourceRepository(database.client),
+      jobRepository,dryRun:false,enqueueAnalysis:config.founderStream.analysisEnabled});
+  }}}:{}),
   ...(founderAnalysis ?? {})
 });
 const workerRuntime = createWorkerRuntime(
