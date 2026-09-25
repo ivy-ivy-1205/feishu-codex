@@ -28,7 +28,7 @@ describe('founder work map cards', () => {
 
   it('renders reviewed business lines before their nested projects instead of a flat active-project list',()=>{
     const a={...topic('a','active_project'),displayName:'AiJia AI Native 房产业务'};
-    const website={...topic('website','active_project'),displayName:'AiJia 官网',parentName:a.displayName};
+    const website={...topic('website','active_project'),displayName:'AiJia AI Native 官网',parentName:a.displayName};
     const smart={...topic('smart','active_project'),displayName:'Smart Listing',parentName:a.displayName};
     const sales={...topic('sales','active_project'),displayName:'房产销售过程数据沉淀',parentName:a.displayName,
       outcome:'沉淀三类数据：1）Open Home 全程、全量、清晰录音并区分销售与客户；2）Open Home 或私聊后的 CRM 客户需求与情况回填，以每套房导出的 CRM 记录作为分析起点，当前尚未要求完整回填；3）销售团队内部 Training 录音语料。'};
@@ -37,13 +37,14 @@ describe('founder work map cards', () => {
     const [page]=renderFounderWorkMap({...window,topics:[episode,sales,smart,b,website,a],uncertainGrouping:[],coverageGaps:[]});
     const body=JSON.stringify(page!.card);
     expect(body).toContain('A 线｜AiJia AI Native 房产业务');
-    expect(body).toContain('子项目：AiJia 官网');
-    expect(body).toContain('层级：A 线 > AiJia 官网');
+    expect(body).toContain('子项目：AiJia AI Native 官网');
+    expect(body).toContain('层级：A 线 > AiJia AI Native 官网');
     expect(body).toContain('子项目：Smart Listing');
     expect(body).toContain('销售团队内部 Training 录音语料');
     expect(body).toContain('B 线｜自媒体生产线');
     expect(body).toContain('子项目：EP00《挺好》（已结束）');
-    expect(body.indexOf('A 线｜AiJia AI Native 房产业务')).toBeLessThan(body.indexOf('子项目：AiJia 官网'));
+    expect(body.indexOf('A 线｜AiJia AI Native 房产业务')).toBeLessThan(body.indexOf('子项目：AiJia AI Native 官网'));
+    expect(body.indexOf('子项目：AiJia AI Native 官网')).toBeLessThan(body.indexOf('子项目：Smart Listing'));
     expect(body.indexOf('B 线｜自媒体生产线')).toBeLessThan(body.indexOf('子项目：EP00《挺好》'));
   });
 

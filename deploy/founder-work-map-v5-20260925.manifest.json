@@ -46,9 +46,9 @@
   "newTopics": [
     {
       "key": "aijia_website",
-      "name": "AiJia 官网",
+      "name": "AiJia AI Native 官网",
       "stage": "active_project",
-      "outcome": "AiJia 的公司与服务入口；客户可从官网进入需求理解与持续服务，并使用与 Smart Listing 共用的 Amy、客户记录、知识和任务承接底座。",
+      "outcome": "面向房产中介业务的 AiJia AI Native 官网入口；客户可从官网进入需求理解与持续服务，并使用与 Smart Listing 共用的 Amy、客户记录、知识和任务承接底座。",
       "sourceIds": [
         "ctxsrc_8886aef5e82dcf97df835d80ea3a5afa",
         "ctxsrc_d81a025f0c185b0be5faad8d2a51459a"

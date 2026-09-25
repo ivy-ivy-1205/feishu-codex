@@ -73,7 +73,7 @@ describe('applyFounderBaseline',()=>{
       expect.objectContaining({canonical:expect.objectContaining({id:'topic_ecedcaad5562d2e3c4da11ffe7644897',version:3,
         name:'Smart Listing L008｜27 Cecil Street 样板'})})
     ]));
-    expect(manifest.newTopics).toEqual([expect.objectContaining({key:'aijia_website',name:'AiJia 官网',stage:'active_project',
+    expect(manifest.newTopics).toEqual([expect.objectContaining({key:'aijia_website',name:'AiJia AI Native 官网',stage:'active_project',
       outcome:expect.stringMatching(/Smart Listing.*Amy/u),sourceIds:expect.arrayContaining([
         'ctxsrc_8886aef5e82dcf97df835d80ea3a5afa','ctxsrc_d81a025f0c185b0be5faad8d2a51459a'
       ])})]);
