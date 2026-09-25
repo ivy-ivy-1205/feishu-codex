@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { CodexCliAdapter, NodeCodexProcessRunner } from '../adapters/codex-cli.js';
+import type { CodexModel, CodexReasoningEffort } from '../adapters/codex-cli.js';
 import { CodexContextCandidateExtractor } from '../adapters/codex-context-candidate-extractor.js';
 import type { ContextCandidateExtractor } from '../ports/context-candidate-extractor.js';
 import { ContextCandidateRepository } from '../repositories/context-candidate-repository.js';
@@ -23,7 +24,8 @@ export interface CreateContextRuntimeOptions {
   projectRepository: ProjectRepository;
   targetChatId: string;
   reviewEnabled: boolean;
-  codex: { command: string; workdir: string; timeoutSeconds: number };
+  codex: { command: string; model?: CodexModel; reasoningEffort?: CodexReasoningEffort;
+    workdir: string; timeoutSeconds: number };
   env?: Record<string, string | undefined>;
   extractor?: ContextCandidateExtractor;
   sourceMaxBytes?: number;
@@ -48,6 +50,8 @@ export function createContextRuntime(options: CreateContextRuntimeOptions): Cont
   const extractor = options.extractor ?? new CodexContextCandidateExtractor({
     codex: new CodexCliAdapter({ command: options.codex.command, workdir: options.codex.workdir,
       timeoutMs: options.codex.timeoutSeconds * 1_000, baseEnv: options.env ?? process.env,
+      ...(options.codex.model ? { model: options.codex.model } : {}),
+      ...(options.codex.reasoningEffort ? { reasoningEffort: options.codex.reasoningEffort } : {}),
       runner: new NodeCodexProcessRunner() })
   });
   const worker: ContextCandidateWorkerDependencies = {

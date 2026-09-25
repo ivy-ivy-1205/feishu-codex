@@ -41,6 +41,8 @@ const envSchema = z.object({
   FEISHU_OAUTH_STALE_EVENT_HOURS: z.coerce.number().positive().default(24),
   WEBHOOK_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(300),
   CODEX_COMMAND: z.string().trim().min(1).default('codex'),
+  CODEX_MODEL: z.enum(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']).default('gpt-5.6-sol'),
+  CODEX_REASONING_EFFORT: z.enum(['none', 'low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
   CODEX_WORKDIR: z.string().trim().min(1),
   CODEX_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(120),
   CODEX_SUMMARIZER_MODE: z.enum(['fake', 'codex']).default('fake'),
@@ -161,6 +163,8 @@ export interface AppConfig {
   };
   codex: {
     command: string;
+    model: 'gpt-5.6-sol' | 'gpt-5.6-terra' | 'gpt-5.6-luna';
+    reasoningEffort: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
     workdir: string;
     timeoutSeconds: number;
     summarizerMode: 'fake' | 'codex';
@@ -237,6 +241,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     },
     codex: {
       command: parsed.CODEX_COMMAND,
+      model: parsed.CODEX_MODEL,
+      reasoningEffort: parsed.CODEX_REASONING_EFFORT,
       workdir: parsed.CODEX_WORKDIR,
       timeoutSeconds: parsed.CODEX_TIMEOUT_SECONDS,
       summarizerMode: parsed.CODEX_SUMMARIZER_MODE

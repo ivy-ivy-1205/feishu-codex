@@ -114,7 +114,8 @@ const codexAuthProbe = new CodexAuthProbe({
 });
 const founderAnalysis = config.founderStream.analysisEnabled ? createFounderAnalysisAdapters({
   codex: new CodexCliAdapter({ command: config.codex.command, workdir: config.codex.workdir,
-    timeoutMs: config.codex.timeoutSeconds * 1000, baseEnv: process.env, runner: new NodeCodexProcessRunner() })
+    timeoutMs: config.codex.timeoutSeconds * 1000, model: config.codex.model,
+    reasoningEffort: config.codex.reasoningEffort, baseEnv: process.env, runner: new NodeCodexProcessRunner() })
 }) : undefined;
 const founderRuntime = createFounderStreamRuntime({
   client: database.client, jobRepository, flags: config.founderStream,

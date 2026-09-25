@@ -88,9 +88,17 @@ export interface CodexCliAdapterOptions {
   command: string;
   workdir: string;
   timeoutMs: number;
+  model?: CodexModel;
+  reasoningEffort?: CodexReasoningEffort;
   baseEnv?: Record<string, string | undefined>;
   runner: CodexProcessRunner;
 }
+
+export type CodexModel = 'gpt-5.6-sol' | 'gpt-5.6-terra' | 'gpt-5.6-luna';
+export type CodexReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export const defaultCodexModel: CodexModel = 'gpt-5.6-sol';
+export const defaultCodexReasoningEffort: CodexReasoningEffort = 'medium';
 
 export type CodexAuthProbeOptions = CodexCliAdapterOptions;
 
@@ -123,6 +131,8 @@ export class CodexCliAdapter {
   readonly #command: string;
   readonly #workdir: string;
   readonly #timeoutMs: number;
+  readonly #model: CodexModel;
+  readonly #reasoningEffort: CodexReasoningEffort;
   readonly #baseEnv: Record<string, string | undefined>;
   readonly #runner: CodexProcessRunner;
   readonly #authProbe: CodexAuthProbe;
@@ -131,6 +141,8 @@ export class CodexCliAdapter {
     this.#command = options.command;
     this.#workdir = options.workdir;
     this.#timeoutMs = options.timeoutMs;
+    this.#model = options.model ?? defaultCodexModel;
+    this.#reasoningEffort = options.reasoningEffort ?? defaultCodexReasoningEffort;
     this.#baseEnv = options.baseEnv ?? process.env;
     this.#runner = options.runner;
     this.#authProbe = new CodexAuthProbe(options);
@@ -151,6 +163,10 @@ export class CodexCliAdapter {
         command: this.#command,
         args: [
           'exec',
+          '--model',
+          this.#model,
+          '--config',
+          `model_reasoning_effort=${JSON.stringify(this.#reasoningEffort)}`,
           '--sandbox',
           'read-only',
           '--ephemeral',

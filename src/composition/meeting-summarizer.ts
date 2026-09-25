@@ -1,4 +1,5 @@
 import { CodexAuthProbe, CodexCliAdapter, NodeCodexProcessRunner } from '../adapters/codex-cli.js';
+import type { CodexModel, CodexReasoningEffort } from '../adapters/codex-cli.js';
 import { CodexMeetingSummarizer } from '../adapters/codex-summarizer.js';
 import type { MeetingSummarizer, MeetingSummaryDraft } from '../ports/summarizer.js';
 import type { MinuteContext } from '../ports/feishu.js';
@@ -12,6 +13,8 @@ import {
 export interface MeetingSummarizerCompositionConfig {
   codex: {
     command: string;
+    model?: CodexModel;
+    reasoningEffort?: CodexReasoningEffort;
     workdir: string;
     timeoutSeconds: number;
     summarizerMode: 'fake' | 'codex';
@@ -66,7 +69,9 @@ export function createMeetingSummarizer(
     command: options.config.codex.command,
     workdir: options.config.codex.workdir,
     timeoutMs: options.config.codex.timeoutSeconds * 1_000,
-    baseEnv: options.env ?? process.env
+    baseEnv: options.env ?? process.env,
+    ...(options.config.codex.model ? { model: options.config.codex.model } : {}),
+    ...(options.config.codex.reasoningEffort ? { reasoningEffort: options.config.codex.reasoningEffort } : {})
   };
   const codex = new CodexCliAdapter({
     ...codexOptions,

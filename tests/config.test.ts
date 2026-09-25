@@ -17,6 +17,17 @@ const baseEnv = {
 };
 
 describe('loadConfig', () => {
+  it('pins the approved Codex model and reasoning effort by default', () => {
+    expect(loadConfig(baseEnv).codex).toMatchObject({
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'medium'
+    });
+    expect(loadConfig({ ...baseEnv, CODEX_MODEL: 'gpt-5.6-terra', CODEX_REASONING_EFFORT: 'low' }).codex)
+      .toMatchObject({ model: 'gpt-5.6-terra', reasoningEffort: 'low' });
+    expect(() => loadConfig({ ...baseEnv, CODEX_MODEL: 'account-default' })).toThrow();
+    expect(() => loadConfig({ ...baseEnv, CODEX_REASONING_EFFORT: 'automatic' })).toThrow();
+  });
+
   it('defaults founder stream off and enforces ordered flag dependencies', () => {
     expect(loadConfig(baseEnv).founderStream).toEqual({ captureEnabled: false, analysisEnabled: false,
       groupDeliveryEnabled: false, manualQueryEnabled: false, dailyReconciliationEnabled: false });
