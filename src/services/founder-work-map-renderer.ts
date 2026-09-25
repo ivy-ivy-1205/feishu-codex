@@ -63,7 +63,8 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     const hierarchy=hierarchyFor(topic,topicByName),framework=frameworkFor(hierarchy);
     const section=framework==='A'?`A 线｜${aLine}`:framework==='B'?`B 线｜${bLine}`:
       topic.displayName==='AiJia Founder Alignment Room / AiJia 合伙人对齐室'?'公司协作基础设施':labels[topic.stage];
-    const title=framework&&hierarchy.length===1?`总项目：${topic.displayName}`:framework?`子项目：${topic.displayName}`:topic.displayName;
+    if(framework&&hierarchy.length===1)continue;
+    const title=framework?`子项目：${topic.displayName}`:topic.displayName;
     const hierarchyText=framework&&hierarchy.length>1?`\n层级：${framework} 线 > ${hierarchy.slice(1).map(item=>founderText(item.displayName,80)).join(' > ')}`:
       topic.parentName?`\n归属：${founderText(topic.parentName,80)}`:'';
     add(section, `${founderText(title, 100)}${suffix}${hierarchyText}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}`,

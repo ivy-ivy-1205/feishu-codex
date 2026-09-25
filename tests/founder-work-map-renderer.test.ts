@@ -43,7 +43,9 @@ describe('founder work map cards', () => {
     expect(body).toContain('销售团队内部 Training 录音语料');
     expect(body).toContain('B 线｜自媒体生产线');
     expect(body).toContain('子项目：EP00《挺好》（已结束）');
-    expect(body.indexOf('总项目：AiJia AI Native 房产业务')).toBeLessThan(body.indexOf('子项目：AiJia AI Native 官网'));
+    expect(body).not.toContain('总项目：AiJia AI Native 房产业务');
+    expect(body).not.toContain('总项目：自媒体生产线');
+    expect(page!.itemRefs.map((item)=>item.id)).toEqual(['website','smart','sales','episode']);
     expect(body.indexOf('A 线｜AiJia AI Native 房产业务')).toBeLessThan(body.indexOf('子项目：AiJia AI Native 官网'));
     expect(body.indexOf('子项目：AiJia AI Native 官网')).toBeLessThan(body.indexOf('子项目：Smart Listing'));
     expect(body.indexOf('B 线｜自媒体生产线')).toBeLessThan(body.indexOf('子项目：EP00《挺好》'));
