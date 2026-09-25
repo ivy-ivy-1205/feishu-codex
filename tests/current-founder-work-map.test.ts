@@ -28,7 +28,7 @@ function fixture(){
   alignment.savePerspective({topicId:parent.id,kind:'james_view',expectedVersion:0,statement:'旧状态：还没有部署。',confidence:1,evidenceIds:[historical],decisionKey:'status',speechAct:'view',observedAt:new Date('2026-09-02T00:00:00Z')});
   alignment.savePerspective({topicId:child.id,kind:'ivy_view',expectedVersion:0,statement:'建议增加每周提醒。',confidence:1,evidenceIds:[unresolved],decisionKey:'frequency',speechAct:'decision_proposal',observedAt:new Date('2026-09-20T00:00:00Z')});
   alignment.savePerspective({topicId:child.id,kind:'shared_decision',expectedVersion:0,statement:'双方确认先人工发布。',confidence:1,evidenceIds:[shared],decisionKey:'publisher',speechAct:'explicit_agreement',observedAt:new Date('2026-09-21T00:00:00Z')});
-  return{db,parent,child};
+  return{db,parent,child,topics,alignment,sources,add};
 }
 
 describe('current founder work map publisher',()=>{
@@ -66,5 +66,15 @@ describe('current founder work map publisher',()=>{
       VALUES('pending-fixture',?,'{}','pending-fixture','pending','2026-09-24T00:00:00Z')`).run(chatId);
     expect(()=>enqueueCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-09-24T00:00:00Z',
       approvedChatIds:[chatId],expectedCanonicalTopicCount:2,confirmedChatId:chatId,groupDeliveryEnabled:true})).toThrow(/QUEUE_NOT_IDLE/);
+  });
+  it('does not render a project name repeated as a founder viewpoint',()=>{
+    const h=fixture();
+    const label=h.topics.createTopic({displayName:'合伙人对齐室',stage:'active_project',createdAt:new Date('2026-09-12T00:00:00Z')});
+    const evidence=h.add('om_label','ou_james','合伙人对齐室','2026-09-13T00:00:00Z');
+    h.alignment.savePerspective({topicId:label.id,kind:'james_view',expectedVersion:0,statement:'合伙人对齐室',confidence:1,evidenceIds:[evidence],decisionKey:'name',speechAct:'view',observedAt:new Date('2026-09-13T00:00:00Z')});
+    const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-09-24T00:00:00Z',approvedChatIds:[chatId],expectedCanonicalTopicCount:3});
+    const body=JSON.stringify(result.cards);
+    expect(body).not.toContain('历史提议（James，2026-09-13）：合伙人对齐室');
+    expect(body).not.toContain('待对齐（James，2026-09-13）：合伙人对齐室');
   });
 });

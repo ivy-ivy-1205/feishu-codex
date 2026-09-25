@@ -99,6 +99,22 @@ describe('AlignmentRepository', () => {
     expect(result[0]).toEqual(expect.objectContaining({ statement: short }));
     expect(new Set(result[0]!.evidenceIds)).toEqual(new Set([first,second]));
   });
+  it('collapses a contained same-day update while retaining the more informative statement', () => {
+    const { repository, sources, topic, database } = createHarness();
+    const duplicate = new TopicRepository(database.client).createTopic({displayName:'选房经验副本',stage:'active_project',createdAt:new Date('2026-09-01T00:01:00Z')});
+    new TopicRepository(database.client).addRelation({fromTopicId:topic.id,toTopicId:duplicate.id,relationType:'same_as',rationale:'confirmed',createdAt:new Date('2026-09-01T00:02:00Z')});
+    const long='我的已经做完，然后等 Jimmy 回复他的判断语录';
+    const short='等 Jimmy 回复他的判断语录';
+    const first=saveGroupEvidence(sources,{messageId:'om_progress_a',openId:'ou_james',displayName:'James',text:long,occurredAt:'2026-09-13T01:00:00Z'});
+    const second=saveGroupEvidence(sources,{messageId:'om_progress_b',openId:'ou_james',displayName:'James',text:short,occurredAt:'2026-09-13T08:00:00Z'});
+    repository.savePerspective({topicId:topic.id,kind:'james_view',expectedVersion:0,statement:long,confidence:1,evidenceIds:[first],decisionKey:'progress',speechAct:'view',observedAt:new Date('2026-09-13T01:00:00Z')});
+    repository.savePerspective({topicId:duplicate.id,kind:'james_view',expectedVersion:0,statement:short,confidence:1,evidenceIds:[second],decisionKey:'next',speechAct:'view',observedAt:new Date('2026-09-13T08:00:00Z')});
+
+    const result=repository.listCanonicalPerspectives(topic.id);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.statement).toBe(long);
+    expect(new Set(result[0]!.evidenceIds)).toEqual(new Set([first,second]));
+  });
   it('attributes evidence only through configured immutable founder identities', () => {
     const { repository, sources } = createHarness();
     const ivyEvidenceId = saveGroupEvidence(sources, {

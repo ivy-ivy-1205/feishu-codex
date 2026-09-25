@@ -256,11 +256,14 @@ export class AlignmentRepository {
     const collapsed:CurrentPerspective[]=[];
     for(const perspective of selected.values()){
       const normalized=normalizePerspectiveStatement(perspective.statement);
-      const index=collapsed.findIndex(existing=>existing.kind===perspective.kind&&existing.observedAt===perspective.observedAt&&
+      const index=collapsed.findIndex(existing=>existing.kind===perspective.kind&&sameIsoDay(existing.observedAt,perspective.observedAt)&&
         semanticallyContains(normalizePerspectiveStatement(existing.statement),normalized));
       if(index<0){collapsed.push(perspective);continue}
       const existing=collapsed[index]!,existingNormalized=normalizePerspectiveStatement(existing.statement);
-      const preferred=normalized.length<existingNormalized.length?perspective:existing;
+      const sameWithoutBoilerplate=stripPerspectiveBoilerplate(normalized)===stripPerspectiveBoilerplate(existingNormalized);
+      const preferred=sameWithoutBoilerplate
+        ?(normalized.length<existingNormalized.length?perspective:existing)
+        :(normalized.length>existingNormalized.length?perspective:existing);
       collapsed[index]={...preferred,evidenceIds:[...new Set([...existing.evidenceIds,...perspective.evidenceIds])].sort()};
     }
     return collapsed.sort((a,b)=>(a.decisionKey??'').localeCompare(b.decisionKey??'')||a.kind.localeCompare(b.kind));
@@ -329,8 +332,11 @@ function normalizePerspectiveStatement(value:string):string{
 
 function semanticallyContains(left:string,right:string):boolean{
   const shorter=left.length<=right.length?left:right,longer=left.length<=right.length?right:left;
-  return shorter.length>=20&&longer.length-shorter.length<=12&&longer.includes(shorter);
+  return shorter.length>=8&&longer.length-shorter.length<=20&&longer.includes(shorter);
 }
+
+function sameIsoDay(left:string,right:string):boolean{return left.slice(0,10)===right.slice(0,10)}
+function stripPerspectiveBoilerplate(value:string):string{return value.replace(/^(?:建议的目标|建议目标)/u,'')}
 
 interface FounderIdentityRow {
   id: string;

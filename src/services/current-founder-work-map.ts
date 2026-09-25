@@ -42,7 +42,8 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
     const parentId=parentByChild.get(topic.id);
     return{...topic,evidence:evidence.items,linkedSourceCount:evidence.linkedSourceCount,
       parentName:parentId?canonicalById.get(parentId)?.displayName:undefined,
-      perspectives:alignment.listCanonicalPerspectives(topic.id).map(perspective=>projectPerspective(topic,perspective))};
+      perspectives:alignment.listCanonicalPerspectives(topic.id).filter(perspective=>!isTopicLabelOnly(topic.displayName,perspective.statement))
+        .map(perspective=>projectPerspective(topic,perspective))};
   });
   const cards=renderFounderWorkMap({since:input.since,until:input.until,topics:projected,uncertainGrouping:[],coverageGaps:loadCoverageGaps(input.client,input.chatId,input.since,input.until)});
   const mapId=stableId('foundermap',canonicalJson({chatId:input.chatId,since:input.since,until:input.until,
@@ -85,6 +86,11 @@ function projectPerspective(topic:CurrentTopic,perspective:CurrentPerspective):N
   const status=perspective.kind==='shared_decision'?'current':perspective.kind==='unresolved'||perspective.speechAct==='explicit_disagreement'||
     perspective.observedAt>topic.changedAt?'unresolved':'historical';
   return{founder,status,statement:perspective.statement,observedAt:perspective.observedAt};
+}
+
+function isTopicLabelOnly(displayName:string,statement:string):boolean{
+  const normalize=(value:string)=>value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\p{P}\p{S}\s]+/gu,'');
+  return normalize(displayName)===normalize(statement);
 }
 
 function loadEvidence(client:Database.Database,topicIds:readonly string[]):{items:FounderCardEvidence[];linkedSourceCount:number}{
