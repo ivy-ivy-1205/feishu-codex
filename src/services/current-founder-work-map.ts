@@ -90,7 +90,8 @@ function projectPerspective(topic:CurrentTopic,perspective:CurrentPerspective):N
 
 function isTopicLabelOnly(displayName:string,statement:string):boolean{
   const normalize=(value:string)=>value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\p{P}\p{S}\s]+/gu,'');
-  return normalize(displayName)===normalize(statement);
+  const label=normalize(displayName),view=normalize(statement);
+  return view===label||(view.endsWith(label)&&view.length-label.length<=12);
 }
 
 function loadEvidence(client:Database.Database,topicIds:readonly string[]):{items:FounderCardEvidence[];linkedSourceCount:number}{
