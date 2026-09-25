@@ -18,10 +18,14 @@ const baseEnv = {
 
 describe('loadConfig', () => {
   it('defaults founder stream off and enforces ordered flag dependencies', () => {
-    expect(loadConfig(baseEnv).founderStream).toEqual({ captureEnabled: false, analysisEnabled: false, groupDeliveryEnabled: false });
+    expect(loadConfig(baseEnv).founderStream).toEqual({ captureEnabled: false, analysisEnabled: false,
+      groupDeliveryEnabled: false, manualQueryEnabled: false });
     expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_ANALYSIS_ENABLED: 'true' })).toThrow(/capture/i);
     expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true', FOUNDER_STREAM_GROUP_DELIVERY_ENABLED: 'true' })).toThrow(/analysis/i);
     expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true' }).founderStream.captureEnabled).toBe(true);
+    expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_MANUAL_QUERY_ENABLED: 'true' })).toThrow(/manual query.*analysis/i);
+    expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true',FOUNDER_STREAM_ANALYSIS_ENABLED:'true',
+      FOUNDER_STREAM_MANUAL_QUERY_ENABLED: 'true',WORKER_LEASE_SECONDS:'241' }).founderStream.manualQueryEnabled).toBe(true);
   });
   it('keeps Context extraction and review independently disabled by default', () => {
     expect(loadConfig(baseEnv).context).toEqual({

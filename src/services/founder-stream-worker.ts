@@ -27,6 +27,7 @@ import type { FeishuContextGap } from './feishu-context-sync.js';
 import { isSelfMediaProposal, projectFounderWorkMap, type FounderWorkMapClassification } from './founder-work-map-classification.js';
 import { parseFeishuAttachment } from './feishu-attachment-parser.js';
 import { classifyFounderFailure, type FounderFailureStage } from './founder-analysis-failure.js';
+import { buildFounderManualQueryMessages, enqueueFounderManualQuery, isConfiguredFounder, parseFounderManualQuery } from './founder-manual-query.js';
 
 export interface FounderPerspectiveAnalysisPort {
   analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[];
@@ -37,7 +38,7 @@ export interface FounderPerspectiveAnalysisPort {
 }
 export interface FounderStreamRoute { ingest(envelope: unknown): Record<string, unknown> | null }
 export interface FounderStreamOptions {
-  client: Database.Database; jobRepository: JobRepository; flags: AppConfig['founderStream'];
+  client: Database.Database; jobRepository: JobRepository; flags: Omit<AppConfig['founderStream'],'manualQueryEnabled'> & {manualQueryEnabled?:boolean};
   approvedChatIds: readonly string[]; ivyPrivateChatId: string; analyzer?: FounderStreamAnalyzer;
   classifier?: { classify(analysis: Awaited<ReturnType<FounderStreamAnalyzer['analyze']>>): Promise<FounderWorkMapClassification> };
   attachmentReader?: { read(input:{messageId:string;fileKey:string;fileName:string}):Promise<{body:Buffer;mimeType:string}> };
@@ -59,6 +60,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   if (options.jobRepository.client !== options.client) throw new Error('founder repositories must share one database');
   if (options.flags.analysisEnabled && !options.flags.captureEnabled) throw new Error('analysis requires capture');
   if (options.flags.groupDeliveryEnabled && (!options.flags.captureEnabled || !options.flags.analysisEnabled)) throw new Error('delivery requires capture and analysis');
+  if (options.flags.manualQueryEnabled && (!options.flags.captureEnabled || !options.flags.analysisEnabled)) throw new Error('manual query requires capture and analysis');
   const now = options.now ?? (() => new Date());
   const sources = new ContextSourceRepository(options.client), topics = new TopicRepository(options.client);
   const outbox = new OutboxRepository(options.client);
@@ -77,6 +79,18 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
     return options.client.transaction(() => {
       if (options.client.prepare('SELECT 1 FROM founder_stream_events WHERE event_id=? OR message_id=?').get(header.event_id, message.message_id)) return { status: 'duplicate' };
       const stamp = now(), text = messageText(message.message_type, message.content);
+      const manualQuery=text?parseFounderManualQuery(text):null;
+      if(manualQuery){
+        if(!options.flags.manualQueryEnabled)return{status:'ignored',reason:'manual_query_disabled'};
+        const openId=event.sender.sender_id.open_id??'';
+        if(event.sender.sender_type!=='user'||!isConfiguredFounder(options.client,openId))return{status:'rejected',reason:'founder_identity_required'};
+        const messages=buildFounderManualQueryMessages({client:options.client,query:manualQuery,queryMessageId:message.message_id,
+          chatId,approvedChatIds:options.approvedChatIds,now:stamp});
+        enqueueFounderManualQuery(options.client,messages,stamp);
+        options.client.prepare('INSERT INTO founder_stream_events(event_id,message_id,chat_id,disposition,received_at) VALUES(?,?,?,?,?)')
+          .run(header.event_id,message.message_id,chatId,'feedback',stamp.toISOString());
+        return{status:'manual_query_queued',pages:messages.length};
+      }
       const attachment=message.message_type==='file'?fileAttachment(message.content):null;
       const attachmentQueued=event.sender.sender_type==='user'&&Boolean(attachment&&options.attachmentReader);
       let disposition = event.sender.sender_type !== 'user' ? 'bot_audit' : !text ? 'skipped_media' : 'captured';
@@ -321,7 +335,9 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         try { enqueueMinute(source); } catch { /* Retry on the next independent tick. */ }
       }
       policy.reconcilePending(now());
-      if (!options.flags.groupDeliveryEnabled || !options.delivery) return;
+      if (!options.delivery) return;
+      if(options.flags.manualQueryEnabled)await deliverManualQueryMessages(options,now,allowed);
+      if (!options.flags.groupDeliveryEnabled) return;
       await deliverFounderMessages(options, outbox, policy, now, allowed);
   };
   const consumer = new DurableJobConsumer({ now, intervalMs: options.intervalMs,
@@ -380,6 +396,22 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
     minuteCaptureChatId:options.flags.captureEnabled && allowed(approvedGroup)?approvedGroup:undefined,
     supportedKinds, runOnce: () => consumer.runOnce(), start: () => { if (options.flags.captureEnabled) consumer.start(); },
     stop: () => consumer.stop(), isConsumptionAvailable: () => consumer.isConsumptionAvailable() };
+}
+async function deliverManualQueryMessages(options:FounderStreamOptions,now:()=>Date,allowed:(id:string)=>boolean){
+  const rows=options.client.prepare(`SELECT idempotency_key,payload FROM outbox WHERE status='pending'
+    AND (next_attempt_at IS NULL OR next_attempt_at<=?) ORDER BY created_at,id`).all(now().toISOString()) as {idempotency_key:string;payload:string}[];
+  for(const row of rows){
+    let message:any;try{message=JSON.parse(row.payload)}catch{continue}
+    const manual=message?.kind==='founder_manual_query'||(message?.kind==='founder_work_map'&&typeof message.manualQueryMessageId==='string');
+    if(!manual||!allowed(message.targetChatId)||!message.card)continue;
+    try{
+      const sent=await options.delivery!.sendInteractiveCard({chatId:message.targetChatId,card:message.card,idempotencyKey:row.idempotency_key});
+      if(!sent.messageId.trim()||sent.messageId.startsWith('pending:'))throw new Error('invalid delivery');
+      options.client.prepare("UPDATE outbox SET status='delivered',delivered_message_id=?,delivered_at=?,next_attempt_at=NULL,last_error_code=NULL WHERE idempotency_key=? AND status='pending'")
+        .run(sent.messageId,now().toISOString(),row.idempotency_key);
+    }catch{options.client.prepare("UPDATE outbox SET attempt_count=attempt_count+1,next_attempt_at=?,last_error_code='FOUNDER_DELIVERY_FAILED' WHERE idempotency_key=? AND status='pending'")
+      .run(new Date(now().getTime()+30_000).toISOString(),row.idempotency_key)}
+  }
 }
 
 export function buildFounderStreamInput(sources: ContextSourceRepository, topics: TopicRepository, sourceIds: readonly string[], chatId: string): FounderStreamInput {
