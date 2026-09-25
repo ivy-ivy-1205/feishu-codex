@@ -35,6 +35,7 @@ const labels: Record<TopicStage, string> = {
 };
 interface Item { section: string; text: string; ref: FounderWorkMapItemRef }
 const compareId = (a: { id: string }, b: { id: string }): number => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+const aLine='AiJia AI Native 房产业务',bLine='自媒体生产线';
 
 export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMapCard[] {
   const start = Date.parse(input.since), end = Date.parse(input.until);
@@ -49,13 +50,23 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     const displayedNumber = items.length + 1;
     items.push({ section, text: `#${displayedNumber} · ${text}`, ref: { ...ref, displayedNumber } });
   };
-  const topics = [...input.topics].sort((a, b) => stages.indexOf(a.stage) - stages.indexOf(b.stage) || compareId(a, b));
+  const topicByName=new Map<string,FounderWorkMapTopic>();
+  const duplicateNames=new Set<string>();
+  for(const topic of input.topics){if(topicByName.has(topic.displayName)){topicByName.delete(topic.displayName);duplicateNames.add(topic.displayName)}
+    else if(!duplicateNames.has(topic.displayName))topicByName.set(topic.displayName,topic)}
+  const topics = [...input.topics].sort((a,b)=>compareHierarchy(a,b,topicByName));
   for (const topic of topics) {
     if (!stages.includes(topic.stage) || !Number.isInteger(topic.currentVersion) || topic.currentVersion < 1 || !topic.displayName.trim()) {
       throw new Error('valid work-map topic is required');
     }
     const suffix = topic.stage === 'paused' ? '（暂停）' : topic.stage === 'closed' ? '（已结束）' : '';
-    add(labels[topic.stage], `${founderText(topic.displayName, 80)}${suffix}${topic.parentName ? `\n归属：${founderText(topic.parentName,80)}` : ''}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 160)}` : ''}${perspectivePreview(topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}`,
+    const hierarchy=hierarchyFor(topic,topicByName),framework=frameworkFor(hierarchy);
+    const section=framework==='A'?`A 线｜${aLine}`:framework==='B'?`B 线｜${bLine}`:
+      topic.displayName==='AiJia Founder Alignment Room / AiJia 合伙人对齐室'?'公司协作基础设施':labels[topic.stage];
+    const title=framework&&hierarchy.length===1?`总项目：${topic.displayName}`:framework?`子项目：${topic.displayName}`:topic.displayName;
+    const hierarchyText=framework&&hierarchy.length>1?`\n层级：${framework} 线 > ${hierarchy.slice(1).map(item=>founderText(item.displayName,80)).join(' > ')}`:
+      topic.parentName?`\n归属：${founderText(topic.parentName,80)}`:'';
+    add(section, `${founderText(title, 100)}${suffix}${hierarchyText}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}`,
       { kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
   }
   for (const grouping of [...input.uncertainGrouping].sort(compareId)) {
@@ -87,6 +98,26 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     return { kind: 'founder_work_map', page: index + 1, totalPages: chunks.length,
       itemRefs: chunk.map((item) => item.ref), card: founderCard(`工作地图 · ${index + 1}/${chunks.length}`, lines) };
   });
+}
+
+function hierarchyFor(topic:FounderWorkMapTopic,byName:ReadonlyMap<string,FounderWorkMapTopic>):FounderWorkMapTopic[]{
+  const path=[topic],seen=new Set([topic.id]);let current=topic;
+  while(current.parentName){const parent=byName.get(current.parentName);if(!parent||seen.has(parent.id))break;
+    path.unshift(parent);seen.add(parent.id);current=parent}
+  return path;
+}
+
+function frameworkFor(path:readonly FounderWorkMapTopic[]):'A'|'B'|null{
+  return path[0]?.displayName===aLine?'A':path[0]?.displayName===bLine?'B':null;
+}
+
+function compareHierarchy(a:FounderWorkMapTopic,b:FounderWorkMapTopic,byName:ReadonlyMap<string,FounderWorkMapTopic>):number{
+  const key=(topic:FounderWorkMapTopic):string=>{const path=hierarchyFor(topic,byName),framework=frameworkFor(path);
+    const root=framework==='A'?'0':framework==='B'?'1':topic.displayName==='AiJia Founder Alignment Room / AiJia 合伙人对齐室'?'2':'3';
+    const projectOrder=(name:string):string=>name==='AiJia 官网'?'00':name==='Smart Listing'?'01':
+      name==='AI 选房经验与知识库'?'02':name==='房产销售过程数据沉淀'?'03':name;
+    return [root,...path.slice(1).map(item=>projectOrder(item.displayName)),stages.indexOf(topic.stage).toString().padStart(2,'0'),topic.id].join('|')};
+  return key(a).localeCompare(key(b));
 }
 
 function supportingPreview(items:readonly {kind:'principle'|'artifact'|'research';displayName:string}[]):string{

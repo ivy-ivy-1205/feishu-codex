@@ -59,6 +59,26 @@ describe('applyFounderBaseline',()=>{
     ]);
     expect(manifest.partOf).toEqual([]);expect(manifest.newTopics).toEqual([]);
   });
+  it('locks V5 to the A/B-line hierarchy, separate website entry and three sales-data dimensions',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync(
+      'deploy/founder-work-map-v5-20260925.manifest.json','utf8')));
+    expect(manifest.expected).toEqual({topics:35,perspectives:25,relations:32});
+    expect(manifest.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_0622155dc9cfbc4ae20c295b04312e99',version:2,
+        outcome:expect.stringMatching(/官网.*Smart Listing.*Amy/u)})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_5606ca3835bf19372aff6ff4e39bb75d',version:2,
+        name:'Smart Listing',outcome:expect.stringMatching(/官网.*共用/u)})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_4d3df2c0792480acf4913b2fea8e42de',version:5,
+        outcome:expect.stringMatching(/Open Home.*CRM.*Training/u)})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_ecedcaad5562d2e3c4da11ffe7644897',version:3,
+        name:'Smart Listing L008｜27 Cecil Street 样板'})})
+    ]));
+    expect(manifest.newTopics).toEqual([expect.objectContaining({key:'aijia_website',name:'AiJia 官网',stage:'active_project',
+      outcome:expect.stringMatching(/Smart Listing.*Amy/u),sourceIds:expect.arrayContaining([
+        'ctxsrc_8886aef5e82dcf97df835d80ea3a5afa','ctxsrc_d81a025f0c185b0be5faad8d2a51459a'
+      ])})]);
+    expect(manifest.newPartOf).toEqual([{childKey:'aijia_website',parentId:'topic_0622155dc9cfbc4ae20c295b04312e99'}]);
+  });
   it('can add reviewed same_as relations without appending unchanged canonical versions',()=>{
     const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
     const at=new Date('2026-09-25T00:00:00Z');

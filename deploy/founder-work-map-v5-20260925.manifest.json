@@ -1,0 +1,64 @@
+{
+  "expected": { "topics": 35, "perspectives": 25, "relations": 32 },
+  "groups": [
+    {
+      "canonical": {
+        "id": "topic_0622155dc9cfbc4ae20c295b04312e99",
+        "version": 2,
+        "name": "AiJia AI Native 房产业务",
+        "stage": "active_project",
+        "outcome": "A 线总项目。官网与 Smart Listing 是两个客户入口，Amy 是二者共享的数字员工与服务底座；AI 选房知识库和销售过程数据共同支撑服务。"
+      },
+      "duplicates": []
+    },
+    {
+      "canonical": {
+        "id": "topic_5606ca3835bf19372aff6ff4e39bb75d",
+        "version": 2,
+        "name": "Smart Listing",
+        "stage": "active_project",
+        "outcome": "单套房源智能入口；Amy 围绕当前房源、空间与客户问题提供连续陪看，并与官网共用客户理解、会话、知识和任务承接底座。"
+      },
+      "duplicates": []
+    },
+    {
+      "canonical": {
+        "id": "topic_4d3df2c0792480acf4913b2fea8e42de",
+        "version": 5,
+        "name": "房产销售过程数据沉淀",
+        "stage": "active_project",
+        "outcome": "沉淀三类数据：1）Open Home 销售过程全程、全量、清晰录音，区分销售与客户，收集真实问答语料；2）Open Home 或私聊后的 CRM 客户需求与情况回填，以每套房导出的 CRM 记录作为分析起点，当前尚未要求完整回填；3）销售团队内部 Training 录音语料。"
+      },
+      "duplicates": []
+    },
+    {
+      "canonical": {
+        "id": "topic_ecedcaad5562d2e3c4da11ffe7644897",
+        "version": 3,
+        "name": "Smart Listing L008｜27 Cecil Street 样板",
+        "stage": "active_project",
+        "outcome": "作为 Smart Listing 的 L008 样板，使用 27 Cecil Street 验证空间浏览、Amy 陪看与真实房源资料协作。"
+      },
+      "duplicates": []
+    }
+  ],
+  "partOf": [],
+  "newTopics": [
+    {
+      "key": "aijia_website",
+      "name": "AiJia 官网",
+      "stage": "active_project",
+      "outcome": "AiJia 的公司与服务入口；客户可从官网进入需求理解与持续服务，并使用与 Smart Listing 共用的 Amy、客户记录、知识和任务承接底座。",
+      "sourceIds": [
+        "ctxsrc_8886aef5e82dcf97df835d80ea3a5afa",
+        "ctxsrc_d81a025f0c185b0be5faad8d2a51459a"
+      ]
+    }
+  ],
+  "newPartOf": [
+    {
+      "childKey": "aijia_website",
+      "parentId": "topic_0622155dc9cfbc4ae20c295b04312e99"
+    }
+  ]
+}
