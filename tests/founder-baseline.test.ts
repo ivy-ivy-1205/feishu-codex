@@ -49,6 +49,35 @@ describe('applyFounderBaseline',()=>{
     ]));
     expect(manifest.newPartOf).toHaveLength(2);
   });
+  it('locks V4 to the two reviewed false-positive merges without rewriting canonical topics',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync(
+      'deploy/founder-work-map-v4-20260925.manifest.json','utf8')));
+    expect(manifest.expected).toEqual({topics:35,perspectives:25,relations:30});
+    expect(manifest.groups).toEqual([
+      expect.objectContaining({updateCanonical:false,canonical:expect.objectContaining({id:'topic_0622155dc9cfbc4ae20c295b04312e99'}),duplicates:[{id:'topic_4cffb20d7cead310bddb2236475c028d',version:1}]}),
+      expect.objectContaining({updateCanonical:false,canonical:expect.objectContaining({id:'topic_03f66a09b3b00d736bf0cab9b4a9e722'}),duplicates:[{id:'topic_a8b0301b2e1362d40b6e6ad741b1a06b',version:1}]})
+    ]);
+    expect(manifest.partOf).toEqual([]);expect(manifest.newTopics).toEqual([]);
+  });
+  it('can add reviewed same_as relations without appending unchanged canonical versions',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
+    const at=new Date('2026-09-25T00:00:00Z');
+    const canonical=topics.createTopic({displayName:'A 线',stage:'active_project',outcome:'方向',createdAt:at});
+    const duplicate=topics.createTopic({displayName:'错误条目',stage:'exploring',createdAt:new Date(at.getTime()+1)});
+    const manifest={expected:{topics:2,perspectives:0,relations:0},groups:[{updateCanonical:false,
+      canonical:{id:canonical.id,version:1,name:'A 线',stage:'active_project' as const,outcome:'方向'},duplicates:[{id:duplicate.id,version:1}]}],partOf:[],newTopics:[]};
+    expect(applyFounderBaseline(db.client,manifest,at,true)).toMatchObject({canonicalUpdates:0,sameAs:1,applied:true});
+    expect(topics.listCurrentTopics().find(topic=>topic.id===canonical.id)?.currentVersion).toBe(1);
+  });
+  it('rejects a relation-only manifest when canonical content has drifted',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
+    const at=new Date('2026-09-25T00:00:00Z');
+    const canonical=topics.createTopic({displayName:'A 线',stage:'active_project',outcome:'已变化方向',createdAt:at});
+    const duplicate=topics.createTopic({displayName:'错误条目',stage:'exploring',createdAt:new Date(at.getTime()+1)});
+    const manifest={expected:{topics:2,perspectives:0,relations:0},groups:[{updateCanonical:false,
+      canonical:{id:canonical.id,version:1,name:'A 线',stage:'active_project' as const,outcome:'原方向'},duplicates:[{id:duplicate.id,version:1}]}],partOf:[],newTopics:[]};
+    expect(()=>applyFounderBaseline(db.client,manifest,at,false)).toThrow(/FOUNDER_BASELINE_CANONICAL_MISMATCH/);
+  });
   it('previews without writes and atomically appends canonical versions and relations',()=>{
     const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
     const at=new Date('2026-09-24T00:00:00Z');

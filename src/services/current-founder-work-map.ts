@@ -1,0 +1,110 @@
+import type Database from 'better-sqlite3';
+import { contextEvidenceLocatorSchema } from '../domain/context.js';
+import type { CurrentPerspective } from '../domain/alignment.js';
+import type { CurrentTopic } from '../domain/topic.js';
+import { AlignmentRepository } from '../repositories/alignment-repository.js';
+import { OutboxRepository } from '../repositories/outbox-repository.js';
+import { TopicRepository } from '../repositories/topic-repository.js';
+import { canonicalJson, stableId } from './canonical-json.js';
+import type { FounderCardEvidence } from './founder-card.js';
+import { renderFounderWorkMap, type FounderWorkMapCard, type FounderWorkMapTopic } from './founder-work-map-renderer.js';
+
+export interface CurrentFounderWorkMapInput {
+  client: Database.Database;
+  chatId: string;
+  since: string;
+  until: string;
+  approvedChatIds: readonly string[];
+  expectedCanonicalTopicCount: number;
+}
+
+export interface CurrentFounderWorkMapResult {
+  mapId: string;
+  canonicalTopicCount: number;
+  cards: FounderWorkMapCard[];
+}
+
+export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):CurrentFounderWorkMapResult{
+  assertInput(input);
+  const topics=new TopicRepository(input.client),alignment=new AlignmentRepository(input.client);
+  const canonical=topics.listCanonicalTopics();
+  if(canonical.length!==input.expectedCanonicalTopicCount)throw new Error('FOUNDER_WORK_MAP_TOPIC_COUNT_MISMATCH');
+  const rootByTopic=canonicalRoots(topics.listCurrentTopics(),topics.listRelations().filter(relation=>relation.relationType==='same_as'));
+  const canonicalById=new Map(canonical.map(topic=>[topic.id,topic]));
+  const parentByChild=new Map<string,string>();
+  for(const relation of topics.listRelations().filter(relation=>relation.relationType==='part_of')){
+    const child=rootByTopic.get(relation.fromTopicId),parent=rootByTopic.get(relation.toTopicId);
+    if(child&&parent&&child!==parent)parentByChild.set(child,parent);
+  }
+  const projected:FounderWorkMapTopic[]=canonical.map(topic=>{
+    const componentIds=[...rootByTopic].filter(([,root])=>root===topic.id).map(([id])=>id);
+    const evidence=loadEvidence(input.client,componentIds);
+    const parentId=parentByChild.get(topic.id);
+    return{...topic,evidence:evidence.items,linkedSourceCount:evidence.linkedSourceCount,
+      parentName:parentId?canonicalById.get(parentId)?.displayName:undefined,
+      perspectives:alignment.listCanonicalPerspectives(topic.id).map(perspective=>projectPerspective(topic,perspective))};
+  });
+  const cards=renderFounderWorkMap({since:input.since,until:input.until,topics:projected,uncertainGrouping:[],coverageGaps:loadCoverageGaps(input.client,input.chatId,input.since,input.until)});
+  const mapId=stableId('foundermap',canonicalJson({chatId:input.chatId,since:input.since,until:input.until,
+    topics:canonical.map(topic=>({id:topic.id,version:topic.currentVersion})),pages:cards.length}));
+  return{mapId,canonicalTopicCount:canonical.length,cards};
+}
+
+export function enqueueCurrentFounderWorkMap(input:CurrentFounderWorkMapInput&{
+  confirmedChatId:string;groupDeliveryEnabled:boolean;now?:Date;
+}):CurrentFounderWorkMapResult&{created:number}{
+  if(!input.groupDeliveryEnabled)throw new Error('FOUNDER_WORK_MAP_DELIVERY_DISABLED');
+  if(input.confirmedChatId!==input.chatId)throw new Error('FOUNDER_WORK_MAP_TARGET_NOT_CONFIRMED');
+  const result=buildCurrentFounderWorkMap(input),outbox=new OutboxRepository(input.client);
+  const created=input.client.transaction(()=>result.cards.reduce((count,card)=>count+Number(outbox.enqueueFounderWorkMap({
+    ...card,mapId:result.mapId,targetChatId:input.chatId
+  },input.now).created),0)).immediate();
+  return{...result,created};
+}
+
+function assertInput(input:CurrentFounderWorkMapInput):void{
+  if(!input.chatId.trim()||!input.approvedChatIds.includes(input.chatId))throw new Error('FOUNDER_WORK_MAP_CHAT_NOT_APPROVED');
+  if(!Number.isSafeInteger(input.expectedCanonicalTopicCount)||input.expectedCanonicalTopicCount<1)throw new Error('FOUNDER_WORK_MAP_TOPIC_COUNT_INVALID');
+  const since=Date.parse(input.since),until=Date.parse(input.until);
+  if(!Number.isFinite(since)||!Number.isFinite(until)||since>=until)throw new Error('FOUNDER_WORK_MAP_WINDOW_INVALID');
+}
+
+function canonicalRoots(all:readonly CurrentTopic[],relations:readonly {fromTopicId:string;toTopicId:string}[]):Map<string,string>{
+  const byId=new Map(all.map(topic=>[topic.id,topic])),parent=new Map(all.map(topic=>[topic.id,topic.id]));
+  const find=(id:string):string=>{const current=parent.get(id)!;if(current===id)return id;const root=find(current);parent.set(id,root);return root};
+  for(const relation of relations){const a=find(relation.fromTopicId),b=find(relation.toTopicId);if(a===b)continue;
+    const root=byId.get(a)!.createdAt.localeCompare(byId.get(b)!.createdAt)<=0?a:b;parent.set(root===a?b:a,root)}
+  return new Map(all.map(topic=>[topic.id,find(topic.id)]));
+}
+
+function projectPerspective(topic:CurrentTopic,perspective:CurrentPerspective):NonNullable<FounderWorkMapTopic['perspectives']>[number]{
+  const founder=perspective.kind==='shared_decision'?'双方':perspective.kind==='james_view'?'James':'Ivy';
+  const status=perspective.kind==='shared_decision'?'current':perspective.kind==='unresolved'||perspective.speechAct==='explicit_disagreement'||
+    perspective.observedAt>topic.changedAt?'unresolved':'historical';
+  return{founder,status,statement:perspective.statement,observedAt:perspective.observedAt};
+}
+
+function loadEvidence(client:Database.Database,topicIds:readonly string[]):{items:FounderCardEvidence[];linkedSourceCount:number}{
+  if(topicIds.length===0)return{items:[],linkedSourceCount:0};
+  const placeholders=topicIds.map(()=>'?').join(',');
+  const links=client.prepare(`SELECT DISTINCT ts.source_id,ts.evidence_id FROM context_topic_sources ts
+    JOIN context_topic_versions tv ON tv.id=ts.topic_version_id WHERE tv.topic_id IN (${placeholders})`).all(...topicIds) as {source_id:string;evidence_id:string|null}[];
+  const ids=[...new Set(links.flatMap(link=>link.evidence_id?[link.evidence_id]:[]))];
+  const items=ids.flatMap(id=>{
+    const row=client.prepare(`SELECT e.id,e.source_id,e.source_version,e.excerpt,e.locator_json,s.occurred_at,s.metadata_json
+      FROM context_evidence e JOIN context_sources s ON s.id=e.source_id WHERE e.id=?`).get(id) as {id:string;source_id:string;source_version:number;excerpt:string;locator_json:string;occurred_at:string;metadata_json:string}|undefined;
+    if(!row)return[];const locator=contextEvidenceLocatorSchema.safeParse(JSON.parse(row.locator_json));if(!locator.success)return[];
+    let minuteToken:string|undefined;try{const token=(JSON.parse(row.metadata_json) as {minuteToken?:unknown}).minuteToken;if(typeof token==='string')minuteToken=token}catch{}
+    return[{id:row.id,sourceId:row.source_id,sourceVersion:row.source_version,excerpt:row.excerpt,locator:locator.data,occurredAt:row.occurred_at,...(minuteToken?{minuteToken}:{})}];
+  });
+  return{items,linkedSourceCount:new Set(links.map(link=>link.source_id)).size};
+}
+
+function loadCoverageGaps(client:Database.Database,chatId:string,since:string,until:string):{id:string;summary:string}[]{
+  const rows=client.prepare(`SELECT metadata_json FROM context_sources WHERE source_type='feishu_sync_coverage'
+    AND occurred_at>=? AND occurred_at<=? ORDER BY occurred_at DESC`).all(since,until) as {metadata_json:string}[];
+  const counts=new Map<string,number>();
+  for(const row of rows)try{const value=JSON.parse(row.metadata_json) as {chatId?:unknown;gaps?:unknown};if(value.chatId!==chatId||!Array.isArray(value.gaps))continue;
+    for(const gap of value.gaps){if(typeof gap==='object'&&gap!==null&&'reasonCode'in gap&&typeof gap.reasonCode==='string')counts.set(gap.reasonCode,(counts.get(gap.reasonCode)??0)+1)}}catch{}
+  return[...counts].sort().map(([reason,count])=>({id:`coverage:${reason}`,summary:`${reason}：${count} 条（不同同步批次可能重复）`}));
+}

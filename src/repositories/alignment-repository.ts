@@ -253,7 +253,17 @@ export class AlignmentRepository {
         perspective.observedAt===existing.observedAt&&perspective.id.localeCompare(existing.id)>0;
       selected.set(key,{...(usePerspective?perspective:existing),evidenceIds});
     }
-    return[...selected.values()].sort((a,b)=>(a.decisionKey??'').localeCompare(b.decisionKey??'')||a.kind.localeCompare(b.kind));
+    const collapsed:CurrentPerspective[]=[];
+    for(const perspective of selected.values()){
+      const normalized=normalizePerspectiveStatement(perspective.statement);
+      const index=collapsed.findIndex(existing=>existing.kind===perspective.kind&&existing.observedAt===perspective.observedAt&&
+        semanticallyContains(normalizePerspectiveStatement(existing.statement),normalized));
+      if(index<0){collapsed.push(perspective);continue}
+      const existing=collapsed[index]!,existingNormalized=normalizePerspectiveStatement(existing.statement);
+      const preferred=normalized.length<existingNormalized.length?perspective:existing;
+      collapsed[index]={...preferred,evidenceIds:[...new Set([...existing.evidenceIds,...perspective.evidenceIds])].sort()};
+    }
+    return collapsed.sort((a,b)=>(a.decisionKey??'').localeCompare(b.decisionKey??'')||a.kind.localeCompare(b.kind));
   }
 
   listPerspectiveVersions(topicId: string, kind: PerspectiveKind): PerspectiveVersion[] {
@@ -315,6 +325,11 @@ export class AlignmentRepository {
 
 function normalizePerspectiveStatement(value:string):string{
   return value.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\p{P}\p{S}\s]+/gu,'');
+}
+
+function semanticallyContains(left:string,right:string):boolean{
+  const shorter=left.length<=right.length?left:right,longer=left.length<=right.length?right:left;
+  return shorter.length>=20&&longer.length-shorter.length<=12&&longer.includes(shorter);
 }
 
 interface FounderIdentityRow {

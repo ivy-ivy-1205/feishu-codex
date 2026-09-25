@@ -1,0 +1,33 @@
+{
+  "expected": { "topics": 35, "perspectives": 25, "relations": 30 },
+  "groups": [
+    {
+      "updateCanonical": false,
+      "canonical": {
+        "id": "topic_0622155dc9cfbc4ae20c295b04312e99",
+        "version": 2,
+        "name": "AiJia AI Native 房产业务",
+        "stage": "active_project",
+        "outcome": "AiJia 当前工作的总项目，覆盖 AI Native 房产服务及其子项目。"
+      },
+      "duplicates": [
+        { "id": "topic_4cffb20d7cead310bddb2236475c028d", "version": 1 }
+      ]
+    },
+    {
+      "updateCanonical": false,
+      "canonical": {
+        "id": "topic_03f66a09b3b00d736bf0cab9b4a9e722",
+        "version": 1,
+        "name": "40 年超长期房贷",
+        "stage": "active_project",
+        "outcome": "相关内容已经完成并达到可发布状态，但尚未发布；下一步是完成发布。"
+      },
+      "duplicates": [
+        { "id": "topic_a8b0301b2e1362d40b6e6ad741b1a06b", "version": 1 }
+      ]
+    }
+  ],
+  "partOf": [],
+  "newTopics": []
+}

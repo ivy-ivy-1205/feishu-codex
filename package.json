@@ -15,6 +15,7 @@
     "founder-stream:backfill": "node --import tsx src/cli/backfill-founder-stream.ts",
     "founder-stream:preview": "node --import tsx src/cli/preview-founder-work-map.ts",
     "founder-baseline": "node --import tsx src/cli/apply-founder-baseline.ts",
+    "founder-work-map:current": "node --import tsx src/cli/current-founder-work-map.ts",
     "context-source-retention:migrate": "node --import tsx src/cli/migrate-context-source-retention.ts",
     "context-source:retention": "node --import tsx src/cli/context-source-retention.ts",
     "dev": "node --env-file=.env --import tsx src/server.ts"

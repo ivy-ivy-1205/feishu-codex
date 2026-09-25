@@ -8,7 +8,7 @@ interface TopicRef{id:string;version:number}
 interface CanonicalRef extends TopicRef{name:string;stage:TopicStage;outcome:string|null}
 export interface FounderBaselineManifest{
   expected:{topics:number;perspectives:number;relations:number};
-  groups:{canonical:CanonicalRef;duplicates:TopicRef[]}[];
+  groups:{canonical:CanonicalRef;duplicates:TopicRef[];updateCanonical?:boolean}[];
   partOf:{childId:string;parentId:string}[];
   newTopics:{key?:string;name:string;stage:TopicStage;outcome:string|null;sourceIds:string[]}[];
   newPartOf?:(
@@ -19,7 +19,7 @@ const topicRefSchema=z.object({id:z.string().min(1),version:z.number().int().pos
 const canonicalRefSchema=topicRefSchema.extend({name:z.string().trim().min(1).max(80),stage:topicStageSchema,outcome:z.string().trim().min(1).nullable()}).strict();
 export const founderBaselineManifestSchema=z.object({
   expected:z.object({topics:z.number().int().nonnegative(),perspectives:z.number().int().nonnegative(),relations:z.number().int().nonnegative()}).strict(),
-  groups:z.array(z.object({canonical:canonicalRefSchema,duplicates:z.array(topicRefSchema)}).strict()).min(1),
+  groups:z.array(z.object({canonical:canonicalRefSchema,duplicates:z.array(topicRefSchema),updateCanonical:z.boolean().default(true)}).strict()).min(1),
   partOf:z.array(z.object({childId:z.string().min(1),parentId:z.string().min(1)}).strict()),
   newTopics:z.array(z.object({key:z.string().trim().min(1).max(80).optional(),name:z.string().trim().min(1).max(80),stage:topicStageSchema,
     outcome:z.string().trim().min(1).nullable(),sourceIds:z.array(z.string().min(1))}).strict()),
@@ -34,7 +34,7 @@ export interface FounderBaselineResult{canonicalUpdates:number;sameAs:number;par
 export function applyFounderBaseline(client:Database.Database,manifest:FounderBaselineManifest,at:Date,apply:boolean):FounderBaselineResult{
   manifest=founderBaselineManifestSchema.parse(manifest);
   const newPartOf=manifest.newPartOf??[];
-  const result:FounderBaselineResult={canonicalUpdates:manifest.groups.length,sameAs:manifest.groups.reduce((n,g)=>n+g.duplicates.length,0),
+  const result:FounderBaselineResult={canonicalUpdates:manifest.groups.filter(group=>group.updateCanonical!==false).length,sameAs:manifest.groups.reduce((n,g)=>n+g.duplicates.length,0),
     partOf:manifest.partOf.length+newPartOf.length,newTopics:manifest.newTopics.length,applied:apply};
   const operation=()=>{
     const counts={topics:count(client,'context_topics'),perspectives:count(client,'topic_perspectives'),relations:count(client,'context_topic_relations')};
@@ -43,6 +43,10 @@ export function applyFounderBaseline(client:Database.Database,manifest:FounderBa
     const refs=manifest.groups.flatMap(group=>[group.canonical,...group.duplicates]);
     if(new Set(refs.map(ref=>ref.id)).size!==refs.length)throw new Error('FOUNDER_BASELINE_TOPIC_DUPLICATE');
     for(const ref of refs)if(byId.get(ref.id)?.currentVersion!==ref.version)throw new Error('FOUNDER_BASELINE_VERSION_MISMATCH');
+    for(const group of manifest.groups)if(group.updateCanonical===false){const current=byId.get(group.canonical.id)!;
+      if(current.displayName!==group.canonical.name||current.stage!==group.canonical.stage||current.outcome!==group.canonical.outcome)
+        throw new Error('FOUNDER_BASELINE_CANONICAL_MISMATCH');
+    }
     for(const relation of manifest.partOf)if(!byId.has(relation.childId)||!byId.has(relation.parentId)||relation.childId===relation.parentId)
       throw new Error('FOUNDER_BASELINE_RELATION_INVALID');
     const keys=manifest.newTopics.flatMap(item=>item.key?[item.key]:[]),keySet=new Set(keys);
@@ -58,7 +62,7 @@ export function applyFounderBaseline(client:Database.Database,manifest:FounderBa
     if(!apply)return;
     for(const group of manifest.groups){const canonical=byId.get(group.canonical.id)!;
       const evidence=[...new Set([canonical,...group.duplicates.map(ref=>byId.get(ref.id)!)].flatMap(topic=>topic.evidenceIds))];
-      topics.appendVersion({topicId:canonical.id,expectedVersion:canonical.currentVersion,displayName:group.canonical.name,
+      if(group.updateCanonical!==false)topics.appendVersion({topicId:canonical.id,expectedVersion:canonical.currentVersion,displayName:group.canonical.name,
         stage:group.canonical.stage,outcome:group.canonical.outcome,rationale:'Ivy confirmed Founder work map baseline',evidenceIds:evidence,changedAt:at});
       for(const duplicate of group.duplicates)topics.addRelation({fromTopicId:canonical.id,toTopicId:duplicate.id,relationType:'same_as',
         rationale:'Ivy confirmed same project in Founder work map',createdAt:at});

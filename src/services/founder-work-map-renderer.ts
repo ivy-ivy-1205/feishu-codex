@@ -4,6 +4,7 @@ import { founderCard, founderSourceText, founderText, type FounderCardEvidence }
 export interface FounderWorkMapTopic extends Pick<CurrentTopic, 'id' | 'currentVersion' | 'displayName' | 'stage' | 'outcome'> {
   evidence: readonly FounderCardEvidence[];
   linkedSourceCount?: number;
+  parentName?: string;
   perspectives?: readonly { founder:'Ivy'|'James'|'双方';status:'current'|'historical'|'unresolved';statement:string;observedAt:string }[];
   supportingItems?: readonly {kind:'principle'|'artifact'|'research';displayName:string}[];
 }
@@ -54,7 +55,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
       throw new Error('valid work-map topic is required');
     }
     const suffix = topic.stage === 'paused' ? '（暂停）' : topic.stage === 'closed' ? '（已结束）' : '';
-    add(labels[topic.stage], `${founderText(topic.displayName, 80)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 160)}` : ''}${perspectivePreview(topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}`,
+    add(labels[topic.stage], `${founderText(topic.displayName, 80)}${suffix}${topic.parentName ? `\n归属：${founderText(topic.parentName,80)}` : ''}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 160)}` : ''}${perspectivePreview(topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}`,
       { kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
   }
   for (const grouping of [...input.uncertainGrouping].sort(compareId)) {

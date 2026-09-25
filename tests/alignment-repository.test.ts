@@ -83,6 +83,22 @@ describe('AlignmentRepository', () => {
       })
     ]);
   });
+  it('collapses a same-time prefixed restatement from the same founder', () => {
+    const { repository, sources, topic, database } = createHarness();
+    const duplicate = new TopicRepository(database.client).createTopic({displayName:'对齐室副本',stage:'active_project',createdAt:new Date('2026-09-01T00:01:00Z')});
+    new TopicRepository(database.client).addRelation({fromTopicId:topic.id,toTopicId:duplicate.id,relationType:'same_as',rationale:'confirmed',createdAt:new Date('2026-09-01T00:02:00Z')});
+    const long='建议的目标：每周减少的重复解释、查找和返工时间，明显高于系统维护的新增成本。';
+    const short='每周减少的重复解释、查找和返工时间，明显高于系统维护的新增成本。';
+    const first=saveGroupEvidence(sources,{messageId:'om_goal_a',openId:'ou_james',displayName:'James',text:long,occurredAt:'2026-09-02T01:00:00Z'});
+    const second=saveGroupEvidence(sources,{messageId:'om_goal_b',openId:'ou_james',displayName:'James',text:short,occurredAt:'2026-09-02T01:00:00Z'});
+    repository.savePerspective({topicId:topic.id,kind:'james_view',expectedVersion:0,statement:long,confidence:1,evidenceIds:[first],decisionKey:'success_standard',speechAct:'view',observedAt:new Date('2026-09-02T01:00:00Z')});
+    repository.savePerspective({topicId:duplicate.id,kind:'james_view',expectedVersion:0,statement:short,confidence:1,evidenceIds:[second],decisionKey:'effect_standard',speechAct:'view',observedAt:new Date('2026-09-02T01:00:00Z')});
+
+    const result=repository.listCanonicalPerspectives(topic.id);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(expect.objectContaining({ statement: short }));
+    expect(new Set(result[0]!.evidenceIds)).toEqual(new Set([first,second]));
+  });
   it('attributes evidence only through configured immutable founder identities', () => {
     const { repository, sources } = createHarness();
     const ivyEvidenceId = saveGroupEvidence(sources, {
