@@ -116,7 +116,8 @@ function compareHierarchy(a:FounderWorkMapTopic,b:FounderWorkMapTopic,byName:Rea
     const root=framework==='A'?'0':framework==='B'?'1':topic.displayName==='AiJia Founder Alignment Room / AiJia 合伙人对齐室'?'2':'3';
     const projectOrder=(name:string):string=>name==='AiJia AI Native 官网'?'00':name==='Smart Listing'?'01':
       name==='AI 选房经验与知识库'?'02':name==='房产销售过程数据沉淀'?'03':name;
-    return [root,...path.slice(1).map(item=>projectOrder(item.displayName)),stages.indexOf(topic.stage).toString().padStart(2,'0'),topic.id].join('|')};
+    const hierarchy=path.length===1?['00-root']:path.slice(1).map(item=>`10-${projectOrder(item.displayName)}`);
+    return [root,...hierarchy,stages.indexOf(topic.stage).toString().padStart(2,'0'),topic.id].join('|')};
   return key(a).localeCompare(key(b));
 }
 
