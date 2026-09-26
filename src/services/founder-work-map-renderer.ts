@@ -36,7 +36,7 @@ const labels: Record<TopicStage, string> = {
 };
 interface Item { section: string; text: string; ref?: FounderWorkMapItemRef }
 const compareId = (a: { id: string }, b: { id: string }): number => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-const aLine='AiJia AI Native 房产业务',bLine='自媒体生产线';
+const aLine='AiJia AI Native 房产业务',bLine='自媒体生产线',cLine='公司协作基础设施';
 const founderRoom='AiJia Founder Alignment Room / AiJia 合伙人对齐室';
 
 export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMapCard[] {
@@ -69,7 +69,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     const hierarchy=hierarchyFor(topic,topicByName),framework=frameworkFor(hierarchy);
     const infrastructure=hierarchy[0]?.displayName===founderRoom;
     const section=framework==='A'?`A 线｜${aLine}`:framework==='B'?`B 线｜${bLine}`:
-      infrastructure?'公司协作基础设施':labels[topic.stage];
+      infrastructure?`C 线｜${cLine}`:labels[topic.stage];
     if(framework&&hierarchy.length===1&&displayKind==='project')continue;
     const nestedProject=framework?hierarchy.length>2:hierarchy.length>1;
     const nestedSupporting=!framework&&hierarchy.length>1?'↳ ':'';
