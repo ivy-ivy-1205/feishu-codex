@@ -30,7 +30,8 @@ describe('loadConfig', () => {
 
   it('defaults founder stream off and enforces ordered flag dependencies', () => {
     expect(loadConfig(baseEnv).founderStream).toEqual({ captureEnabled: false, analysisEnabled: false,
-      groupDeliveryEnabled: false, manualQueryEnabled: false, dailyReconciliationEnabled: false });
+      groupDeliveryEnabled: false, manualQueryEnabled: false, dailyReconciliationEnabled: false,
+      reconciliationBootstrapSince: null });
     expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_ANALYSIS_ENABLED: 'true' })).toThrow(/capture/i);
     expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true', FOUNDER_STREAM_GROUP_DELIVERY_ENABLED: 'true' })).toThrow(/analysis/i);
     expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true' }).founderStream.captureEnabled).toBe(true);
@@ -38,9 +39,14 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true',FOUNDER_STREAM_ANALYSIS_ENABLED:'true',
       FOUNDER_STREAM_MANUAL_QUERY_ENABLED: 'true',WORKER_LEASE_SECONDS:'241' }).founderStream.manualQueryEnabled).toBe(true);
     expect(()=>loadConfig({...baseEnv,FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED:'true'})).toThrow(/daily reconciliation.*capture/i);
+    expect(()=>loadConfig({...baseEnv,FOUNDER_STREAM_CAPTURE_ENABLED:'true',FOUNDER_STREAM_ANALYSIS_ENABLED:'true',
+      FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED:'true',PROJECT_CONTEXT_CHAT_IDS:'oc_a84d5b6ca478220d0a37964b50776edb',
+      WORKER_LEASE_SECONDS:'241'})).toThrow(/bootstrap/i);
     expect(loadConfig({...baseEnv,FOUNDER_STREAM_CAPTURE_ENABLED:'true',FOUNDER_STREAM_ANALYSIS_ENABLED:'true',
       FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED:'true',PROJECT_CONTEXT_CHAT_IDS:'oc_a84d5b6ca478220d0a37964b50776edb',
-      WORKER_LEASE_SECONDS:'241'}).founderStream.dailyReconciliationEnabled).toBe(true);
+      FOUNDER_STREAM_RECONCILIATION_BOOTSTRAP_SINCE:'2026-09-22T15:20:18.120Z',WORKER_LEASE_SECONDS:'241'})
+      .founderStream).toMatchObject({dailyReconciliationEnabled:true,
+        reconciliationBootstrapSince:'2026-09-22T15:20:18.120Z'});
   });
   it('keeps Context extraction and review independently disabled by default', () => {
     expect(loadConfig(baseEnv).context).toEqual({

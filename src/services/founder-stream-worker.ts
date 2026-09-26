@@ -38,7 +38,7 @@ export interface FounderPerspectiveAnalysisPort {
 }
 export interface FounderStreamRoute { ingest(envelope: unknown): Record<string, unknown> | null }
 export interface FounderStreamOptions {
-  client: Database.Database; jobRepository: JobRepository; flags: Omit<AppConfig['founderStream'],'manualQueryEnabled'|'dailyReconciliationEnabled'> &
+  client: Database.Database; jobRepository: JobRepository; flags: Omit<AppConfig['founderStream'],'manualQueryEnabled'|'dailyReconciliationEnabled'|'reconciliationBootstrapSince'> &
     {manualQueryEnabled?:boolean;dailyReconciliationEnabled?:boolean};
   approvedChatIds: readonly string[]; ivyPrivateChatId: string; analyzer?: FounderStreamAnalyzer;
   classifier?: { classify(analysis: Awaited<ReturnType<FounderStreamAnalyzer['analyze']>>): Promise<FounderWorkMapClassification> };
@@ -46,7 +46,7 @@ export interface FounderStreamOptions {
   perspectiveAnalyzer?: FounderPerspectiveAnalysisPort;
   now?: () => Date; intervalMs?: number;
   policy?: Pick<AlignmentNotificationPolicy, 'reconcilePending'>;
-  dailyReconciliation?:{run(input:{since:string;until:string;now:Date}):Promise<unknown>};
+  dailyReconciliation?:{bootstrapSince:string;run(input:{since:string;until:string;now:Date}):Promise<unknown>};
   delivery?: { sendTextMessage(input: { chatId: string; text: string; idempotencyKey?: string }): Promise<{ messageId: string }>;
     sendInteractiveCard(input: { chatId: string; card: Record<string, unknown>; idempotencyKey?: string }): Promise<{ messageId: string }> };
 }
@@ -72,7 +72,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   const notificationPolicy = new AlignmentNotificationPolicy(new AlignmentIssueRepository(options.client), perspectives, outbox);
   const policy = options.policy ?? new AlignmentNotificationPolicy(new AlignmentIssueRepository(options.client), new AlignmentRepository(options.client), outbox);
   const dayMs=24*60*60*1_000;
-  const latestAudit=latestGroupCoverageAt(options.client,approvedGroup);
+  const latestAudit=latestDailyCoverageAttemptAt(options.client,approvedGroup);
   let nextDailyReconciliationAt=latestAudit===undefined?now().getTime():latestAudit+dayMs;
   const allowed = (chatId: string) => chatId === approvedGroup && options.approvedChatIds.includes(chatId);
   const route: FounderStreamRoute = { ingest(raw) {
@@ -335,7 +335,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   const afterTick = async () => {
       if(options.flags.dailyReconciliationEnabled&&options.dailyReconciliation&&now().getTime()>=nextDailyReconciliationAt){
         const stamp=now();nextDailyReconciliationAt=stamp.getTime()+dayMs;
-        try{await options.dailyReconciliation.run({since:new Date(stamp.getTime()-dayMs).toISOString(),until:stamp.toISOString(),now:stamp})}
+        const since=latestCompleteDailyCoverageUntil(options.client,approvedGroup)??options.dailyReconciliation.bootstrapSince;
+        try{if(Date.parse(since)<stamp.getTime())await options.dailyReconciliation.run({since,until:stamp.toISOString(),now:stamp})}
         catch{/* A failed daily audit waits until the next daily window; history reads persist their own safe gaps. */}
       }
       if (!options.flags.analysisEnabled) return;
@@ -578,12 +579,25 @@ function parseTime(value:string):string|null {
 function normalizeTopicName(value:string):string {
   return value.normalize('NFKC').toLocaleLowerCase('und').replace(/[\p{P}\p{S}\s]+/gu,'');
 }
-function latestGroupCoverageAt(client:Database.Database,chatId:string):number|undefined{
-  const rows=client.prepare("SELECT captured_at,metadata_json FROM context_sources WHERE source_type='feishu_sync_coverage' ORDER BY captured_at DESC")
-    .all() as {captured_at:string;metadata_json:string}[];
-  for(const row of rows)try{if((JSON.parse(row.metadata_json) as {chatId?:unknown}).chatId===chatId){
+function dailyCoverageRows(client:Database.Database):{captured_at:string;metadata_json:string;content_text:string}[]{
+  return client.prepare("SELECT captured_at,metadata_json,content_text FROM context_sources WHERE source_type='feishu_sync_coverage' ORDER BY captured_at DESC")
+    .all() as {captured_at:string;metadata_json:string;content_text:string}[];
+}
+function latestDailyCoverageAttemptAt(client:Database.Database,chatId:string):number|undefined{
+  for(const row of dailyCoverageRows(client))try{const metadata=JSON.parse(row.metadata_json) as {chatId?:unknown;syncPurpose?:unknown};
+    if(metadata.chatId===chatId&&metadata.syncPurpose==='daily_reconciliation'){
     const value=Date.parse(row.captured_at);if(Number.isFinite(value))return value;
   }}catch{/* Malformed audit metadata cannot suppress a future reconciliation. */}
+  return undefined;
+}
+function latestCompleteDailyCoverageUntil(client:Database.Database,chatId:string):string|undefined{
+  for(const row of dailyCoverageRows(client))try{
+    const metadata=JSON.parse(row.metadata_json) as {chatId?:unknown;syncPurpose?:unknown};
+    const content=JSON.parse(row.content_text) as {requestedRange?:{until?:unknown};sourceCoverage?:{termination?:unknown}};
+    const until=content.requestedRange?.until;
+    if(metadata.chatId===chatId&&metadata.syncPurpose==='daily_reconciliation'&&content.sourceCoverage?.termination==='next_cursor_null'&&
+      typeof until==='string'&&Number.isFinite(Date.parse(until)))return new Date(until).toISOString();
+  }catch{/* Malformed or incomplete coverage cannot advance the durable cursor. */}
   return undefined;
 }
 function messageText(type:string,content:string):string|null {

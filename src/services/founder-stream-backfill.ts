@@ -15,6 +15,7 @@ export interface FounderStreamBackfillInput {
   jobRepository?: JobRepository;
   dryRun?: boolean;
   enqueueAnalysis?: boolean;
+  syncPurpose?: 'daily_reconciliation';
 }
 
 export interface FounderStreamBackfillReport extends FeishuContextSyncReport {
@@ -71,7 +72,8 @@ export async function runFounderStreamBackfill(input: FounderStreamBackfillInput
       sourceRepository!.saveSource({ sourceSystem: 'feishu', sourceType: snapshot.sourceKind,
         externalId: snapshot.sourceRef, logicalKey: snapshot.sourceRef, occurredAt: input.now.toISOString(),
         authors: [], locatorUri: null, contentFormat: snapshot.sourceKind.startsWith('feishu_sync_') ? 'application/json' : 'text/plain',
-        contentText: snapshot.content, metadata: { chatId: input.chatId }, availabilityStatus: 'available', capturedAt: input.now });
+        contentText: snapshot.content, metadata: { chatId: input.chatId, ...(input.syncPurpose ? { syncPurpose: input.syncPurpose } : {}) },
+        availabilityStatus: 'available', capturedAt: input.now });
     }
   });
   let jobsEnqueued = 0;

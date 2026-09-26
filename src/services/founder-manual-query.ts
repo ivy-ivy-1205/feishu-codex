@@ -142,7 +142,8 @@ function processingStatus(client:Database.Database,chatId:string):string{
 function latestCoverageAudit(client:Database.Database,chatId:string):string|null{
   const rows=client.prepare("SELECT captured_at,metadata_json FROM context_sources WHERE source_type='feishu_sync_coverage' ORDER BY captured_at DESC")
     .all() as {captured_at:string;metadata_json:string}[];
-  for(const row of rows)try{if((JSON.parse(row.metadata_json) as {chatId?:unknown}).chatId===chatId)return row.captured_at}catch{}
+  for(const row of rows)try{const metadata=JSON.parse(row.metadata_json) as {chatId?:unknown;syncPurpose?:unknown};
+    if(metadata.chatId===chatId&&metadata.syncPurpose==='daily_reconciliation')return row.captured_at}catch{}
   return null;
 }
 

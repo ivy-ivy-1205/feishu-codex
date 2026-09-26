@@ -108,8 +108,10 @@ describe('founder stream backfill', () => {
     const second={message_id:'missed_webhook',msg_type:'text',create_time:String(Date.parse('2026-09-02T00:00:00.000Z')),
       sender:{id:'ou_james',id_type:'open_id'},body:{content:JSON.stringify({text:'newly recovered'})}};
     const report=await backfill.runFounderStreamBackfill({chatId,since,now:new Date('2026-09-20T00:01:00.000Z'),
-      feishu:make([first,second]),...deps,dryRun:false});
+      feishu:make([first,second]),...deps,dryRun:false,syncPurpose:'daily_reconciliation'});
     expect(report.sourcesCreated).toBe(1);
+    expect(deps.sourceRepository.listSources().find(source=>source.sourceType==='feishu_sync_coverage'&&
+      source.capturedAt==='2026-09-20T00:01:00.000Z')?.metadata).toMatchObject({chatId,syncPurpose:'daily_reconciliation'});
     const jobs=deps.db.client.prepare("SELECT payload FROM batch_jobs WHERE type='analyze_founder_stream_batch' ORDER BY created_at").all() as {payload:string}[];
     expect(jobs).toHaveLength(2);
     const latest=JSON.parse(jobs[1]!.payload) as {sourceIds:string[]};

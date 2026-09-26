@@ -545,18 +545,41 @@ describe('founder stream durable wiring', () => {
     await h.runtime.runOnce(); expect(h.jobs.list().map(j => j.kind)).toEqual(['capture_group_message']);
     expect(h.calls()).toBe(0); await h.app.close(); h.db.close();
   });
-  it('runs one bounded 24-hour reconciliation per day and never on every worker tick',async()=>{
+  it('runs daily from the last completely reconciled cursor instead of truncating the window to 24 hours',async()=>{
     const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const jobs=new JobRepository(db.client);
-    let now=new Date('2026-09-25T00:00:00.000Z');const windows:{since:string;until:string}[]=[];
+    const sources=new ContextSourceRepository(db.client);
+    sources.saveSource({sourceSystem:'feishu',sourceType:'feishu_sync_coverage',externalId:'daily-coverage-1',logicalKey:'daily-coverage-1',
+      occurredAt:'2026-09-25T00:00:00.000Z',authors:[],locatorUri:null,contentFormat:'application/json',contentText:JSON.stringify({
+        requestedRange:{since:'2026-09-20T00:00:00.000Z',until:'2026-09-22T15:20:18.120Z'},
+        sourceCoverage:{termination:'next_cursor_null'}}),metadata:{chatId:chat,syncPurpose:'daily_reconciliation'},
+      availabilityStatus:'available',capturedAt:new Date('2026-09-25T00:00:00.000Z')});
+    let now=new Date('2026-09-26T00:00:00.000Z');const windows:{since:string;until:string}[]=[];
     const runtime=createFounderStreamRuntime({client:db.client,jobRepository:jobs,
       flags:{captureEnabled:true,analysisEnabled:false,groupDeliveryEnabled:false,dailyReconciliationEnabled:true},
       approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>now,
-      dailyReconciliation:{async run(window){windows.push({since:window.since,until:window.until})}}});
+      dailyReconciliation:{bootstrapSince:'2026-09-22T15:20:18.120Z',async run(window){windows.push({since:window.since,until:window.until})}}});
     await runtime.afterTick();await runtime.afterTick();
-    expect(windows).toEqual([{since:'2026-09-24T00:00:00.000Z',until:'2026-09-25T00:00:00.000Z'}]);
-    now=new Date('2026-09-25T23:59:59.999Z');await runtime.afterTick();expect(windows).toHaveLength(1);
-    now=new Date('2026-09-26T00:00:00.000Z');await runtime.afterTick();
-    expect(windows[1]).toEqual({since:'2026-09-25T00:00:00.000Z',until:'2026-09-26T00:00:00.000Z'});
+    expect(windows).toEqual([{since:'2026-09-22T15:20:18.120Z',until:'2026-09-26T00:00:00.000Z'}]);
+    now=new Date('2026-09-26T23:59:59.999Z');await runtime.afterTick();expect(windows).toHaveLength(1);
+    db.close();
+  });
+  it('does not advance the daily cursor when the newest audit is incomplete',async()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const jobs=new JobRepository(db.client);
+    const sources=new ContextSourceRepository(db.client);
+    for(const coverage of [
+      {id:'complete',capturedAt:'2026-09-24T00:00:00.000Z',until:'2026-09-22T15:20:18.120Z',termination:'next_cursor_null'},
+      {id:'incomplete',capturedAt:'2026-09-25T00:00:00.000Z',until:'2026-09-25T00:00:00.000Z',termination:'incomplete'}
+    ])sources.saveSource({sourceSystem:'feishu',sourceType:'feishu_sync_coverage',externalId:coverage.id,logicalKey:coverage.id,
+      occurredAt:coverage.capturedAt,authors:[],locatorUri:null,contentFormat:'application/json',contentText:JSON.stringify({
+        requestedRange:{since:'2026-09-20T00:00:00.000Z',until:coverage.until},sourceCoverage:{termination:coverage.termination}}),
+      metadata:{chatId:chat,syncPurpose:'daily_reconciliation'},availabilityStatus:'available',capturedAt:new Date(coverage.capturedAt)});
+    const windows:{since:string;until:string}[]=[];const now=new Date('2026-09-26T00:00:00.000Z');
+    const runtime=createFounderStreamRuntime({client:db.client,jobRepository:jobs,
+      flags:{captureEnabled:true,analysisEnabled:false,groupDeliveryEnabled:false,dailyReconciliationEnabled:true},
+      approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>now,
+      dailyReconciliation:{bootstrapSince:'2026-09-20T00:00:00.000Z',async run(window){windows.push({since:window.since,until:window.until})}}});
+    await runtime.afterTick();
+    expect(windows).toEqual([{since:'2026-09-22T15:20:18.120Z',until:'2026-09-26T00:00:00.000Z'}]);
     db.close();
   });
   it('passes immutable source occurrence time to the perspective analyzer', async () => {

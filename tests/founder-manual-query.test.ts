@@ -149,6 +149,9 @@ describe('founder manual queries',()=>{
     sources.saveSource({sourceSystem:'feishu',sourceType:'feishu_sync_coverage',externalId:'coverage-1',logicalKey:'coverage-1',
       occurredAt:at.toISOString(),authors:[],locatorUri:null,contentFormat:'application/json',contentText:JSON.stringify({
         gaps:[{code:'FILE_TEXT_UNREADABLE',sourceRef:'file-1',reason:'unreadable'}]}),metadata:{chatId},availabilityStatus:'available',capturedAt:at});
+    sources.saveSource({sourceSystem:'feishu',sourceType:'feishu_sync_coverage',externalId:'daily-coverage',logicalKey:'daily-coverage',
+      occurredAt:'2026-09-09T00:00:00.000Z',authors:[],locatorUri:null,contentFormat:'application/json',contentText:'{}',
+      metadata:{chatId,syncPurpose:'daily_reconciliation'},availabilityStatus:'available',capturedAt:new Date('2026-09-09T00:00:00.000Z')});
     sources.saveSource({sourceSystem:'feishu',sourceType:'feishu_sync_gap',externalId:'gap-duplicate',logicalKey:'gap-duplicate',
       occurredAt:at.toISOString(),authors:[],locatorUri:null,contentFormat:'application/json',contentText:JSON.stringify({
         code:'FILE_TEXT_UNREADABLE',sourceRef:'file-1',reason:'same gap persisted separately'}),metadata:{chatId},availabilityStatus:'available',capturedAt:at});
@@ -168,6 +171,8 @@ describe('founder manual queries',()=>{
     const body=JSON.stringify(message.card);
     expect(Buffer.byteLength(body,'utf8')).toBeLessThanOrEqual(28_000);
     expect(body).toContain('不可读/跳过缺口：1');
+    expect(body).toContain('最后防漏复核：2026-09-09T00:00:00.000Z');
+    expect(body).not.toContain('最后防漏复核：2026-09-10T00:00:00.000Z');
     expect(body).toContain('仅展示前');
     db.close();
   });

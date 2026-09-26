@@ -121,10 +121,11 @@ const founderRuntime = createFounderStreamRuntime({
   client: database.client, jobRepository, flags: config.founderStream,
   approvedChatIds: config.projectContext.approvedChatIds, ivyPrivateChatId: config.feishu.ivyPrivateChatId,
   intervalMs: config.worker.pollIntervalMs, delivery: feishuIntegration.delivery,attachmentReader:feishuIntegration.attachmentReader,
-  ...(config.founderStream.dailyReconciliationEnabled?{dailyReconciliation:{async run(window:{since:string;until:string;now:Date}){
+  ...(config.founderStream.dailyReconciliationEnabled?{dailyReconciliation:{
+    bootstrapSince:config.founderStream.reconciliationBootstrapSince!,async run(window:{since:string;until:string;now:Date}){
     await runFounderStreamBackfill({chatId:config.projectContext.approvedChatIds[0]!,since:window.since,until:window.until,
       now:window.now,feishu:feishuIntegration.contextClient,sourceRepository:new ContextSourceRepository(database.client),
-      jobRepository,dryRun:false,enqueueAnalysis:config.founderStream.analysisEnabled});
+      jobRepository,dryRun:false,enqueueAnalysis:config.founderStream.analysisEnabled,syncPurpose:'daily_reconciliation'});
   }}}:{}),
   ...(founderAnalysis ?? {})
 });
