@@ -68,7 +68,11 @@ describe('founder work map cards', () => {
     expect(body).toContain('公司协作基础设施');
     expect(body).toContain('#3 · 项目｜AiJia Founder Alignment Room / AiJia 合伙人对齐室');
     expect(body).toContain('#4 · ↳ 子项目｜企业微信接入');
-    expect(body).toContain('阶段目标｜飞书第一阶段目标');
+    expect(body).toContain('↳ 阶段目标｜飞书第一阶段目标');
+    expect(body.indexOf('#3 · 项目｜AiJia Founder Alignment Room / AiJia 合伙人对齐室'))
+      .toBeLessThan(body.indexOf('↳ 阶段目标｜飞书第一阶段目标'));
+    expect(body.indexOf('↳ 阶段目标｜飞书第一阶段目标'))
+      .toBeLessThan(body.indexOf('#4 · ↳ 子项目｜企业微信接入'));
     expect(body).not.toContain('层级：');
     expect(page!.itemRefs.map(ref=>ref.id)).toEqual(['smart','sample','room','wecom']);
   });
