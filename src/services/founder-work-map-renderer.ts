@@ -3,10 +3,11 @@ import { founderCard, founderSourceText, founderText, type FounderCardEvidence }
 
 export interface FounderWorkMapTopic extends Pick<CurrentTopic, 'id' | 'currentVersion' | 'displayName' | 'stage' | 'outcome'> {
   evidence: readonly FounderCardEvidence[];
+  displayKind?: 'project'|'task'|'goal';
   linkedSourceCount?: number;
   parentName?: string;
   perspectives?: readonly { founder:'Ivy'|'James'|'双方';status:'current'|'historical'|'unresolved';statement:string;observedAt:string }[];
-  supportingItems?: readonly {kind:'principle'|'artifact'|'research';displayName:string}[];
+  supportingItems?: readonly {kind:'principle'|'artifact'|'research'|'task'|'goal';displayName:string}[];
 }
 export interface FounderWorkMapInput {
   since: string;
@@ -33,7 +34,7 @@ const stages: TopicStage[] = ['active_project', 'project_candidate', 'exploring'
 const labels: Record<TopicStage, string> = {
   active_project: '正在推进的项目', project_candidate: '候选项目', exploring: '探索中的话题', idea: '想法', paused: '暂停 / 已结束', closed: '暂停 / 已结束'
 };
-interface Item { section: string; text: string; ref: FounderWorkMapItemRef }
+interface Item { section: string; text: string; ref?: FounderWorkMapItemRef }
 const compareId = (a: { id: string }, b: { id: string }): number => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 const aLine='AiJia AI Native 房产业务',bLine='自媒体生产线';
 
@@ -46,10 +47,12 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     }
   }
   const items: Item[] = [];
+  let numbered=0;
   const add = (section: string, text: string, ref: Omit<FounderWorkMapItemRef, 'displayedNumber'>) => {
-    const displayedNumber = items.length + 1;
+    const displayedNumber = ++numbered;
     items.push({ section, text: `#${displayedNumber} · ${text}`, ref: { ...ref, displayedNumber } });
   };
+  const addSupporting=(section:string,text:string)=>items.push({section,text});
   const topicByName=new Map<string,FounderWorkMapTopic>();
   const duplicateNames=new Set<string>();
   for(const topic of input.topics){if(topicByName.has(topic.displayName)){topicByName.delete(topic.displayName);duplicateNames.add(topic.displayName)}
@@ -59,26 +62,30 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     if (!stages.includes(topic.stage) || !Number.isInteger(topic.currentVersion) || topic.currentVersion < 1 || !topic.displayName.trim()) {
       throw new Error('valid work-map topic is required');
     }
+    const displayKind=topic.displayKind??'project';
+    if(!['project','task','goal'].includes(displayKind))throw new Error('valid work-map display kind is required');
     const suffix = topic.stage === 'paused' ? '（暂停）' : topic.stage === 'closed' ? '（已结束）' : '';
     const hierarchy=hierarchyFor(topic,topicByName),framework=frameworkFor(hierarchy);
+    const infrastructure=hierarchy[0]?.displayName==='AiJia Founder Alignment Room / AiJia 合伙人对齐室';
     const section=framework==='A'?`A 线｜${aLine}`:framework==='B'?`B 线｜${bLine}`:
-      topic.displayName==='AiJia Founder Alignment Room / AiJia 合伙人对齐室'?'公司协作基础设施':labels[topic.stage];
-    if(framework&&hierarchy.length===1)continue;
-    const title=framework?`子项目：${topic.displayName}`:topic.displayName;
-    const hierarchyText=framework&&hierarchy.length>1?`\n层级：${framework} 线 > ${hierarchy.slice(1).map(item=>founderText(item.displayName,80)).join(' > ')}`:
-      topic.parentName?`\n归属：${founderText(topic.parentName,80)}`:'';
-    add(section, `${founderText(title, 100)}${suffix}${hierarchyText}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}`,
-      { kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
+      infrastructure?'公司协作基础设施':labels[topic.stage];
+    if(framework&&hierarchy.length===1&&displayKind==='project')continue;
+    const nestedProject=framework?hierarchy.length>2:hierarchy.length>1;
+    const title=displayKind==='task'?`任务｜${topic.displayName}`:displayKind==='goal'?`阶段目标｜${topic.displayName}`:
+      `${nestedProject?'↳ 子项目':'项目'}｜${topic.displayName}`;
+    const text=`${founderText(title, 120)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.displayName,topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}`;
+    if(displayKind==='project')add(section,text,{ kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
+    else addSupporting(section,text);
   }
   for (const grouping of [...input.uncertainGrouping].sort(compareId)) {
-    const related = [...new Set(grouping.topicIds)].map((id) => items.find((item) => item.ref.kind === 'topic' && item.ref.id === id)?.ref.displayedNumber);
+    const related = [...new Set(grouping.topicIds)].map((id) => items.find((item) => item.ref?.kind === 'topic' && item.ref.id === id)?.ref?.displayedNumber);
     if (related.length < 2 || related.some((number) => number === undefined)) throw new Error('grouping requires at least two known topics');
     add('归类待确认', `关联条目 ${related.sort((a, b) => a! - b!).map((number) => `#${number}`).join('、')}\n${founderText(grouping.summary, 240)}${evidencePreview(grouping.evidence)}`,
       { kind: 'uncertain_grouping', id: grouping.id });
   }
   for (const gap of [...input.coverageGaps].sort(compareId)) add('覆盖缺口', founderText(gap.summary, 240), { kind: 'coverage_gap', id: gap.id });
   const preface = `整理范围：${new Date(start).toISOString()} 至 ${new Date(end).toISOString()}\n这是根据已读取语料整理的工作地图，可继续纠正。`;
-  const footer = `归类待确认：${input.uncertainGrouping.length} 项；覆盖缺口：${input.coverageGaps.length} 项。未报告缺口不代表完整同步。\n可直接在本卡下用自然语言回复，例如“2 和 4 是同一个项目”“第 1 项只是想法”。编号仅对应本次工作地图。`;
+  const footer = `归类待确认：${input.uncertainGrouping.length} 项；覆盖缺口：${input.coverageGaps.length} 项。未报告缺口不代表完整同步。\n可直接在本卡下用自然语言回复，例如“2 和 4 是同一个项目”“第 1 项只是想法”。编号只给项目和待确认项；任务与阶段目标挂在所属项目下。`;
   const chunks: Item[][] = [[]];
   for (const item of items) {
     const chunk = chunks.at(-1)!;
@@ -97,7 +104,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     if (items.length === 0) lines.push('暂无可归纳的话题；不会凭空创建项目。');
     lines.push(footer);
     return { kind: 'founder_work_map', page: index + 1, totalPages: chunks.length,
-      itemRefs: chunk.map((item) => item.ref), card: founderCard(`工作地图 · ${index + 1}/${chunks.length}`, lines) };
+      itemRefs: chunk.flatMap((item) => item.ref?[item.ref]:[]), card: founderCard(`工作地图 · ${index + 1}/${chunks.length}`, lines) };
   });
 }
 
@@ -122,23 +129,28 @@ function compareHierarchy(a:FounderWorkMapTopic,b:FounderWorkMapTopic,byName:Rea
   return key(a).localeCompare(key(b));
 }
 
-function supportingPreview(items:readonly {kind:'principle'|'artifact'|'research';displayName:string}[]):string{
-  const labels={principle:'原则',artifact:'产物',research:'研究'} as const;
+function supportingPreview(items:readonly {kind:'principle'|'artifact'|'research'|'task'|'goal';displayName:string}[]):string{
+  const labels={principle:'原则',artifact:'产物',research:'研究',task:'任务',goal:'阶段目标'} as const;
   return [...items].sort((a,b)=>a.kind.localeCompare(b.kind)||a.displayName.localeCompare(b.displayName))
     .map(item=>`\n${labels[item.kind]}：${founderText(item.displayName,120)}`).join('');
 }
 
-function perspectivePreview(items:NonNullable<FounderWorkMapTopic['perspectives']>):string{
+function perspectivePreview(topicName:string,items:NonNullable<FounderWorkMapTopic['perspectives']>):string{
   const order={current:0,unresolved:1,historical:2} as const;
-  const labels={current:'当前共识',unresolved:'待对齐',historical:'历史提议'} as const;
-  return [...items].sort((a,b)=>order[a.status]-order[b.status]||a.observedAt.localeCompare(b.observedAt)||a.founder.localeCompare(b.founder)||a.statement.localeCompare(b.statement))
+  const labels={current:'当前共识',unresolved:'待对齐'} as const;
+  const visible=items.filter((item):item is typeof item&{status:'current'|'unresolved'}=>item.status!=='historical');
+  const historyCount=items.length-visible.length;
+  const details=[...visible].sort((a,b)=>order[a.status]-order[b.status]||a.observedAt.localeCompare(b.observedAt)||a.founder.localeCompare(b.founder)||a.statement.localeCompare(b.statement))
     .map(item=>{const at=new Date(item.observedAt);if(!Number.isFinite(at.getTime()))throw new Error('valid perspective time is required');
       return `\n${labels[item.status]}（${item.founder}，${at.toISOString().slice(0,10)}）：${founderText(item.statement,180)}`}).join('');
+  return `${details}${historyCount?`\n历史记录：${historyCount} 条，可用“查看对齐：${founderText(topicName,80)}”查看`:''}`;
 }
 
 function evidencePreview(evidence: readonly FounderCardEvidence[],linkedSourceCount=0): string {
   const first = [...evidence].sort(compareId)[0];
-  if(first)return `\n${founderSourceText(first)}${evidence.length > 1 ? `\n另有 ${evidence.length - 1} 条来源，完整来源保留在记录中。` : ''}`;
+  if(first){const source=first.locator.kind==='group_message'
+    ?`来源：群聊 · ${new Date(first.occurredAt).toISOString()}\n原文：${founderText(first.excerpt,240)}`:founderSourceText(first);
+    return `\n${source}${evidence.length > 1 ? `\n另有 ${evidence.length - 1} 条来源，完整来源保留在记录中。` : ''}`;}
   if(!Number.isSafeInteger(linkedSourceCount)||linkedSourceCount<0)throw new Error('valid linked source count is required');
   return linkedSourceCount>0?`\n来源：已关联 ${linkedSourceCount} 个来源，暂无可展示摘录。`:'\n来源：待补充（不作为已确认共识）';
 }

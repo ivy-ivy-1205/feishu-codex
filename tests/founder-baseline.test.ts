@@ -5,6 +5,7 @@ import {TopicRepository} from '../src/repositories/topic-repository.js';
 import {applyFounderBaseline} from '../src/services/founder-baseline.js';
 import {founderBaselineManifestSchema} from '../src/services/founder-baseline.js';
 import {readFileSync} from 'node:fs';
+import {buildCurrentFounderWorkMap} from '../src/services/current-founder-work-map.js';
 
 describe('applyFounderBaseline',()=>{
   it('locks the reviewed production manifest to the expected six-project projection',()=>{
@@ -79,6 +80,21 @@ describe('applyFounderBaseline',()=>{
       ])})]);
     expect(manifest.newPartOf).toEqual([{childKey:'aijia_website',parentId:'topic_0622155dc9cfbc4ae20c295b04312e99'}]);
   });
+  it('locks V6 to the reviewed task, phase goal, WeCom child project and restored Smart Listing direction',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync(
+      'deploy/founder-work-map-v6-20260926.manifest.json','utf8')));
+    expect(manifest.expected).toEqual({topics:40,perspectives:34,relations:33});
+    expect(manifest.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_5606ca3835bf19372aff6ff4e39bb75d',version:13,
+        displayKind:'project',outcome:expect.stringContaining('单套房源智能入口')})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_106cf9757e6cae55cbca67fa5e677cd7',version:5}),
+        duplicates:[{id:'topic_0d7fa02af118a4f395755ddcb46c5975',version:8}]}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_0cb5c43fe097f5e0c2edbd96c346faeb',displayKind:'task'})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_61714f83345431c413c004d990c82c82',name:'企业微信接入',stage:'exploring'})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_8f14af085d21b2bd6c6fefcac627ceff',displayKind:'goal'})})
+    ]));
+    expect(manifest.partOf).toHaveLength(3);
+  });
   it('can add reviewed same_as relations without appending unchanged canonical versions',()=>{
     const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
     const at=new Date('2026-09-25T00:00:00Z');
@@ -135,5 +151,24 @@ describe('applyFounderBaseline',()=>{
       expect.objectContaining({fromTopicId:existing.id,toTopicId:media.id,relationType:'part_of'}),
       expect.objectContaining({fromTopicId:mortgage.id,toTopicId:media.id,relationType:'part_of'})
     ]));
+  });
+  it('persists reviewed task and goal kinds so the work map nests them without project numbers',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
+    const at=new Date('2026-09-26T00:00:00Z');
+    const room=topics.createTopic({displayName:'AiJia Founder Alignment Room / AiJia 合伙人对齐室',stage:'active_project',createdAt:at});
+    const task=topics.createTopic({displayName:'给静姐和 Kenny 哥 update',stage:'active_project',createdAt:new Date(at.getTime()+1)});
+    const goal=topics.createTopic({displayName:'飞书第一阶段目标',stage:'active_project',createdAt:new Date(at.getTime()+2)});
+    const manifest={expected:{topics:3,perspectives:0,relations:0},groups:[
+      {canonical:{id:room.id,version:1,name:room.displayName,stage:'active_project' as const,outcome:null,displayKind:'project' as const},duplicates:[]},
+      {canonical:{id:task.id,version:1,name:task.displayName,stage:'active_project' as const,outcome:null,displayKind:'task' as const},duplicates:[]},
+      {canonical:{id:goal.id,version:1,name:goal.displayName,stage:'active_project' as const,outcome:null,displayKind:'goal' as const},duplicates:[]}
+    ],partOf:[{childId:task.id,parentId:room.id},{childId:goal.id,parentId:room.id}],newTopics:[]};
+    applyFounderBaseline(db.client,manifest,at,true);
+    const result=buildCurrentFounderWorkMap({client:db.client,chatId:'oc_a84d5b6ca478220d0a37964b50776edb',
+      approvedChatIds:['oc_a84d5b6ca478220d0a37964b50776edb'],since:'2026-08-31T00:00:00.000Z',until:'2026-09-26T00:00:00.000Z',expectedCanonicalTopicCount:3});
+    const body=JSON.stringify(result.cards.map(card=>card.card));
+    expect(body).toContain('任务｜给静姐和 Kenny 哥 update');
+    expect(body).toContain('阶段目标｜飞书第一阶段目标');
+    expect(result.cards.flatMap(card=>card.itemRefs).map(ref=>ref.id)).toEqual([room.id]);
   });
 });

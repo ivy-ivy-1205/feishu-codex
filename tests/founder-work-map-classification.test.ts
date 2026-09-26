@@ -6,6 +6,20 @@ const proposal=(displayName:string,sourceId:string):TopicProposal=>({displayName
   confidence:'high',sourceIds:[sourceId],evidenceExcerpts:[{sourceId,excerpt:`${displayName} evidence`}],
   joinDecision:{kind:'new',topicId:null,confidence:'high',sharedTerms:[]},splitSuggestions:[]});
 
+it('attaches tasks and phase goals to their project instead of exposing them as projects',()=>{
+  const input:FounderStreamAnalysis={topics:[proposal('合伙人对齐室','s1'),proposal('给静姐和 Kenny 哥 update','s2'),proposal('项目第一阶段目标','s3')]};
+  const result=projectFounderWorkMap(input,{items:[
+    {proposalIndex:0,kind:'project',lifecycle:'active',parentProposalIndex:null},
+    {proposalIndex:1,kind:'task',lifecycle:'active',parentProposalIndex:0},
+    {proposalIndex:2,kind:'goal',lifecycle:'active',parentProposalIndex:0}
+  ]});
+  expect(result.analysis.topics.map(item=>item.displayName)).toEqual(['合伙人对齐室']);
+  expect(result.supportingItems).toEqual([
+    expect.objectContaining({displayName:'给静姐和 Kenny 哥 update',kind:'task',parentDisplayName:'合伙人对齐室'}),
+    expect.objectContaining({displayName:'项目第一阶段目标',kind:'goal',parentDisplayName:'合伙人对齐室'})
+  ]);
+});
+
 it('keeps EP00 as a closed B-line project while principles and research stay out of the project layer',()=>{
   const input:FounderStreamAnalysis={topics:[proposal('AI native 房产业务','s1'),proposal('情绪价值','s2'),
     proposal('EP00《挺好》｜剧本 V1.4-R1 候选稿','s3'),proposal('低干扰自动沉淀与工作对齐','s4'),

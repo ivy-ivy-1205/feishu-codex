@@ -348,13 +348,17 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
       }
       policy.reconcilePending(now());
       if (!options.delivery) return;
-      if(options.flags.manualQueryEnabled)await deliverManualQueryMessages(options,now,allowed);
       if (!options.flags.groupDeliveryEnabled) return;
       await deliverFounderMessages(options, outbox, policy, now, allowed);
   };
   const consumer = new DurableJobConsumer({ now, intervalMs: options.intervalMs,
     leaseNext: at => options.jobRepository.leaseNextSupportedJob(at,supportedKinds),
     process: job => process(job as FounderDurableJob), afterTick
+  });
+  const manualQueryConsumer = new DurableJobConsumer({ now, intervalMs: options.intervalMs,
+    leaseNext: () => null, process: async () => 'completed',
+    afterTick: async () => { if(options.flags.manualQueryEnabled&&options.delivery)
+      await deliverManualQueryMessages(options,now,allowed); }
   });
   function enqueueMinute(source: ContextSourceRecord) {
     return options.jobRepository.enqueueFounderStreamBatch({chatId:approvedGroup,sourceIds:[source.id],since:source.occurredAt,until:now().toISOString(),capturedAt:now()});
@@ -406,8 +410,12 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   }
   return { route, process, afterTick, captureMinute,
     minuteCaptureChatId:options.flags.captureEnabled && allowed(approvedGroup)?approvedGroup:undefined,
-    supportedKinds, runOnce: () => consumer.runOnce(), start: () => { if (options.flags.captureEnabled) consumer.start(); },
-    stop: () => consumer.stop(), isConsumptionAvailable: () => consumer.isConsumptionAvailable() };
+    supportedKinds, runOnce: () => consumer.runOnce(), runManualQueriesOnce:()=>manualQueryConsumer.runOnce(),
+    startManualQueries:()=>{if(options.flags.manualQueryEnabled&&options.delivery)manualQueryConsumer.start()},
+    stopManualQueries:()=>manualQueryConsumer.stop(),
+    start: () => { if (options.flags.captureEnabled) consumer.start(); if(options.flags.manualQueryEnabled&&options.delivery)manualQueryConsumer.start(); },
+    stop: async () => {await Promise.all([consumer.stop(),manualQueryConsumer.stop()]);},
+    isConsumptionAvailable: () => consumer.isConsumptionAvailable() };
 }
 async function deliverManualQueryMessages(options:FounderStreamOptions,now:()=>Date,allowed:(id:string)=>boolean){
   const rows=options.client.prepare(`SELECT idempotency_key,payload FROM outbox WHERE status='pending'
@@ -487,6 +495,10 @@ function topicAuthority(client: Database.Database, topics: TopicRepository, topi
     JOIN context_sources s ON s.id=e.source_id WHERE f.chat_id=? ORDER BY s.occurred_at DESC,f.created_at DESC,f.id`)
     .all(approvedGroup) as {id:string;evidence_id:string;correction_json:string;result_json:string;occurred_at:string}[];
   const versions=topics.listVersions(topic.id);
+  const baseline=[...versions].reverse().find(version=>/^Ivy confirmed Founder work map(?: V\d+)? baseline$/u.test(version.rationale)||[
+    'Ivy confirmed Founder work map task','Ivy confirmed Founder work map goal'
+  ].includes(version.rationale));
+  if(baseline)return{snapshot:baseline,correctionId:null,evidenceId:null,occurredAt:baseline.changedAt};
   for(const row of rows) {
     const correction=topicCorrectionSchema.safeParse(JSON.parse(row.correction_json));
     if(!correction.success || !['merge_topics','split_topic','reclassify_stage','rename_topic','pause_topic'].includes(correction.data.kind) ||

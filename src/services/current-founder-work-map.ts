@@ -41,6 +41,7 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
     const evidence=loadEvidence(input.client,componentIds);
     const parentId=parentByChild.get(topic.id);
     return{...topic,evidence:evidence.items,linkedSourceCount:evidence.linkedSourceCount,
+      displayKind:displayKindFor(topics,topic.id),
       parentName:parentId?canonicalById.get(parentId)?.displayName:undefined,
       perspectives:alignment.listCanonicalPerspectives(topic.id).filter(perspective=>!isTopicLabelOnly(topic.displayName,perspective.statement))
         .map(perspective=>projectPerspective(topic,perspective))};
@@ -49,6 +50,15 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
   const mapId=stableId('foundermap',canonicalJson({chatId:input.chatId,since:input.since,until:input.until,
     topics:canonical.map(topic=>({id:topic.id,version:topic.currentVersion})),pages:cards.length}));
   return{mapId,canonicalTopicCount:canonical.length,cards};
+}
+
+function displayKindFor(topics:TopicRepository,topicId:string):'project'|'task'|'goal'{
+  for(const version of [...topics.listVersions(topicId)].reverse()){
+    if(version.rationale==='Ivy confirmed Founder work map task')return'task';
+    if(version.rationale==='Ivy confirmed Founder work map goal')return'goal';
+    if(/^Ivy confirmed Founder work map(?: V\d+)? baseline$/u.test(version.rationale))return'project';
+  }
+  return'project';
 }
 
 export function enqueueCurrentFounderWorkMap(input:CurrentFounderWorkMapInput&{

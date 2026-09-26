@@ -96,7 +96,12 @@ export function createWorkerRuntime(
     }
   });
 
-  return consumer;
+  return {
+    start(){options.founder?.startManualQueries();consumer.start();},
+    async stop(){await consumer.stop();await options.founder?.stopManualQueries();},
+    async runOnce(){await Promise.all([consumer.runOnce(),options.founder?.runManualQueriesOnce()]);},
+    isConsumptionAvailable(){return consumer.isConsumptionAvailable();}
+  };
 }
 
 const disabledWorkerRuntime: WorkerRuntime = {

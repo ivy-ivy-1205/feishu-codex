@@ -37,18 +37,40 @@ describe('founder work map cards', () => {
     const [page]=renderFounderWorkMap({...window,topics:[episode,sales,smart,b,website,a],uncertainGrouping:[],coverageGaps:[]});
     const body=JSON.stringify(page!.card);
     expect(body).toContain('A 线｜AiJia AI Native 房产业务');
-    expect(body).toContain('子项目：AiJia AI Native 官网');
-    expect(body).toContain('层级：A 线 > AiJia AI Native 官网');
-    expect(body).toContain('子项目：Smart Listing');
+    expect(body).toContain('项目｜AiJia AI Native 官网');
+    expect(body).toContain('项目｜Smart Listing');
+    expect(body).not.toContain('层级：');
     expect(body).toContain('销售团队内部 Training 录音语料');
     expect(body).toContain('B 线｜自媒体生产线');
-    expect(body).toContain('子项目：EP00《挺好》（已结束）');
+    expect(body).toContain('项目｜EP00《挺好》（已结束）');
     expect(body).not.toContain('总项目：AiJia AI Native 房产业务');
     expect(body).not.toContain('总项目：自媒体生产线');
     expect(page!.itemRefs.map((item)=>item.id)).toEqual(['website','smart','sales','episode']);
-    expect(body.indexOf('A 线｜AiJia AI Native 房产业务')).toBeLessThan(body.indexOf('子项目：AiJia AI Native 官网'));
-    expect(body.indexOf('子项目：AiJia AI Native 官网')).toBeLessThan(body.indexOf('子项目：Smart Listing'));
-    expect(body.indexOf('B 线｜自媒体生产线')).toBeLessThan(body.indexOf('子项目：EP00《挺好》'));
+    expect(body.indexOf('A 线｜AiJia AI Native 房产业务')).toBeLessThan(body.indexOf('项目｜AiJia AI Native 官网'));
+    expect(body.indexOf('项目｜AiJia AI Native 官网')).toBeLessThan(body.indexOf('项目｜Smart Listing'));
+    expect(body.indexOf('B 线｜自媒体生产线')).toBeLessThan(body.indexOf('项目｜EP00《挺好》'));
+  });
+
+  it('renders a glanceable tree and keeps tasks and phase goals out of project numbering',()=>{
+    const a={...topic('a','active_project'),displayName:'AiJia AI Native 房产业务'};
+    const smart={...topic('smart','active_project'),displayName:'Smart Listing',parentName:a.displayName};
+    const sample={...topic('sample','active_project'),displayName:'Smart Listing L008｜27 Cecil Street 样板',parentName:smart.displayName};
+    const update={...topic('update','active_project'),displayName:'给静姐和 Kenny 哥 update',parentName:a.displayName,displayKind:'task' as const};
+    const room={...topic('room','active_project'),displayName:'AiJia Founder Alignment Room / AiJia 合伙人对齐室'};
+    const wecom={...topic('wecom','exploring'),displayName:'企业微信接入',parentName:room.displayName};
+    const phase={...topic('phase','active_project'),displayName:'飞书第一阶段目标',parentName:room.displayName,displayKind:'goal' as const};
+    const [page]=renderFounderWorkMap({...window,topics:[phase,wecom,room,update,sample,smart,a],uncertainGrouping:[],coverageGaps:[]});
+    const body=JSON.stringify(page!.card);
+    expect(body).toContain('A 线｜AiJia AI Native 房产业务');
+    expect(body).toContain('#1 · 项目｜Smart Listing');
+    expect(body).toContain('#2 · ↳ 子项目｜Smart Listing L008｜27 Cecil Street 样板');
+    expect(body).toContain('任务｜给静姐和 Kenny 哥 update');
+    expect(body).toContain('公司协作基础设施');
+    expect(body).toContain('#3 · 项目｜AiJia Founder Alignment Room / AiJia 合伙人对齐室');
+    expect(body).toContain('#4 · ↳ 子项目｜企业微信接入');
+    expect(body).toContain('阶段目标｜飞书第一阶段目标');
+    expect(body).not.toContain('层级：');
+    expect(page!.itemRefs.map(ref=>ref.id)).toEqual(['smart','sample','room','wecom']);
   });
 
   it('separates the current direction from historical proposals and unresolved viewpoints', () => {
@@ -61,8 +83,9 @@ describe('founder work map cards', () => {
     }], uncertainGrouping: [], coverageGaps: [] });
     const body = JSON.stringify(page!.card);
     expect(body).toContain('当前方向：不承诺全场景、全量录音。');
-    expect(body).toContain('历史提议（James，2026-09-07）');
+    expect(body).toContain('历史记录：1 条，可用“查看对齐：话题 a”查看');
     expect(body).toContain('待对齐（Ivy，2026-09-24）');
+    expect(body).not.toContain('所有真实业务场景开启录音。');
     expect(body).toContain('已关联 3 个来源');
     expect(body).not.toContain('目标：不承诺全场景、全量录音。');
   });
@@ -99,7 +122,8 @@ describe('founder work map cards', () => {
     }], uncertainGrouping: [], coverageGaps: [] });
     const body = JSON.stringify(page!.card);
     expect(body).not.toMatch(/ou_secret|ou_private|authorOpenId|confidence|<at/);
-    expect(body).toContain('om_a');
+    expect(body).not.toContain('om_a');
+    expect(body).toContain('来源：群聊');
     expect(body).toContain('2026-08-31');
     expect(body).toContain('…');
     expect(body.length).toBeLessThan(2500);

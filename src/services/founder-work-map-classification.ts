@@ -1,15 +1,15 @@
 import { z } from 'zod';
 import type { FounderStreamAnalysis, TopicProposal } from '../ports/founder-stream-analyzer.js';
 
-export const founderEntityKindSchema=z.enum(['project','principle','artifact','research','idea']);
+export const founderEntityKindSchema=z.enum(['project','principle','artifact','research','idea','task','goal']);
 export const founderEntityLifecycleSchema=z.enum(['active','completed','unknown']);
 export const founderWorkMapClassificationSchema=z.object({items:z.array(z.object({
   proposalIndex:z.number().int().nonnegative(),kind:founderEntityKindSchema,lifecycle:founderEntityLifecycleSchema,
   parentProposalIndex:z.number().int().nonnegative().nullable()
 }).strict()).max(40)}).strict();
 export type FounderWorkMapClassification=z.infer<typeof founderWorkMapClassificationSchema>;
-export type FounderSupportingItem={displayName:string;kind:'principle'|'artifact'|'research';lifecycle:'active'|'completed'|'unknown';parentDisplayName:string};
-export type FounderDetachedItem={displayName:string;kind:'principle'|'artifact'|'research';lifecycle:'active'|'completed'|'unknown'};
+export type FounderSupportingItem={displayName:string;kind:'principle'|'artifact'|'research'|'task'|'goal';lifecycle:'active'|'completed'|'unknown';parentDisplayName:string};
+export type FounderDetachedItem={displayName:string;kind:'principle'|'artifact'|'research'|'task'|'goal';lifecycle:'active'|'completed'|'unknown'};
 
 export function projectFounderWorkMap(input:FounderStreamAnalysis,raw:FounderWorkMapClassification):{
   analysis:FounderStreamAnalysis;supportingItems:FounderSupportingItem[];historyItems:FounderDetachedItem[];researchInbox:FounderDetachedItem[];

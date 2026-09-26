@@ -38,9 +38,9 @@ describe('current founder work map publisher',()=>{
     const body=JSON.stringify(result.cards);
     expect(result.canonicalTopicCount).toBe(2);
     expect(body).toContain('当前共识（双方，2026-09-21）');
-    expect(body).toContain('历史提议（James，2026-09-02）');
+    expect(body).toContain('历史记录：1 条，可用“查看对齐：A 线”查看');
     expect(body).toContain('待对齐（Ivy，2026-09-20）');
-    expect(body).toContain('归属：A 线');
+    expect(body).toContain('↳ 子项目｜子项目');
   });
 
   it('previews without writes and requires both the delivery gate and exact target before enqueue',()=>{

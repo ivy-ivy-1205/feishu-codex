@@ -5,24 +5,27 @@ import {topicStageSchema} from '../domain/topic.js';
 import {TopicRepository} from '../repositories/topic-repository.js';
 
 interface TopicRef{id:string;version:number}
-interface CanonicalRef extends TopicRef{name:string;stage:TopicStage;outcome:string|null}
+export type FounderDisplayKind='project'|'task'|'goal';
+interface CanonicalRef extends TopicRef{name:string;stage:TopicStage;outcome:string|null;displayKind?:FounderDisplayKind}
 export interface FounderBaselineManifest{
   expected:{topics:number;perspectives:number;relations:number};
   groups:{canonical:CanonicalRef;duplicates:TopicRef[];updateCanonical?:boolean}[];
   partOf:{childId:string;parentId:string}[];
-  newTopics:{key?:string;name:string;stage:TopicStage;outcome:string|null;sourceIds:string[]}[];
+  newTopics:{key?:string;name:string;stage:TopicStage;outcome:string|null;sourceIds:string[];displayKind?:FounderDisplayKind}[];
   newPartOf?:(
     {childId:string;parentKey:string}|{childKey:string;parentId:string}|{childKey:string;parentKey:string}
   )[];
 }
 const topicRefSchema=z.object({id:z.string().min(1),version:z.number().int().positive()}).strict();
-const canonicalRefSchema=topicRefSchema.extend({name:z.string().trim().min(1).max(80),stage:topicStageSchema,outcome:z.string().trim().min(1).nullable()}).strict();
+const displayKindSchema=z.enum(['project','task','goal']);
+const canonicalRefSchema=topicRefSchema.extend({name:z.string().trim().min(1).max(80),stage:topicStageSchema,
+  outcome:z.string().trim().min(1).nullable(),displayKind:displayKindSchema.optional()}).strict();
 export const founderBaselineManifestSchema=z.object({
   expected:z.object({topics:z.number().int().nonnegative(),perspectives:z.number().int().nonnegative(),relations:z.number().int().nonnegative()}).strict(),
   groups:z.array(z.object({canonical:canonicalRefSchema,duplicates:z.array(topicRefSchema),updateCanonical:z.boolean().default(true)}).strict()).min(1),
   partOf:z.array(z.object({childId:z.string().min(1),parentId:z.string().min(1)}).strict()),
   newTopics:z.array(z.object({key:z.string().trim().min(1).max(80).optional(),name:z.string().trim().min(1).max(80),stage:topicStageSchema,
-    outcome:z.string().trim().min(1).nullable(),sourceIds:z.array(z.string().min(1))}).strict()),
+    outcome:z.string().trim().min(1).nullable(),sourceIds:z.array(z.string().min(1)),displayKind:displayKindSchema.optional()}).strict()),
   newPartOf:z.array(z.union([
     z.object({childId:z.string().min(1),parentKey:z.string().min(1)}).strict(),
     z.object({childKey:z.string().min(1),parentId:z.string().min(1)}).strict(),
@@ -63,7 +66,7 @@ export function applyFounderBaseline(client:Database.Database,manifest:FounderBa
     for(const group of manifest.groups){const canonical=byId.get(group.canonical.id)!;
       const evidence=[...new Set([canonical,...group.duplicates.map(ref=>byId.get(ref.id)!)].flatMap(topic=>topic.evidenceIds))];
       if(group.updateCanonical!==false)topics.appendVersion({topicId:canonical.id,expectedVersion:canonical.currentVersion,displayName:group.canonical.name,
-        stage:group.canonical.stage,outcome:group.canonical.outcome,rationale:'Ivy confirmed Founder work map baseline',evidenceIds:evidence,changedAt:at});
+        stage:group.canonical.stage,outcome:group.canonical.outcome,rationale:baselineRationale(group.canonical.displayKind),evidenceIds:evidence,changedAt:at});
       for(const duplicate of group.duplicates)topics.addRelation({fromTopicId:canonical.id,toTopicId:duplicate.id,relationType:'same_as',
         rationale:'Ivy confirmed same project in Founder work map',createdAt:at});
     }
@@ -71,7 +74,7 @@ export function applyFounderBaseline(client:Database.Database,manifest:FounderBa
       rationale:'Ivy confirmed project hierarchy in Founder work map',createdAt:at});
     const newIds=new Map<string,string>();
     for(const item of manifest.newTopics){const topic=topics.createTopic({displayName:item.name,stage:item.stage,outcome:item.outcome,
-      rationale:'Ivy confirmed Founder work map baseline',createdAt:at});
+      rationale:baselineRationale(item.displayKind),createdAt:at});
       if(item.key)newIds.set(item.key,topic.id);
       for(const sourceId of item.sourceIds)topics.addSource({topicId:topic.id,sourceId,addedAt:at});}
     for(const relation of newPartOf){
@@ -83,6 +86,11 @@ export function applyFounderBaseline(client:Database.Database,manifest:FounderBa
     }
   };
   if(apply)client.transaction(operation).immediate();else operation();return result;
+}
+
+function baselineRationale(kind:FounderDisplayKind|undefined):string{
+  return kind==='task'?'Ivy confirmed Founder work map task':kind==='goal'?'Ivy confirmed Founder work map goal':
+    'Ivy confirmed Founder work map baseline';
 }
 
 function count(client:Database.Database,table:string):number{

@@ -399,6 +399,32 @@ describe('founder stream durable wiring', () => {
     const source=h.sources.listSources().find(s=>s.externalId==='om_rename');expect(source?.metadata.senderType).toBe('user');
     await h.app.close();h.db.close();
   });
+  it('keeps an Ivy-confirmed baseline direction when later model evidence joins the project',async()=>{
+    const h=harness();
+    const baselineSource=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_baseline',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'Smart Listing 单套房源智能入口，与官网共用 Amy 和客户理解底座。',
+      occurredAt:start.toISOString()},start).source).source;
+    const baselineEvidence=saveFounderEvidence(h.sources,baselineSource.id,'Smart Listing 单套房源智能入口，与官网共用 Amy 和客户理解底座。',start);
+    const baseline=h.topics.createTopic({displayName:'Smart Listing',stage:'active_project',
+      outcome:'单套房源智能入口，与官网共用 Amy 和客户理解底座。',evidenceIds:[baselineEvidence],
+      rationale:'Ivy confirmed Founder work map V2 baseline',createdAt:start});
+    const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_later',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'Smart Listing，就是看看先把已有二手房业务做起来',
+      occurredAt:new Date(start.getTime()+60_000).toISOString()},new Date(start.getTime()+60_000)).source).source;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',
+      now:()=>new Date(start.getTime()+120_000),analyzer:{async analyze(){return{topics:[{displayName:'Smart Listing',stage:'active_project',
+        outcome:'就是看看先把已有二手房业务做起来',currentAction:'把已有二手房业务做起来',confidence:'high',sourceIds:[source.id],
+        evidenceExcerpts:[{sourceId:source.id,excerpt:'Smart Listing，就是看看先把已有二手房业务做起来'}],
+        joinDecision:{kind:'exact_continuation',topicId:baseline.id,confidence:'high',sharedTerms:['Smart Listing']},splitSuggestions:[]}]}}}});
+    h.jobs.enqueueFounderStreamBatch({chatId:chat,since:source.occurredAt,until:source.occurredAt,sourceIds:[source.id],capturedAt:start});
+    await runtime.runOnce();
+    expect(h.db.client.prepare("SELECT status FROM batch_jobs WHERE type='analyze_founder_stream_batch' ORDER BY created_at DESC LIMIT 1").get())
+      .toEqual({status:'completed'});
+    expect(h.topics.listCurrentTopics().find(topic=>topic.id===baseline.id)).toMatchObject({
+      displayName:'Smart Listing',stage:'active_project',outcome:'单套房源智能入口，与官网共用 Amy 和客户理解底座。'});
+    await h.app.close();h.db.close();
+  });
   it('reserves name and latest outcome anchors before filling the remaining window with recent trusted evidence', async () => {
     const h=harness();const ids:string[]=[];let latestSourceId='';
     for(let i=0;i<26;i++){

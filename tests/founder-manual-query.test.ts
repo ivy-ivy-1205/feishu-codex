@@ -71,7 +71,7 @@ describe('founder manual queries',()=>{
         async sendTextMessage(){return{messageId:'om_text'}},
         async sendInteractiveCard(input){sent.push(input.card);return{messageId:'om_manual_response'}}}});
     runtime.route.ingest(event('查看工作地图'));
-    await runtime.afterTick();
+    await runtime.runManualQueriesOnce();
     expect(sent).toHaveLength(1);
     expect((db.client.prepare("SELECT status FROM outbox WHERE idempotency_key LIKE 'founder-manual-query:%'").get() as {status:string}).status).toBe('delivered');
     const delivered=new (await import('../src/repositories/outbox-repository.js')).OutboxRepository(db.client)
@@ -79,6 +79,33 @@ describe('founder manual queries',()=>{
     expect(delivered).toMatchObject({kind:'founder_work_map',itemRefs:[{kind:'topic'}]});
     expect((db.client.prepare("SELECT count(*) n FROM outbox WHERE idempotency_key LIKE 'alignment-question:%' AND status='delivered'").get() as {n:number}).n).toBe(0);
     db.close();
+  });
+
+  it('delivers a manual query while a long founder analysis is still running',async()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    const jobs=new JobRepository(db.client),sources=new ContextSourceRepository(db.client);
+    new AlignmentRepository(db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:at});
+    const captured=captureGroupMessageSource({chatId,messageId:'om_business',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'新的业务讨论',occurredAt:at.toISOString()},at);
+    const source=sources.saveSource(captured.source).source;
+    jobs.enqueueFounderStreamBatch({chatId,since:at.toISOString(),until:at.toISOString(),sourceIds:[source.id],capturedAt:at});
+    let release!:()=>void,started!:()=>void;
+    const analysisStarted=new Promise<void>(resolve=>{started=resolve});
+    const blocked=new Promise<void>(resolve=>{release=resolve});
+    const sent:Record<string,unknown>[]=[];
+    const runtime=createFounderStreamRuntime({client:db.client,jobRepository:jobs,intervalMs:1,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false,manualQueryEnabled:true},
+      approvedChatIds:[chatId],ivyPrivateChatId:'oc_private',now:()=>at,
+      analyzer:{async analyze(){started();await blocked;return{topics:[]}}},delivery:{
+        async sendTextMessage(){return{messageId:'om_text'}},
+        async sendInteractiveCard(input){sent.push(input.card);return{messageId:'om_manual_while_busy'}}}});
+    runtime.start();
+    await analysisStarted;
+    runtime.route.ingest(event('查看待对齐','ou_ivy','om_query_while_busy'));
+    await new Promise(resolve=>setTimeout(resolve,30));
+    expect(sent).toHaveLength(1);
+    expect((db.client.prepare("SELECT status FROM outbox WHERE idempotency_key LIKE 'founder-manual-query:%'").get() as {status:string}).status).toBe('delivered');
+    release();await new Promise(resolve=>setTimeout(resolve,5));await runtime.stop();db.close();
   });
 
   it('separates confirmed consensus, personal views and a missing founder expression',()=>{

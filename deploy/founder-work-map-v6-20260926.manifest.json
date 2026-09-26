@@ -1,0 +1,77 @@
+{
+  "expected": { "topics": 40, "perspectives": 34, "relations": 33 },
+  "groups": [
+    {
+      "canonical": {
+        "id": "topic_5606ca3835bf19372aff6ff4e39bb75d",
+        "version": 13,
+        "name": "Smart Listing",
+        "stage": "active_project",
+        "outcome": "单套房源智能入口；Amy 围绕当前房源、空间与客户问题提供连续陪看，并与官网共用客户理解、会话、知识和任务承接底座。",
+        "displayKind": "project"
+      },
+      "duplicates": []
+    },
+    {
+      "canonical": {
+        "id": "topic_106cf9757e6cae55cbca67fa5e677cd7",
+        "version": 5,
+        "name": "AiJia Founder Alignment Room / AiJia 合伙人对齐室",
+        "stage": "active_project",
+        "outcome": "减少反复解释、查找和返工，识别执行偏差，处理分歧，同时尽量不增加额外人工沟通成本",
+        "displayKind": "project"
+      },
+      "duplicates": [
+        { "id": "topic_0d7fa02af118a4f395755ddcb46c5975", "version": 8 }
+      ]
+    },
+    {
+      "canonical": {
+        "id": "topic_0cb5c43fe097f5e0c2edbd96c346faeb",
+        "version": 3,
+        "name": "给静姐和 Kenny 哥 update",
+        "stage": "active_project",
+        "outcome": "整理一份面向静姐和 Kenny 哥的 AiJia AI Native 业务进展 update，Ivy 与 James 对齐后发送到单独群。",
+        "displayKind": "task"
+      },
+      "duplicates": []
+    },
+    {
+      "canonical": {
+        "id": "topic_61714f83345431c413c004d990c82c82",
+        "version": 8,
+        "name": "企业微信接入",
+        "stage": "exploring",
+        "outcome": "探索把合伙人对齐室的工作地图、发言总结、责任人与项目自动 update 能力接入含 Kenny、静姐、Jimmy 的企业微信群；讨论刚开始，先验证可行性与数据边界。",
+        "displayKind": "project"
+      },
+      "duplicates": []
+    },
+    {
+      "canonical": {
+        "id": "topic_8f14af085d21b2bd6c6fefcac627ceff",
+        "version": 1,
+        "name": "飞书第一阶段目标",
+        "stage": "active_project",
+        "outcome": "在 Ivy 与 James 的飞书群内小范围试用，验证工作地图、进度追踪、分歧整理与上下文留存是否可用。",
+        "displayKind": "goal"
+      },
+      "duplicates": []
+    }
+  ],
+  "partOf": [
+    {
+      "childId": "topic_0cb5c43fe097f5e0c2edbd96c346faeb",
+      "parentId": "topic_0622155dc9cfbc4ae20c295b04312e99"
+    },
+    {
+      "childId": "topic_61714f83345431c413c004d990c82c82",
+      "parentId": "topic_106cf9757e6cae55cbca67fa5e677cd7"
+    },
+    {
+      "childId": "topic_8f14af085d21b2bd6c6fefcac627ceff",
+      "parentId": "topic_106cf9757e6cae55cbca67fa5e677cd7"
+    }
+  ],
+  "newTopics": []
+}
