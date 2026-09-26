@@ -37,7 +37,6 @@ const labels: Record<TopicStage, string> = {
 interface Item { section: string; text: string; ref?: FounderWorkMapItemRef }
 const compareId = (a: { id: string }, b: { id: string }): number => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 const aLine='AiJia AI Native 房产业务',bLine='自媒体生产线',cLine='公司协作基础设施';
-const founderRoom='AiJia Founder Alignment Room / AiJia 合伙人对齐室';
 
 export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMapCard[] {
   const start = Date.parse(input.since), end = Date.parse(input.until);
@@ -67,12 +66,11 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     if(!['project','task','goal'].includes(displayKind))throw new Error('valid work-map display kind is required');
     const suffix = topic.stage === 'paused' ? '（暂停）' : topic.stage === 'closed' ? '（已结束）' : '';
     const hierarchy=hierarchyFor(topic,topicByName),framework=frameworkFor(hierarchy);
-    const infrastructure=hierarchy[0]?.displayName===founderRoom;
     const section=framework==='A'?`A 线｜${aLine}`:framework==='B'?`B 线｜${bLine}`:
-      infrastructure?`C 线｜${cLine}`:labels[topic.stage];
+      framework==='C'?`C 线｜${cLine}`:labels[topic.stage];
     if(framework&&hierarchy.length===1&&displayKind==='project')continue;
     const nestedProject=framework?hierarchy.length>2:hierarchy.length>1;
-    const nestedSupporting=!framework&&hierarchy.length>1?'↳ ':'';
+    const nestedSupporting=(framework?hierarchy.length>2:hierarchy.length>1)?'↳ ':'';
     const title=displayKind==='task'?`${nestedSupporting}任务｜${topic.displayName}`:displayKind==='goal'?`${nestedSupporting}阶段目标｜${topic.displayName}`:
       `${nestedProject?'↳ 子项目':'项目'}｜${topic.displayName}`;
     const text=`${founderText(title, 120)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.displayName,topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}`;
@@ -117,19 +115,17 @@ function hierarchyFor(topic:FounderWorkMapTopic,byName:ReadonlyMap<string,Founde
   return path;
 }
 
-function frameworkFor(path:readonly FounderWorkMapTopic[]):'A'|'B'|null{
-  return path[0]?.displayName===aLine?'A':path[0]?.displayName===bLine?'B':null;
+function frameworkFor(path:readonly FounderWorkMapTopic[]):'A'|'B'|'C'|null{
+  return path[0]?.displayName===aLine?'A':path[0]?.displayName===bLine?'B':path[0]?.displayName===cLine?'C':null;
 }
 
 function compareHierarchy(a:FounderWorkMapTopic,b:FounderWorkMapTopic,byName:ReadonlyMap<string,FounderWorkMapTopic>):number{
   const key=(topic:FounderWorkMapTopic):string=>{const path=hierarchyFor(topic,byName),framework=frameworkFor(path);
-    const infrastructure=path[0]?.displayName===founderRoom;
-    const root=framework==='A'?'0':framework==='B'?'1':infrastructure?'2':'3';
+    const root=framework==='A'?'0':framework==='B'?'1':framework==='C'?'2':'3';
     const projectOrder=(name:string):string=>name==='AiJia AI Native 官网'?'00':name==='Smart Listing'?'01':
-      name==='AI 选房经验与知识库'?'02':name==='房产销售过程数据沉淀'?'03':name;
-    const hierarchy=path.length===1?['00-root']:path.slice(1).map((item,index)=>
-      infrastructure&&index===0&&item.displayKind==='goal'?'05-goal':
-      infrastructure&&index===0&&item.displayKind==='task'?'06-task':`10-${projectOrder(item.displayName)}`);
+      name==='AI 选房经验与知识库'?'02':name==='房产销售过程数据沉淀'?'03':
+      name==='飞书合伙人对齐'?'00':name==='企业微信接入'?'01':name;
+    const hierarchy=path.length===1?['00-root']:path.slice(1).map(item=>`10-${projectOrder(item.displayName)}`);
     return [root,...hierarchy,stages.indexOf(topic.stage).toString().padStart(2,'0'),topic.id].join('|')};
   return key(a).localeCompare(key(b));
 }

@@ -1,0 +1,43 @@
+{
+  "expected": { "topics": 40, "perspectives": 34, "relations": 37 },
+  "groups": [
+    {
+      "canonical": {
+        "id": "topic_106cf9757e6cae55cbca67fa5e677cd7",
+        "version": 6,
+        "name": "飞书合伙人对齐",
+        "stage": "active_project",
+        "outcome": "减少反复解释、查找和返工，识别执行偏差，处理分歧，同时尽量不增加额外人工沟通成本",
+        "displayKind": "project"
+      },
+      "duplicates": []
+    }
+  ],
+  "partOf": [],
+  "removePartOf": [
+    {
+      "childId": "topic_61714f83345431c413c004d990c82c82",
+      "parentId": "topic_106cf9757e6cae55cbca67fa5e677cd7"
+    }
+  ],
+  "newTopics": [
+    {
+      "key": "company_collaboration_infrastructure",
+      "name": "公司协作基础设施",
+      "stage": "active_project",
+      "outcome": "承载公司内部协作、认知对齐与跨平台工作上下文基础设施。",
+      "sourceIds": [],
+      "displayKind": "project"
+    }
+  ],
+  "newPartOf": [
+    {
+      "childId": "topic_106cf9757e6cae55cbca67fa5e677cd7",
+      "parentKey": "company_collaboration_infrastructure"
+    },
+    {
+      "childId": "topic_61714f83345431c413c004d990c82c82",
+      "parentKey": "company_collaboration_infrastructure"
+    }
+  ]
+}

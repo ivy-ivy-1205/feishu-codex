@@ -95,6 +95,17 @@ describe('applyFounderBaseline',()=>{
     ]));
     expect(manifest.partOf).toHaveLength(3);
   });
+  it('locks V7 to the C-line root with Feishu and WeCom as sibling projects',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync(
+      'deploy/founder-work-map-v7-20260926.manifest.json','utf8')));
+    expect(manifest.expected).toEqual({topics:40,perspectives:34,relations:37});
+    expect(manifest.groups).toEqual([expect.objectContaining({canonical:expect.objectContaining({
+      id:'topic_106cf9757e6cae55cbca67fa5e677cd7',version:6,name:'飞书合伙人对齐'
+    })})]);
+    expect(manifest.removePartOf).toEqual([{childId:'topic_61714f83345431c413c004d990c82c82',parentId:'topic_106cf9757e6cae55cbca67fa5e677cd7'}]);
+    expect(manifest.newTopics).toEqual([expect.objectContaining({key:'company_collaboration_infrastructure',name:'公司协作基础设施'})]);
+    expect(manifest.newPartOf).toHaveLength(2);
+  });
   it('can add reviewed same_as relations without appending unchanged canonical versions',()=>{
     const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
     const at=new Date('2026-09-25T00:00:00Z');
@@ -104,6 +115,27 @@ describe('applyFounderBaseline',()=>{
       canonical:{id:canonical.id,version:1,name:'A 线',stage:'active_project' as const,outcome:'方向'},duplicates:[{id:duplicate.id,version:1}]}],partOf:[],newTopics:[]};
     expect(applyFounderBaseline(db.client,manifest,at,true)).toMatchObject({canonicalUpdates:0,sameAs:1,applied:true});
     expect(topics.listCurrentTopics().find(topic=>topic.id===canonical.id)?.currentVersion).toBe(1);
+  });
+  it('moves a reviewed child between parents atomically',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
+    const at=new Date('2026-09-26T00:00:00Z');
+    const oldParent=topics.createTopic({displayName:'飞书合伙人对齐',stage:'active_project',createdAt:at});
+    const child=topics.createTopic({displayName:'企业微信接入',stage:'exploring',createdAt:new Date(at.getTime()+1)});
+    topics.addRelation({fromTopicId:child.id,toTopicId:oldParent.id,relationType:'part_of',rationale:'old',createdAt:at});
+    const manifest={expected:{topics:2,perspectives:0,relations:1},groups:[{updateCanonical:false,
+      canonical:{id:oldParent.id,version:1,name:'飞书合伙人对齐',stage:'active_project' as const,outcome:null},duplicates:[]}],
+      partOf:[],removePartOf:[{childId:child.id,parentId:oldParent.id}],newTopics:[
+        {key:'c_line',name:'公司协作基础设施',stage:'active_project' as const,outcome:'协作底座。',sourceIds:[]}
+      ],newPartOf:[{childId:oldParent.id,parentKey:'c_line'},{childId:child.id,parentKey:'c_line'}]};
+    expect(applyFounderBaseline(db.client,manifest,at,false)).toMatchObject({partOf:2,removedPartOf:1,newTopics:1,applied:false});
+    expect(topics.listRelations()).toHaveLength(1);
+    expect(applyFounderBaseline(db.client,manifest,at,true)).toMatchObject({partOf:2,removedPartOf:1,newTopics:1,applied:true});
+    const cLine=topics.listCurrentTopics().find(topic=>topic.displayName==='公司协作基础设施')!;
+    expect(topics.listRelations()).toEqual(expect.arrayContaining([
+      expect.objectContaining({fromTopicId:oldParent.id,toTopicId:cLine.id,relationType:'part_of'}),
+      expect.objectContaining({fromTopicId:child.id,toTopicId:cLine.id,relationType:'part_of'})
+    ]));
+    expect(topics.listRelations()).not.toContainEqual(expect.objectContaining({fromTopicId:child.id,toTopicId:oldParent.id,relationType:'part_of'}));
   });
   it('rejects a relation-only manifest when canonical content has drifted',()=>{
     const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);

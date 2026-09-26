@@ -56,25 +56,26 @@ describe('founder work map cards', () => {
     const smart={...topic('smart','active_project'),displayName:'Smart Listing',parentName:a.displayName};
     const sample={...topic('sample','active_project'),displayName:'Smart Listing L008｜27 Cecil Street 样板',parentName:smart.displayName};
     const update={...topic('update','active_project'),displayName:'给静姐和 Kenny 哥 update',parentName:a.displayName,displayKind:'task' as const};
-    const room={...topic('room','active_project'),displayName:'AiJia Founder Alignment Room / AiJia 合伙人对齐室'};
-    const wecom={...topic('wecom','exploring'),displayName:'企业微信接入',parentName:room.displayName};
+    const c={...topic('c','active_project'),displayName:'公司协作基础设施'};
+    const room={...topic('room','active_project'),displayName:'飞书合伙人对齐',parentName:c.displayName};
+    const wecom={...topic('wecom','exploring'),displayName:'企业微信接入',parentName:c.displayName};
     const phase={...topic('phase','active_project'),displayName:'飞书第一阶段目标',parentName:room.displayName,displayKind:'goal' as const};
-    const [page]=renderFounderWorkMap({...window,topics:[phase,wecom,room,update,sample,smart,a],uncertainGrouping:[],coverageGaps:[]});
+    const [page]=renderFounderWorkMap({...window,topics:[phase,wecom,room,c,update,sample,smart,a],uncertainGrouping:[],coverageGaps:[]});
     const body=JSON.stringify(page!.card);
     expect(body).toContain('A 线｜AiJia AI Native 房产业务');
     expect(body).toContain('#1 · 项目｜Smart Listing');
     expect(body).toContain('#2 · ↳ 子项目｜Smart Listing L008｜27 Cecil Street 样板');
     expect(body).toContain('任务｜给静姐和 Kenny 哥 update');
     expect(body).toContain('C 线｜公司协作基础设施');
-    expect(body).toContain('#3 · 项目｜AiJia Founder Alignment Room / AiJia 合伙人对齐室');
-    expect(body).toContain('#4 · ↳ 子项目｜企业微信接入');
+    expect(body).toContain('#3 · 项目｜飞书合伙人对齐');
+    expect(body).toContain('#4 · 项目｜企业微信接入');
     expect(body).toContain('↳ 阶段目标｜飞书第一阶段目标');
-    expect(body.indexOf('#3 · 项目｜AiJia Founder Alignment Room / AiJia 合伙人对齐室'))
+    expect(body.indexOf('#3 · 项目｜飞书合伙人对齐'))
       .toBeLessThan(body.indexOf('↳ 阶段目标｜飞书第一阶段目标'));
     expect(body.indexOf('↳ 阶段目标｜飞书第一阶段目标'))
-      .toBeLessThan(body.indexOf('#4 · ↳ 子项目｜企业微信接入'));
+      .toBeLessThan(body.indexOf('#4 · 项目｜企业微信接入'));
     expect(body.indexOf('C 线｜公司协作基础设施'))
-      .toBeLessThan(body.indexOf('#3 · 项目｜AiJia Founder Alignment Room / AiJia 合伙人对齐室'));
+      .toBeLessThan(body.indexOf('#3 · 项目｜飞书合伙人对齐'));
     expect(body).not.toContain('层级：');
     expect(page!.itemRefs.map(ref=>ref.id)).toEqual(['smart','sample','room','wecom']);
   });
