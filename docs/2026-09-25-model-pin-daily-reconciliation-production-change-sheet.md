@@ -1,15 +1,15 @@
 # AiJia 合伙人对齐室：模型锁定与每日防漏复核生产变更单
 
-状态：**待 Ivy review；不构成生产执行授权。**
+状态：**Ivy 已批准执行；异常先停止，不自动回滚。**
 
-目标提交：`2b97c81`。该提交包含每日 24 小时防漏复核提交 `bed01df`，以及模型锁定、测试、配置示例和群置顶说明。
+目标提交：`a1a86d1`。该提交包含每日游标式防漏复核、模型锁定、测试、配置示例和群置顶说明。
 
 ## 1. 本次唯一目标
 
 用一次 Bridge 替换完成两项变更：
 
 1. 所有 Bridge 内的 Codex CLI 语义任务显式使用 `gpt-5.6-sol` + `medium`，不再跟随账号默认模型漂移；
-2. 对唯一批准群每天执行一次最近 24 小时的飞书历史复核，只把此前未持久化的新来源送入既有分析链路。
+2. 对唯一批准群每天执行一次游标式飞书历史复核：从上次完整复核的 `until` 继续读到当前时间，只把此前未持久化的新来源送入既有分析链路。首次游标固定为已 review 历史批次最后一条实际消息的时间 `2026-09-22T15:20:18.120Z`。
 
 本次不启用自动分歧提醒，不启用自动工作地图推送，不修改 Nginx、域名、飞书权限、OAuth、身份映射、数据库 schema 或其他产品。
 
@@ -21,6 +21,7 @@
 CODEX_MODEL=gpt-5.6-sol
 CODEX_REASONING_EFFORT=medium
 FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED=true
+FOUNDER_STREAM_RECONCILIATION_BOOTSTRAP_SINCE=2026-09-22T15:20:18.120Z
 ```
 
 下列现有边界必须保持：
@@ -40,9 +41,10 @@ PROJECT_CONTEXT_CHAT_IDS=oc_a84d5b6ca478220d0a37964b50776edb
 
 - TDD 红灯确认旧代码未传模型和推理强度；绿灯后每次 `codex exec` 显式传入 `--model gpt-5.6-sol` 与 `model_reasoning_effort="medium"`。
 - 配置只接受 GPT-5.6 Sol/Terra/Luna 和官方支持的推理强度闭集；`account-default`、`automatic` 等值拒绝启动。
-- 每日复核只允许唯一批准群；使用稳定来源标识去重，仅新增来源进入分析。
+- 每日复核只允许唯一批准群；每天触发一次，但读取跨度不固定为 24 小时，而是从上次完整游标继续；使用稳定来源标识去重，仅新增来源进入分析。
+- `sourceCoverage.termination` 不是 `next_cursor_null` 时不得推进游标；下一次仍从上一个完整游标重读，避免把权限、分页或临时错误造成的缺口误记为已覆盖。
 - 群查询卡显示最后收到、最后分析、最后防漏复核、积压、未补偿失败和唯一缺口数。
-- `93` 个测试文件、`796` 项测试、typecheck、build、diff check 全部通过。
+- `93` 个测试文件、`797` 项测试、typecheck、build、diff check 全部通过。
 
 ## 4. 执行顺序
 
@@ -61,9 +63,9 @@ PROJECT_CONTEXT_CHAT_IDS=oc_a84d5b6ca478220d0a37964b50776edb
 
 ### D2：隔离构建候选镜像
 
-- 从 tracked-only 的目标提交 `2b97c81` 生成归档，记录 SHA-256；
+- 从 tracked-only 的目标提交 `a1a86d1` 生成归档，记录 SHA-256；
 - 在 `/opt/feishu-codex` 的隔离 build/upload 目录构建候选镜像；
-- 镜像标签和 OCI revision 必须为 `2b97c81`；
+- 镜像标签和 OCI revision 必须为 `a1a86d1`；
 - 用不挂生产数据库、不连飞书、不调用 Codex 的临时容器验证配置解析、编译产物和目标 CLI 文件存在；验证容器立即删除；
 - 生产 Bridge 继续运行，不在 D2 重启。
 
@@ -72,19 +74,19 @@ PROJECT_CONTEXT_CHAT_IDS=oc_a84d5b6ca478220d0a37964b50776edb
 1. 再次确认没有正在执行的生产任务；如有活动任务，等待其完成并重新确认，不强杀模型任务。
 2. 停止 Bridge，保留现场。
 3. 对生产 SQLite 做一致性备份，权限 `600`，验证 `integrity_check=ok`；备份当前 env、应用 checkpoint、当前镜像 ID/revision。
-4. 只写入第 2 节的三个配置值；再次确认 `GROUP_DELIVERY=false`。
+4. 只写入第 2 节的四个配置值；再次确认 `GROUP_DELIVERY=false`。
 5. 用候选镜像替换 Bridge 并启动一次。不得在本变更中做第二次试探性重启。
 
-首次启动时，如果数据库中没有最近 24 小时的 coverage audit，每日复核会在首个 worker tick 立即运行；以后以上次成功记录为基准，每 24 小时运行一次。
+首次启动时，由于数据库中没有带 `syncPurpose=daily_reconciliation` 的完整 coverage audit，每日复核会在首个 worker tick 立即从 `2026-09-22T15:20:18.120Z` 读到启动时刻。以后每 24 小时触发一次，并从上次完整 audit 的 `requestedRange.until` 继续；不完整 audit 只作为审计记录，不推进读取游标。
 
 ### D4：部署后验证
 
 - Bridge `running/healthy`、restart count 符合一次切换，`/health` 与 `/ready` 成功；
-- 运行镜像 revision 为 `2b97c81`；
-- 三个新配置值准确，既有六个 Founder 边界未改变；
+- 运行镜像 revision 为 `a1a86d1`；
+- 四个新配置值准确，既有六个 Founder 边界未改变；
 - ChatGPT 登录有效，API Key 环境变量仍未设置；
 - SQLite `integrity_check=ok`，身份映射仍为两位已配置 founder；
-- 首次 24 小时复核产生新的 coverage audit，或明确报告安全 gap；重复消息不新增重复 source；
+- 首次复核范围从 `2026-09-22T15:20:18.120Z` 到部署时刻，产生带 `syncPurpose=daily_reconciliation` 的 coverage audit，或明确报告安全 gap；重复消息不新增重复 source；
 - 如发现新来源，只允许形成持久化分析 job；`GROUP_DELIVERY=false` 下不得产生自动群提醒或工作地图投递；
 - 手动查询能力仍可用，但本次不主动在群里发送测试消息；Ivy/James 后续自然使用三条查询指令验收。
 
@@ -104,7 +106,7 @@ PROJECT_CONTEXT_CHAT_IDS=oc_a84d5b6ca478220d0a37964b50776edb
 
 ## 6. 清理范围
 
-部署验证通过后，可删除本次 `2b97c81` 的上传归档、隔离 build 目录和无容器引用的临时候选标签；保留：
+部署验证通过后，可删除本次 `a1a86d1` 的上传归档、隔离 build 目录和无容器引用的临时候选标签；保留：
 
 - 当前运行镜像；
 - 部署前回滚镜像；
@@ -117,7 +119,7 @@ PROJECT_CONTEXT_CHAT_IDS=oc_a84d5b6ca478220d0a37964b50776edb
 
 - 一次短暂 Bridge 停机窗口；期间飞书可能重试 webhook，幂等键负责去重。
 - `medium` 相比 `low` 可能增加分析时间和 Codex 套餐额度消耗，但不增加 OpenAI API Key 按量费用。
-- 每日复核会增加一次飞书历史读取；只有补到新来源时才增加后续 Codex 分析。
+- 每日复核会增加一次飞书历史读取；读取跨度取决于上次完整游标，只有补到新来源时才增加后续 Codex 分析。
 - 群内自动发言仍关闭，因此这次上线不会主动打扰 Ivy/James。
 
 ## 8. 审批范围
