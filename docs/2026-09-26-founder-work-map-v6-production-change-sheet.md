@@ -48,3 +48,12 @@
 
 - 删除部署归档、构建目录和一次性预览副本。
 - 保留当前一致性数据库备份和审计日志；不保留多余 app 目录副本。
+
+## 2026-09-26 执行结果
+
+- 部署 revision：`1fd353ce8807bbeaaf092a12defa6b75b55ff9b2`。
+- 一致性备份：`/opt/feishu-codex/backups/bridge-pre-v6-20260926T103509Z.sqlite`，mode `600`，`integrity_check=ok`。
+- baseline preview/apply 均精确得到：5 个 canonical version 更新、1 个 `same_as`、3 个 `part_of`、0 个新 topic。
+- 终态：40 topics、34 perspectives、37 relations，active jobs=0、pending outbox=0、无外键异常。
+- Bridge `running/healthy`、restart=0；本地及公网 `/health`、`/ready` 均为 HTTP 200；群投递仍为 `false`。
+- 最终只读预览 `foundermap_f0f01618efb2f8453c3e919d8213a6d8` 从一致性临时副本生成；未发群，临时副本、上传归档、部署脚本、构建目录和 app checkpoint 已清理。
