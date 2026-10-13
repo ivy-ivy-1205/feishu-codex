@@ -20,13 +20,43 @@ function event(text:string,openId='ou_ivy',messageId='om_query'){
 }
 
 describe('founder manual queries',()=>{
-  it('recognizes only the three approved commands',()=>{
+  it('recognizes the three board uses and keeps the previous alignment commands compatible',()=>{
     expect(parseFounderManualQuery('查看工作地图')).toEqual({kind:'work_map'});
+    expect(parseFounderManualQuery('查看项目进展：Smart Listing')).toEqual({kind:'project_progress',topicName:'Smart Listing'});
+    expect(parseFounderManualQuery('查看分歧：Smart Listing')).toEqual({kind:'topic_alignment',topicName:'Smart Listing'});
+    expect(parseFounderManualQuery('查看分歧')).toEqual({kind:'open_alignment'});
     expect(parseFounderManualQuery(' 查看对齐：Smart Listing ')).toEqual({kind:'topic_alignment',topicName:'Smart Listing'});
     expect(parseFounderManualQuery('查看对齐: AI 选房经验与知识库')).toEqual({kind:'topic_alignment',topicName:'AI 选房经验与知识库'});
     expect(parseFounderManualQuery('查看待对齐')).toEqual({kind:'open_alignment'});
     expect(parseFounderManualQuery('请查看工作地图')).toBeNull();
     expect(parseFounderManualQuery('查看对齐：')).toBeNull();
+    expect(parseFounderManualQuery('查看项目进展：')).toBeNull();
+  });
+
+  it('lets the configured James identity invoke the work map',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    new AlignmentRepository(db.client).configureFounderIdentity({founder:'james',sourceSystem:'feishu',externalAuthorId:'ou_james',configuredAt:at});
+    const runtime=createFounderStreamRuntime({client:db.client,jobRepository:new JobRepository(db.client),
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false,manualQueryEnabled:true},
+      approvedChatIds:[chatId],ivyPrivateChatId:'oc_private',now:()=>at,
+      analyzer:{async analyze(){return{topics:[]}}}});
+    expect(runtime.route.ingest(event('查看工作地图','ou_james','om_james_query'))).toMatchObject({status:'manual_query_queued'});
+    db.close();
+  });
+
+  it('renders project progress as current stage, completed, next and blockers without inventing completion',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    new TopicRepository(db.client).createTopic({displayName:'Smart Listing',stage:'active_project',outcome:'验证房源服务',createdAt:at});
+    const message=buildFounderManualQueryMessages({client:db.client,query:{kind:'project_progress',topicName:'Smart Listing'},
+      queryMessageId:'om_progress',chatId,approvedChatIds:[chatId],now:at})[0]!;
+    const body=JSON.stringify(message.card);
+    expect(body).toContain('项目进展');
+    expect(body).toContain('当前阶段');
+    expect(body).toContain('已完成');
+    expect(body).toContain('待推进');
+    expect(body).toContain('卡点与依赖');
+    expect(body).toContain('没有明确标注');
+    db.close();
   });
 
   it('does not persist an authorized query as business context and queues an auditable response',()=>{
@@ -78,6 +108,47 @@ describe('founder manual queries',()=>{
       .findDeliveredFounderMessage(chatId,'om_manual_response');
     expect(delivered).toMatchObject({kind:'founder_work_map',itemRefs:[{kind:'topic'}]});
     expect((db.client.prepare("SELECT count(*) n FROM outbox WHERE idempotency_key LIKE 'alignment-question:%' AND status='delivered'").get() as {n:number}).n).toBe(0);
+    db.close();
+  });
+
+  it('reuses a persisted whiteboard when card delivery retries',async()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    new AlignmentRepository(db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:at});
+    new TopicRepository(db.client).createTopic({displayName:'Smart Listing',stage:'active_project',createdAt:at});
+    let publishes=0,sends=0;const cards:Record<string,unknown>[]=[];
+    const runtime=createFounderStreamRuntime({client:db.client,jobRepository:new JobRepository(db.client),
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false,manualQueryEnabled:true},
+      approvedChatIds:[chatId],ivyPrivateChatId:'oc_private',now:()=>at,
+      analyzer:{async analyze(){return{topics:[]}}},whiteboardPublisher:{async publish(){publishes++;return{
+        documentId:'doc_1',whiteboardId:'board_1',url:'https://example.test/docx/doc_1',paletteId:'coral'}}},delivery:{
+        async sendTextMessage(){return{messageId:'om_text'}},
+        async sendInteractiveCard(input){cards.push(input.card);if(sends++===0)throw new Error('temporary');return{messageId:'om_after_retry'}}}});
+    runtime.route.ingest(event('查看工作地图'));
+    await runtime.runManualQueriesOnce();
+    const pending=db.client.prepare("SELECT payload FROM outbox WHERE status='pending'").get() as {payload:string};
+    expect(JSON.parse(pending.payload).boardArtifact.url).toBe('https://example.test/docx/doc_1');
+    await runtime.runManualQueriesOnce();
+    expect(publishes).toBe(1);
+    expect(JSON.stringify(cards.at(-1))).toContain('https://example.test/docx/doc_1');
+    db.close();
+  });
+
+  it('keeps the complete text response and makes a whiteboard publishing failure visible',async()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    new AlignmentRepository(db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:at});
+    new TopicRepository(db.client).createTopic({displayName:'Smart Listing',stage:'active_project',createdAt:at});
+    let sentCard:Record<string,unknown>|undefined;
+    const runtime=createFounderStreamRuntime({client:db.client,jobRepository:new JobRepository(db.client),
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false,manualQueryEnabled:true},
+      approvedChatIds:[chatId],ivyPrivateChatId:'oc_private',now:()=>at,
+      analyzer:{async analyze(){return{topics:[]}}},whiteboardPublisher:{async publish(){throw new Error('permission denied')}},delivery:{
+        async sendTextMessage(){return{messageId:'om_text'}},
+        async sendInteractiveCard(input){sentCard=input.card;return{messageId:'om_fallback'}}}});
+    runtime.route.ingest(event('查看工作地图'));
+    await runtime.runManualQueriesOnce();
+    expect(JSON.stringify(sentCard)).toContain('看板生成失败');
+    const delivered=db.client.prepare("SELECT payload FROM outbox WHERE status='delivered'").get() as {payload:string};
+    expect(JSON.parse(delivered.payload).boardFailure.code).toBe('FOUNDER_WHITEBOARD_PUBLISH_FAILED');
     db.close();
   });
 
@@ -177,8 +248,13 @@ describe('founder manual queries',()=>{
       occurredAt:at.toISOString(),authors:[],locatorUri:null,contentFormat:'application/json',contentText:JSON.stringify({
         gaps:[{code:'FILE_TEXT_UNREADABLE',sourceRef:'file-1',reason:'unreadable'}]}),metadata:{chatId},availabilityStatus:'available',capturedAt:at});
     sources.saveSource({sourceSystem:'feishu',sourceType:'feishu_sync_coverage',externalId:'daily-coverage',logicalKey:'daily-coverage',
-      occurredAt:'2026-09-09T00:00:00.000Z',authors:[],locatorUri:null,contentFormat:'application/json',contentText:'{}',
+      occurredAt:'2026-09-09T00:00:00.000Z',authors:[],locatorUri:null,contentFormat:'application/json',contentText:JSON.stringify({
+        requestedRange:{until:'2026-09-09T00:00:00.000Z'},sourceCoverage:{termination:'next_cursor_null'}}),
       metadata:{chatId,syncPurpose:'daily_reconciliation'},availabilityStatus:'available',capturedAt:new Date('2026-09-09T00:00:00.000Z')});
+    sources.saveSource({sourceSystem:'feishu',sourceType:'feishu_sync_coverage',externalId:'manual-coverage',logicalKey:'manual-coverage',
+      occurredAt:'2026-09-10T00:00:00.000Z',authors:[],locatorUri:null,contentFormat:'application/json',contentText:JSON.stringify({
+        requestedRange:{until:'2026-09-10T00:00:00.000Z'},sourceCoverage:{termination:'next_cursor_null'}}),
+      metadata:{chatId},availabilityStatus:'available',capturedAt:new Date('2026-09-10T00:00:00.000Z')});
     sources.saveSource({sourceSystem:'feishu',sourceType:'feishu_sync_gap',externalId:'gap-duplicate',logicalKey:'gap-duplicate',
       occurredAt:at.toISOString(),authors:[],locatorUri:null,contentFormat:'application/json',contentText:JSON.stringify({
         code:'FILE_TEXT_UNREADABLE',sourceRef:'file-1',reason:'same gap persisted separately'}),metadata:{chatId},availabilityStatus:'available',capturedAt:at});
@@ -198,8 +274,7 @@ describe('founder manual queries',()=>{
     const body=JSON.stringify(message.card);
     expect(Buffer.byteLength(body,'utf8')).toBeLessThanOrEqual(28_000);
     expect(body).toContain('不可读/跳过缺口：1');
-    expect(body).toContain('最后防漏复核：2026-09-09T00:00:00.000Z');
-    expect(body).not.toContain('最后防漏复核：2026-09-10T00:00:00.000Z');
+    expect(body).toContain('最后防漏复核：2026-09-10T00:00:00.000Z');
     expect(body).toContain('仅展示前');
     db.close();
   });

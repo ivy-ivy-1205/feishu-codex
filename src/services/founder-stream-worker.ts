@@ -28,6 +28,7 @@ import { isSelfMediaProposal, projectFounderWorkMap, type FounderWorkMapClassifi
 import { parseFeishuAttachment } from './feishu-attachment-parser.js';
 import { classifyFounderFailure, type FounderFailureStage } from './founder-analysis-failure.js';
 import { buildFounderManualQueryMessages, enqueueFounderManualQuery, isConfiguredFounder, parseFounderManualQuery } from './founder-manual-query.js';
+import type { FounderWhiteboardArtifact } from './founder-whiteboard.js';
 
 export interface FounderPerspectiveAnalysisPort {
   analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[];
@@ -38,7 +39,7 @@ export interface FounderPerspectiveAnalysisPort {
 }
 export interface FounderStreamRoute { ingest(envelope: unknown): Record<string, unknown> | null }
 export interface FounderStreamOptions {
-  client: Database.Database; jobRepository: JobRepository; flags: Omit<AppConfig['founderStream'],'manualQueryEnabled'|'dailyReconciliationEnabled'|'reconciliationBootstrapSince'> &
+  client: Database.Database; jobRepository: JobRepository; flags: Omit<AppConfig['founderStream'],'manualQueryEnabled'|'dailyReconciliationEnabled'|'reconciliationBootstrapSince'|'whiteboardEnabled'> &
     {manualQueryEnabled?:boolean;dailyReconciliationEnabled?:boolean};
   approvedChatIds: readonly string[]; ivyPrivateChatId: string; analyzer?: FounderStreamAnalyzer;
   classifier?: { classify(analysis: Awaited<ReturnType<FounderStreamAnalyzer['analyze']>>): Promise<FounderWorkMapClassification> };
@@ -47,6 +48,8 @@ export interface FounderStreamOptions {
   now?: () => Date; intervalMs?: number;
   policy?: Pick<AlignmentNotificationPolicy, 'reconcilePending'>;
   dailyReconciliation?:{bootstrapSince:string;run(input:{since:string;until:string;now:Date}):Promise<unknown>};
+  whiteboardPublisher?:{publish(input:{title:string;chatId:string;cards:readonly Record<string,unknown>[];
+    previousPaletteId?:string|null}):Promise<FounderWhiteboardArtifact>};
   delivery?: { sendTextMessage(input: { chatId: string; text: string; idempotencyKey?: string }): Promise<{ messageId: string }>;
     sendInteractiveCard(input: { chatId: string; card: Record<string, unknown>; idempotencyKey?: string }): Promise<{ messageId: string }> };
 }
@@ -420,10 +423,41 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
 async function deliverManualQueryMessages(options:FounderStreamOptions,now:()=>Date,allowed:(id:string)=>boolean){
   const rows=options.client.prepare(`SELECT idempotency_key,payload FROM outbox WHERE status='pending'
     AND (next_attempt_at IS NULL OR next_attempt_at<=?) ORDER BY created_at,id`).all(now().toISOString()) as {idempotency_key:string;payload:string}[];
+  const artifacts=new Map<string,FounderWhiteboardArtifact>();
+  const failures=new Map<string,{code:'FOUNDER_WHITEBOARD_PUBLISH_FAILED';at:string}>();
   for(const row of rows){
     let message:any;try{message=JSON.parse(row.payload)}catch{continue}
     const manual=message?.kind==='founder_manual_query'||(message?.kind==='founder_work_map'&&typeof message.manualQueryMessageId==='string');
     if(!manual||!allowed(message.targetChatId)||!message.card)continue;
+    const queryMessageId=message.kind==='founder_manual_query'?message.queryMessageId:message.manualQueryMessageId;
+    const knownFailure=failures.get(queryMessageId);
+    if(knownFailure){message.boardFailure=knownFailure;message.card=withWhiteboardFailure(message.card)}
+    if(options.whiteboardPublisher&&!message.boardArtifact&&!message.boardFailure){
+      try{
+        let artifact=artifacts.get(queryMessageId);
+        if(!artifact){
+          const grouped=rows.flatMap(candidate=>{try{const value=JSON.parse(candidate.payload);const id=value.kind==='founder_manual_query'?
+            value.queryMessageId:value.manualQueryMessageId;return id===queryMessageId&&value.card?[value]:[]}catch{return[]}});
+          const previous=options.client.prepare(`SELECT payload FROM outbox WHERE status='delivered' AND json_valid(payload)
+            AND json_extract(payload,'$.boardArtifact.paletteId') IS NOT NULL ORDER BY delivered_at DESC LIMIT 1`).get() as {payload:string}|undefined;
+          const previousPaletteId=previous?JSON.parse(previous.payload).boardArtifact?.paletteId:null;
+          artifact=await options.whiteboardPublisher.publish({title:manualQueryTitle(grouped[0]?.card),chatId:message.targetChatId,
+            cards:grouped.map(value=>value.card),previousPaletteId});artifacts.set(queryMessageId,artifact);
+          const update=options.client.prepare("UPDATE outbox SET payload=? WHERE idempotency_key=? AND status='pending'");
+          for(const candidate of rows){try{const value=JSON.parse(candidate.payload);const id=value.kind==='founder_manual_query'?
+            value.queryMessageId:value.manualQueryMessageId;if(id===queryMessageId){value.boardArtifact=artifact;value.card=withWhiteboardLink(value.card,artifact);
+              update.run(JSON.stringify(value),candidate.idempotency_key)}}catch{/* An invalid unrelated row remains untouched. */}}
+        }
+        message.boardArtifact=artifact;message.card=withWhiteboardLink(message.card,artifact);
+      }catch{
+        const failure={code:'FOUNDER_WHITEBOARD_PUBLISH_FAILED' as const,at:now().toISOString()};failures.set(queryMessageId,failure);
+        const update=options.client.prepare("UPDATE outbox SET payload=? WHERE idempotency_key=? AND status='pending'");
+        for(const candidate of rows){try{const value=JSON.parse(candidate.payload);const id=value.kind==='founder_manual_query'?
+          value.queryMessageId:value.manualQueryMessageId;if(id===queryMessageId){value.boardFailure=failure;
+            value.card=withWhiteboardFailure(value.card);update.run(JSON.stringify(value),candidate.idempotency_key)}}catch{/* Invalid rows are untouched. */}}
+        message.boardFailure=failure;message.card=withWhiteboardFailure(message.card);
+      }
+    }
     try{
       const sent=await options.delivery!.sendInteractiveCard({chatId:message.targetChatId,card:message.card,idempotencyKey:row.idempotency_key});
       if(!sent.messageId.trim()||sent.messageId.startsWith('pending:'))throw new Error('invalid delivery');
@@ -432,6 +466,25 @@ async function deliverManualQueryMessages(options:FounderStreamOptions,now:()=>D
     }catch{options.client.prepare("UPDATE outbox SET attempt_count=attempt_count+1,next_attempt_at=?,last_error_code='FOUNDER_DELIVERY_FAILED' WHERE idempotency_key=? AND status='pending'")
       .run(new Date(now().getTime()+30_000).toISOString(),row.idempotency_key)}
   }
+}
+
+function manualQueryTitle(card:Record<string,unknown>|undefined):string{
+  const content=(card?.header as {title?:{content?:unknown}}|undefined)?.title?.content;
+  return typeof content==='string'&&content.trim()?content.replace(/\s*·\s*\d+\/\d+\s*$/u,'').trim():'AiJia 工作看板';
+}
+function withWhiteboardLink(card:Record<string,unknown>,artifact:FounderWhiteboardArtifact):Record<string,unknown>{
+  const elements=Array.isArray(card.elements)?[...card.elements]:[];
+  if(!elements.some(element=>(element as {actions?:{url?:unknown}[]})?.actions?.some(action=>action.url===artifact.url)))elements.push({
+    tag:'action',actions:[{tag:'button',type:'primary',text:{tag:'plain_text',content:'打开可编辑看板'},url:artifact.url}]
+  });
+  return{...card,elements};
+}
+function withWhiteboardFailure(card:Record<string,unknown>):Record<string,unknown>{
+  const elements=Array.isArray(card.elements)?[...card.elements]:[];
+  if(!elements.some(element=>(element as {text?:{content?:unknown}})?.text?.content==='看板生成失败，已返回完整文本；请稍后重新查询。'))elements.push({
+    tag:'note',elements:[{tag:'plain_text',content:'看板生成失败，已返回完整文本；请稍后重新查询。'}]
+  });
+  return{...card,elements};
 }
 
 export function buildFounderStreamInput(sources: ContextSourceRepository, topics: TopicRepository, sourceIds: readonly string[], chatId: string): FounderStreamInput {

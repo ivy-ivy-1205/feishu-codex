@@ -8,6 +8,7 @@ import type { FounderWorkMapCard } from './founder-work-map-renderer.js';
 
 export type FounderManualQuery =
   | { kind:'work_map' }
+  | { kind:'project_progress';topicName:string }
   | { kind:'topic_alignment';topicName:string }
   | { kind:'open_alignment' };
 
@@ -24,9 +25,11 @@ const baselineSince='2026-08-31T00:00:00.000Z';
 export function parseFounderManualQuery(value:string):FounderManualQuery|null{
   const text=value.normalize('NFKC').trim();
   if(text==='查看工作地图')return{kind:'work_map'};
-  if(text==='查看待对齐')return{kind:'open_alignment'};
-  const match=/^查看对齐\s*[:：]\s*(.{1,100})$/u.exec(text);
-  return match?.[1]?.trim()?{kind:'topic_alignment',topicName:match[1].trim()}:null;
+  if(text==='查看待对齐'||text==='查看分歧')return{kind:'open_alignment'};
+  const progress=/^查看项目进展\s*[:：]\s*(.{1,100})$/u.exec(text);
+  if(progress?.[1]?.trim())return{kind:'project_progress',topicName:progress[1].trim()};
+  const alignment=/^查看(?:对齐|分歧)\s*[:：]\s*(.{1,100})$/u.exec(text);
+  return alignment?.[1]?.trim()?{kind:'topic_alignment',topicName:alignment[1].trim()}:null;
 }
 
 export function isConfiguredFounder(client:Database.Database,openId:string):boolean{
@@ -41,11 +44,43 @@ export function buildFounderManualQueryMessages(input:{client:Database.Database;
     if(result)return result.cards.map(item=>({...item,mapId:result.mapId,targetChatId:input.chatId,
       manualQueryMessageId:input.queryMessageId,card:withProcessingStatus(item.card,status)}));
   }
-  const cards=input.query.kind==='topic_alignment'?[buildTopicAlignment(input,input.query.topicName)]:
+  const cards=input.query.kind==='project_progress'?[buildProjectProgress(input,input.query.topicName)]:
+    input.query.kind==='topic_alignment'?[buildTopicAlignment(input,input.query.topicName)]:
     input.query.kind==='open_alignment'?[buildOpenAlignment(input)]:
       [founderCard('工作地图',['目前没有可展示的项目；机器人不会凭空创建项目。'])];
   return cards.map((card,index)=>({kind:'founder_manual_query',queryMessageId:input.queryMessageId,page:index+1,
     totalPages:cards.length,targetChatId:input.chatId,card:withProcessingStatus(card,status)}));
+}
+
+function buildProjectProgress(input:{client:Database.Database;now:Date},name:string):Record<string,unknown>{
+  const topics=new TopicRepository(input.client).listCanonicalTopics();
+  const wanted=normalize(name),matches=topics.filter(topic=>normalize(topic.displayName)===wanted);
+  if(matches.length!==1)return founderCard('项目进展',[
+    matches.length===0?`没有找到“${founderText(name,100)}”。请先用“查看工作地图”确认项目名称。`:
+      `“${founderText(name,100)}”对应多个项目，暂不自动猜测。`],'orange');
+  const topic=matches[0]!,perspectives=new AlignmentRepository(input.client).listCanonicalPerspectives(topic.id);
+  const issues=new AlignmentIssueRepository(input.client).listForTopic(topic.id)
+    .filter(item=>['candidate','ready','asked'].includes(item.status));
+  const stageLabels={idea:'想法',exploring:'探索中',project_candidate:'候选项目',active_project:'正在推进',paused:'暂停',closed:'已结束'} as const;
+  const statements=perspectives.map(item=>item.statement);
+  const completedStatements=statements.filter(item=>/(?:已|已经|完成|上线|发布|交付|验收|解决)/u.test(item));
+  const nextStatements=statements.filter(item=>/(?:下一步|待|计划|准备|推进|需要|将|本周|本月)/u.test(item));
+  const completed=topic.stage==='closed'||topic.stage==='paused'
+    ?`项目状态为${stageLabels[topic.stage]}；具体完成成果仍以来源记录为准。`
+    :completedStatements.length?completedStatements.slice(0,6).map(item=>`- ${founderText(item,180)}`).join('\n'):
+      '没有明确标注“已完成／已交付／已验收”的可追溯记录；不据此判断为未完成。';
+  const next=nextStatements.length?nextStatements.slice(0,6).map(item=>`- ${founderText(item,180)}`).join('\n'):
+    '当前资料没有明确标注下一步；需要结合最新项目表达确认。';
+  const blockers=issues.length?issues.slice(0,6).map(issue=>`- ${founderText(issue.ivy.statement,120)} ↔ ${founderText(issue.james.statement,120)}`).join('\n'):
+    '当前没有满足“双方向不同且影响行动”条件的卡点记录；这不代表没有依赖。';
+  return founderCard(`项目进展 · ${founderText(topic.displayName,100)}`,[
+    `当前方向：${topic.outcome?founderText(topic.outcome,500):'尚未形成明确目标。'}`,
+    `01 当前阶段\n${stageLabels[topic.stage]}；本版本更新时间 ${new Date(input.now).toISOString()}。`,
+    `02 已完成\n${completed}`,
+    `03 待推进\n${next}`,
+    `04 卡点与依赖\n${blockers}`,
+    `来源边界：当前观点关联 ${new Set(perspectives.flatMap(item=>item.evidenceIds)).size} 条证据；未读取内容不计入已完成。`
+  ],issues.length?'orange':'blue');
 }
 
 export function enqueueFounderManualQuery(client:Database.Database,messages:readonly FounderManualQueryMessage[],at:Date):number{
@@ -140,10 +175,15 @@ function processingStatus(client:Database.Database,chatId:string):string{
 }
 
 function latestCoverageAudit(client:Database.Database,chatId:string):string|null{
-  const rows=client.prepare("SELECT captured_at,metadata_json FROM context_sources WHERE source_type='feishu_sync_coverage' ORDER BY captured_at DESC")
-    .all() as {captured_at:string;metadata_json:string}[];
-  for(const row of rows)try{const metadata=JSON.parse(row.metadata_json) as {chatId?:unknown;syncPurpose?:unknown};
-    if(metadata.chatId===chatId&&metadata.syncPurpose==='daily_reconciliation')return row.captured_at}catch{}
+  const rows=client.prepare("SELECT captured_at,metadata_json,content_text FROM context_sources WHERE source_type='feishu_sync_coverage' ORDER BY captured_at DESC")
+    .all() as {captured_at:string;metadata_json:string;content_text:string}[];
+  for(const row of rows)try{
+    const metadata=JSON.parse(row.metadata_json) as {chatId?:unknown};
+    const content=JSON.parse(row.content_text) as {requestedRange?:{until?:unknown};sourceCoverage?:{termination?:unknown}};
+    const until=content.requestedRange?.until;
+    if(metadata.chatId===chatId&&content.sourceCoverage?.termination==='next_cursor_null'&&typeof until==='string'&&
+      Number.isFinite(Date.parse(until)))return new Date(until).toISOString();
+  }catch{}
   return null;
 }
 

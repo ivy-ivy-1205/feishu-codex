@@ -18,6 +18,7 @@ const envSchema = z.object({
   FOUNDER_STREAM_ANALYSIS_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
   FOUNDER_STREAM_GROUP_DELIVERY_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
   FOUNDER_STREAM_MANUAL_QUERY_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  FOUNDER_STREAM_WHITEBOARD_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
   FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
   FOUNDER_STREAM_RECONCILIATION_BOOTSTRAP_SINCE: z.iso.datetime({ offset: true }).optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -68,6 +69,9 @@ const envSchema = z.object({
   }
   if (config.FOUNDER_STREAM_MANUAL_QUERY_ENABLED && (!config.FOUNDER_STREAM_CAPTURE_ENABLED || !config.FOUNDER_STREAM_ANALYSIS_ENABLED)) {
     context.addIssue({ code: 'custom', message: 'Founder manual query requires capture and analysis' });
+  }
+  if (config.FOUNDER_STREAM_WHITEBOARD_ENABLED && !config.FOUNDER_STREAM_MANUAL_QUERY_ENABLED) {
+    context.addIssue({ code: 'custom', message: 'Founder whiteboard requires manual query' });
   }
   if (config.FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED && !config.FOUNDER_STREAM_CAPTURE_ENABLED) {
     context.addIssue({ code: 'custom', message: 'Founder daily reconciliation requires capture' });
@@ -140,7 +144,7 @@ type DatabaseKind = 'postgresql' | 'sqlite';
 
 export interface AppConfig {
   founderStream: { captureEnabled: boolean; analysisEnabled: boolean; groupDeliveryEnabled: boolean; manualQueryEnabled: boolean;
-    dailyReconciliationEnabled: boolean; reconciliationBootstrapSince: string | null };
+    dailyReconciliationEnabled: boolean; reconciliationBootstrapSince: string | null; whiteboardEnabled:boolean };
   environment: 'development' | 'test' | 'production';
   host: string;
   port: number;
@@ -219,6 +223,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     founderStream: { captureEnabled: parsed.FOUNDER_STREAM_CAPTURE_ENABLED, analysisEnabled: parsed.FOUNDER_STREAM_ANALYSIS_ENABLED,
       groupDeliveryEnabled: parsed.FOUNDER_STREAM_GROUP_DELIVERY_ENABLED,
       manualQueryEnabled: parsed.FOUNDER_STREAM_MANUAL_QUERY_ENABLED,
+      whiteboardEnabled: parsed.FOUNDER_STREAM_WHITEBOARD_ENABLED,
       dailyReconciliationEnabled: parsed.FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED,
       reconciliationBootstrapSince: parsed.FOUNDER_STREAM_RECONCILIATION_BOOTSTRAP_SINCE ?? null },
     host: parsed.HOST,

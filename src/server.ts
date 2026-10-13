@@ -5,6 +5,7 @@ import { createFounderAnalysisAdapters } from './composition/founder-stream-anal
 import { createFounderStreamRuntime } from './services/founder-stream-worker.js';
 import { FeishuOAuthHttpClient, type FeishuOAuthSdkClientLike } from './adapters/feishu-oauth-client.js';
 import { createFeishuSdkClient } from './adapters/feishu-sdk.js';
+import { createFeishuWhiteboardGateway, type FeishuWhiteboardSdkLike } from './adapters/feishu-whiteboard.js';
 import { createFeishuIntegration } from './composition/feishu.js';
 import { createMeetingSummarizer } from './composition/meeting-summarizer.js';
 import { createWorkerRuntime } from './composition/worker-runtime.js';
@@ -24,6 +25,7 @@ import { ingestMinuteGenerated } from './services/minute-ingestion.js';
 import { TokenCrypto } from './services/oauth-token-crypto.js';
 import { routeReply } from './services/reply-router.js';
 import { runFounderStreamBackfill } from './services/founder-stream-backfill.js';
+import { publishFounderWhiteboard, selectFounderPalette } from './services/founder-whiteboard.js';
 
 const config = loadConfig(process.env);
 if (config.database.kind !== 'sqlite') {
@@ -117,6 +119,11 @@ const founderAnalysis = config.founderStream.analysisEnabled ? createFounderAnal
     timeoutMs: config.codex.timeoutSeconds * 1000, model: config.codex.model,
     reasoningEffort: config.codex.reasoningEffort, baseEnv: process.env, runner: new NodeCodexProcessRunner() })
 }) : undefined;
+const founderWhiteboardGateway = config.founderStream.whiteboardEnabled
+  ? createFeishuWhiteboardGateway(createFeishuSdkClient({
+    appId:config.feishu.appId,appSecret:config.feishu.appSecret
+  }) as unknown as FeishuWhiteboardSdkLike)
+  : undefined;
 const founderRuntime = createFounderStreamRuntime({
   client: database.client, jobRepository, flags: config.founderStream,
   approvedChatIds: config.projectContext.approvedChatIds, ivyPrivateChatId: config.feishu.ivyPrivateChatId,
@@ -126,6 +133,11 @@ const founderRuntime = createFounderStreamRuntime({
     await runFounderStreamBackfill({chatId:config.projectContext.approvedChatIds[0]!,since:window.since,until:window.until,
       now:window.now,feishu:feishuIntegration.contextClient,sourceRepository:new ContextSourceRepository(database.client),
       jobRepository,dryRun:false,enqueueAnalysis:config.founderStream.analysisEnabled,syncPurpose:'daily_reconciliation'});
+  }}}:{}),
+  ...(founderWhiteboardGateway?{whiteboardPublisher:{async publish(input:{title:string;chatId:string;
+    cards:readonly Record<string,unknown>[];previousPaletteId?:string|null}){
+    const palette=selectFounderPalette(input.previousPaletteId);
+    return publishFounderWhiteboard({...input,paletteId:palette.id},founderWhiteboardGateway);
   }}}:{}),
   ...(founderAnalysis ?? {})
 });

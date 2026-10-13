@@ -31,13 +31,18 @@ describe('loadConfig', () => {
   it('defaults founder stream off and enforces ordered flag dependencies', () => {
     expect(loadConfig(baseEnv).founderStream).toEqual({ captureEnabled: false, analysisEnabled: false,
       groupDeliveryEnabled: false, manualQueryEnabled: false, dailyReconciliationEnabled: false,
-      reconciliationBootstrapSince: null });
+      reconciliationBootstrapSince: null, whiteboardEnabled: false });
     expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_ANALYSIS_ENABLED: 'true' })).toThrow(/capture/i);
     expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true', FOUNDER_STREAM_GROUP_DELIVERY_ENABLED: 'true' })).toThrow(/analysis/i);
     expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true' }).founderStream.captureEnabled).toBe(true);
     expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_MANUAL_QUERY_ENABLED: 'true' })).toThrow(/manual query.*analysis/i);
     expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true',FOUNDER_STREAM_ANALYSIS_ENABLED:'true',
       FOUNDER_STREAM_MANUAL_QUERY_ENABLED: 'true',WORKER_LEASE_SECONDS:'241' }).founderStream.manualQueryEnabled).toBe(true);
+    expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_WHITEBOARD_ENABLED: 'true' }))
+      .toThrow(/whiteboard.*manual query/i);
+    expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true',FOUNDER_STREAM_ANALYSIS_ENABLED:'true',
+      FOUNDER_STREAM_MANUAL_QUERY_ENABLED: 'true',FOUNDER_STREAM_WHITEBOARD_ENABLED:'true',WORKER_LEASE_SECONDS:'241' })
+      .founderStream.whiteboardEnabled).toBe(true);
     expect(()=>loadConfig({...baseEnv,FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED:'true'})).toThrow(/daily reconciliation.*capture/i);
     expect(()=>loadConfig({...baseEnv,FOUNDER_STREAM_CAPTURE_ENABLED:'true',FOUNDER_STREAM_ANALYSIS_ENABLED:'true',
       FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED:'true',PROJECT_CONTEXT_CHAT_IDS:'oc_a84d5b6ca478220d0a37964b50776edb',
