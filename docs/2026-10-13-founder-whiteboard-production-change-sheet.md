@@ -1,6 +1,6 @@
 # Founder 三类查询原生飞书白板上线变更单
 
-状态：**待 Ivy 明确批准执行**。
+状态：**Ivy 已批准；2026-10-13 执行至 D2 权限探针失败后按停止条件暂停**。
 
 目标提交：`d853f5c537cbb3b0d68b25bc51fe94eb2293e9f5`。
 
@@ -113,3 +113,12 @@ PROJECT_CONTEXT_CHAT_IDS=oc_a84d5b6ca478220d0a37964b50776edb
 验证成功后删除本次上传归档、隔离 build 目录和无容器引用的候选标签；保留运行镜像、回滚镜像、SQLite 备份、env/app checkpoint、审计日志和权限探针文档链接。
 
 Ivy 批准本变更单即授权 D1–D4 及成功后的上述临时资产清理。审批包含：一次无业务数据飞书白板权限探针、两个明确窗口的唯一批准群历史回填、一个生产配置键、一次 Bridge 切换。权限后台修改、第二次重启、数据库恢复、主动发送群消息、自动群投递或扩大群范围均不在本次授权内。
+
+## 8. 2026-10-13 执行记录
+
+- D1 通过：生产 revision 仍为 `25b2269306e72e5cc212da3a5de22891d9027f7f`，Bridge running/healthy、restart=0，`/health` 与 `/ready` 成功，SQLite 与配置边界正常。
+- 指定归档上传后双重校验通过：压缩传输文件 SHA-256 为 `ac35e00bd1bfcfd921b8acf5922bc071de44f20e442c6898779284530a0403d5`；解压后的原始 tar 为 `2457600` bytes，SHA-256 与本单指定值一致。
+- 隔离候选镜像构建完成，OCI revision 为目标提交；候选配置解析与编译产物检查通过，未挂载生产 SQLite。
+- 唯一一次 `preflight-founder-whiteboard --create` 返回失败；CLI 为防止泄露只输出通用权限错误，未返回 document ID 或 whiteboard ID，因此不能证明是否产生了部分文档。按本单停止条件没有重试创建，也没有进入 D3/D4。
+- 停止后复核：生产 Bridge 仍是旧 revision、原 startedAt 和 restart=0；`FOUNDER_STREAM_WHITEBOARD_ENABLED` 未写入，`FOUNDER_STREAM_GROUP_DELIVERY_ENABLED=false`；没有回填、停服、重启、镜像切换或主动群消息。
+- 失败现场保留在服务器的本次上传、隔离 build、候选镜像与构建日志中。下一步需要单独批准飞书开发者后台权限核对／修改及一次新的无业务数据探针；在此之前不得开启白板功能。
