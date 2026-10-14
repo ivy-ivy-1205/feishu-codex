@@ -16,6 +16,23 @@ describe('founder whiteboard',()=>{
     expect(text).toContain('当前方向：验证房源服务');
   });
 
+  it('emits text nodes in the official OpenAPI shape without transparent style colors',()=>{
+    const result=buildFounderWhiteboard({title:'工作地图',paletteId:'coral',cards:[{
+      header:{title:{content:'工作地图 · 1/1'}},elements:[{text:{content:'当前阶段\n正在推进'}}]
+    }]});
+    const textNodes=result.nodes.filter(node=>node.type==='text_shape');
+    expect(textNodes.length).toBeGreaterThan(0);
+    for(const node of textNodes){
+      expect(node).not.toHaveProperty('style');
+      expect(node.text).toEqual(expect.objectContaining({
+        line_through:false,underline:false,italic:false,angle:0,
+        text_color_type:0,text_background_color_type:0,
+        theme_text_color_code:-1,theme_text_background_color_code:-1
+      }));
+      expect(node.text?.text_color).toMatch(/^#[0-9A-F]{6}$/i);
+    }
+  });
+
   it('does not repeat the previous palette when alternatives exist',()=>{
     expect(selectFounderPalette('coral',()=>0).id).not.toBe('coral');
   });

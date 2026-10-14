@@ -2,7 +2,9 @@ export interface FounderWhiteboardNode {
   id?:string;
   type:'text_shape'|'composite_shape'|'connector'|'group';
   x?:number;y?:number;width?:number;height?:number;
-  text?:{text?:string;font_weight?:'regular'|'bold';font_size?:number;text_color?:string;horizontal_align?:'left'|'center'|'right';vertical_align?:'top'|'mid'|'bottom'};
+  text?:{text?:string;font_weight?:'regular'|'bold';font_size?:number;text_color?:string;horizontal_align?:'left'|'center'|'right';vertical_align?:'top'|'mid'|'bottom';
+    line_through?:boolean;underline?:boolean;italic?:boolean;angle?:number;text_color_type?:number;text_background_color_type?:number;
+    theme_text_color_code?:number;theme_text_background_color_code?:number};
   style?:{fill_color?:string;border_color?:string;border_style?:'solid'|'none';border_width?:'extra_narrow'|'narrow'|'medium'|'bold'};
   composite_shape?:{type:'rect'};
 }
@@ -85,8 +87,9 @@ function shape(x:number,y:number,width:number,height:number,fill:string,border:s
   type:'composite_shape',x,y,width,height,composite_shape:{type:'rect'},style:{fill_color:fill,border_color:border,border_style:'solid',border_width:'narrow'}};}
 function textNode(x:number,y:number,width:number,height:number,value:string,fontSize:number,color:string,fontWeight:'regular'|'bold',
   align:'left'|'center'|'right'='left'):FounderWhiteboardNode{return{type:'text_shape',x,y,width,height,
-  text:{text:value,font_size:fontSize,font_weight:fontWeight,text_color:color,horizontal_align:align,vertical_align:'top'},
-  style:{fill_color:'#FFFFFF00',border_style:'none'}};}
+  text:{text:value,font_size:fontSize,font_weight:fontWeight,text_color:color,horizontal_align:align,vertical_align:'top',
+    line_through:false,underline:false,italic:false,angle:0,text_color_type:0,text_background_color_type:0,
+    theme_text_color_code:-1,theme_text_background_color_code:-1}};}
 function darkest(colors:string[]):string{return [...colors].sort((a,b)=>luminance(a)-luminance(b))[0]??'#1A1A1A'}
 function luminance(hex:string):number{const rgb=hex.replace('#','').match(/.{2}/g)?.map(v=>parseInt(v,16))??[0,0,0];
   return rgb[0]!*0.2126+rgb[1]!*0.7152+rgb[2]!*0.0722;}
