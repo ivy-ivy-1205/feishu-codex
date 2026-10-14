@@ -28,7 +28,7 @@ import { isSelfMediaProposal, projectFounderWorkMap, type FounderWorkMapClassifi
 import { parseFeishuAttachment } from './feishu-attachment-parser.js';
 import { classifyFounderFailure, type FounderFailureStage } from './founder-analysis-failure.js';
 import { buildFounderManualQueryMessages, enqueueFounderManualQuery, isConfiguredFounder, parseFounderManualQuery } from './founder-manual-query.js';
-import type { FounderWhiteboardArtifact } from './founder-whiteboard.js';
+import { founderPalettes, type FounderWhiteboardArtifact } from './founder-whiteboard.js';
 
 export interface FounderPerspectiveAnalysisPort {
   analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[];
@@ -474,10 +474,17 @@ function manualQueryTitle(card:Record<string,unknown>|undefined):string{
 }
 function withWhiteboardLink(card:Record<string,unknown>,artifact:FounderWhiteboardArtifact):Record<string,unknown>{
   const elements=Array.isArray(card.elements)?[...card.elements]:[];
-  if(!elements.some(element=>(element as {actions?:{url?:unknown}[]})?.actions?.some(action=>action.url===artifact.url)))elements.push({
-    tag:'action',actions:[{tag:'button',type:'primary',text:{tag:'plain_text',content:'打开可编辑看板'},url:artifact.url}]
+  const paletteName=founderPalettes.find(palette=>palette.id===artifact.paletteId)?.name??artifact.paletteId;
+  const visible=elements.filter(element=>{
+    const candidate=element as {actions?:{url?:unknown}[];text?:{content?:unknown}};
+    return !candidate.actions?.some(action=>action.url===artifact.url)&&
+      !(typeof candidate.text?.content==='string'&&candidate.text.content.startsWith('**可编辑看板已生成**'));
   });
-  return{...card,elements};
+  return{...card,elements:[
+    {tag:'div',text:{tag:'lark_md',content:`**可编辑看板已生成**\n当前查询的完整内容已同步到飞书白板；配色：${paletteName}。`}},
+    {tag:'action',actions:[{tag:'button',type:'primary',text:{tag:'plain_text',content:'打开可编辑看板'},url:artifact.url}]},
+    ...visible
+  ]};
 }
 function withWhiteboardFailure(card:Record<string,unknown>):Record<string,unknown>{
   const elements=Array.isArray(card.elements)?[...card.elements]:[];

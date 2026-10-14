@@ -133,6 +133,31 @@ describe('founder manual queries',()=>{
     db.close();
   });
 
+  it('shows the editable board context and action before the full text on every page',async()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    new AlignmentRepository(db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:at});
+    const topics=new TopicRepository(db.client);
+    for(let index=1;index<=13;index++)topics.createTopic({displayName:`项目 ${index}`,stage:'active_project',createdAt:at});
+    const sent:Record<string,unknown>[]=[];
+    const runtime=createFounderStreamRuntime({client:db.client,jobRepository:new JobRepository(db.client),
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false,manualQueryEnabled:true},
+      approvedChatIds:[chatId],ivyPrivateChatId:'oc_private',now:()=>at,
+      analyzer:{async analyze(){return{topics:[]}}},whiteboardPublisher:{async publish(){return{
+        documentId:'doc_1',whiteboardId:'board_1',url:'https://example.test/docx/doc_1',paletteId:'coral'}}},delivery:{
+        async sendTextMessage(){return{messageId:'om_text'}},
+        async sendInteractiveCard(input){sent.push(input.card);return{messageId:`om_page_${sent.length}`}}}});
+    runtime.route.ingest(event('查看工作地图'));
+    await runtime.runManualQueriesOnce();
+    expect(sent).toHaveLength(2);
+    for(const card of sent){
+      const elements=card.elements as {tag?:unknown;text?:{content?:unknown};actions?:{url?:unknown}[]}[];
+      expect(elements[0]).toMatchObject({tag:'div',text:{content:expect.stringContaining('可编辑看板已生成')}});
+      expect(elements[0]).toMatchObject({text:{content:expect.stringContaining('Coral')}});
+      expect(elements[1]).toMatchObject({tag:'action',actions:[{url:'https://example.test/docx/doc_1'}]});
+    }
+    db.close();
+  });
+
   it('keeps the complete text response and makes a whiteboard publishing failure visible',async()=>{
     const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
     new AlignmentRepository(db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:at});
