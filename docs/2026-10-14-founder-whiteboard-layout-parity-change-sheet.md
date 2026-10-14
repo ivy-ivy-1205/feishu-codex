@@ -37,7 +37,8 @@
 - 生产镜像增加 Noto CJK 字体，避免 Linux 容器生成中文方框。
 - 同源本地预览：`docs/reviews/2026-10-14-founder-inline-workmap-preview.png`，1160×1847、约 110KB。
 - 自动门禁：96 个测试文件、825 项测试全部通过；TypeScript typecheck、生产 build、`git diff --check` 全部通过。
-- 本机 Docker 隔离构建已验证到应用编译和生产依赖裁剪；Docker 内 Debian 镜像源下载字体包连续超时，未取得完整本地镜像结果。生产候选构建必须把字体安装与 PNG 渲染列为硬门禁，失败则不切换 Bridge。
+- 代码候选提交为 `1c4719a`。
+- 本机 Docker build stage 已完成应用编译、生产依赖裁剪和 Linux Sharp PNG 渲染；不含字体的 build stage 明确出现 Fontconfig 缺失和中文方框，证明字体不是可选美化。完整 runtime 镜像在 Docker 内 Debian 镜像源下载字体包时连续超时，未取得本地成功结果。生产候选构建必须把 Noto CJK 安装与中文 PNG 目检列为硬门禁，失败则不切换 Bridge。
 
 ## 已完成的本地步骤
 
