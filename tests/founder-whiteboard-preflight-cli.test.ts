@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseWhiteboardPreflightArguments, runWhiteboardPreflightCli } from '../src/cli/preflight-founder-whiteboard.js';
+import { formatWhiteboardPreflightFailure, parseWhiteboardPreflightArguments,
+  runWhiteboardPreflightCli } from '../src/cli/preflight-founder-whiteboard.js';
 
 describe('founder whiteboard preflight CLI',()=>{
   it('requires the approved group and an explicit create mode',()=>{
@@ -19,5 +20,19 @@ describe('founder whiteboard preflight CLI',()=>{
     expect(published.some(node=>node.type==='image')).toBe(false);
     expect(JSON.parse(output[0]!)).toEqual({documentId:'doc_1',whiteboardId:'board_1',
       url:'https://icnua99ny9c4.feishu.cn/docx/doc_1',paletteId:'grove'});
+  });
+
+  it('reports only the failed stage and Feishu code',async()=>{
+    let failure:unknown;
+    try{
+      await runWhiteboardPreflightCli(['--chat-id','oc_a84d5b6ca478220d0a37964b50776edb','--create'],{
+        gateway:{async createDocument(){throw{response:{data:{code:99991672,msg:'sensitive remote detail'}}}},
+          async createBoard(){throw new Error('unexpected')},async createNodes(){throw new Error('unexpected')},
+          async grantGroupEdit(){throw new Error('unexpected')}},write:()=>{}
+      });
+    }catch(error){failure=error;}
+    expect(formatWhiteboardPreflightFailure(failure)).toEqual({status:'failed',stage:'create_document',
+      feishuCode:99991672});
+    expect(JSON.stringify(formatWhiteboardPreflightFailure(failure))).not.toContain('sensitive remote detail');
   });
 });
