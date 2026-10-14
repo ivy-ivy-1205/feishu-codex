@@ -1,7 +1,7 @@
 # Founder 工作地图批量纠正恢复变更单
 
 日期：2026-10-14  
-状态：C1–C3 本地候选 `7542f0b` 已完成；97 个测试文件／832 项测试、typecheck、build、diff check 全部通过；尚未修改生产数据库、尚未部署
+状态：C1–C3 与 D3 已完成；生产运行候选 `f04442e4702d4d65de7bf2212798aa5d50bac95f`；尚未执行 D4 群内人工验收
 
 ## 现场事实
 
@@ -73,3 +73,12 @@
 - C1 执行前使用 SQLite Backup API 创建一致性快照并验证完整性。
 - 应用与数据库切换继续复用群内总览 D3 的 app checkpoint、rollback image 和原子切换方式。
 - 若任一语义断言、数据库检查、健康检查或群卡限制失败，恢复原数据库与原镜像；不邀请 Ivy 测试。
+
+## 2026-10-14 C1–C3 / D3 执行记录
+
+- 在生产数据库一致性副本上按消息 ID 重新读取 Ivy 的真实回复，确认发送者、回复绑定和编辑后当前正文；preview 生成 11 项操作：8 个 topic 更新、1 个 `same_as` 合并、1 个 `space_managed` 显示策略和 1 个工作地图偏好。
+- 副本 apply 后 18 项业务断言全部通过：Smart Listing 的两套房源计划保留第二套待定；知识库保持 active 且标记 Jimmy 阻塞；销售数据与 update 任务关闭；B_Ivy/EP00 未重复追加版本；房贷关闭但保留未发布；三条教育内容合并并从日常地图隐藏；AI 产业落地为 idea；飞书阶段目标与企业微信暂停原因正确；过时 outbox 精确取消。
+- D3 停止 Bridge 后使用 SQLite Backup API 建立 `/opt/feishu-codex/backups/bridge-pre-correction-20261014T125608Z.sqlite`，完整性与外键检查通过；应用 checkpoint 和 rollback image 使用同一时间戳。生产 apply 返回同一 map/draft ID、同一 11 项操作且 `applied=true`。
+- 生产现运行 revision `f04442e4702d4d65de7bf2212798aa5d50bac95f`，`running/healthy`、restart count `0`、health/ready 200、ChatGPT 登录有效、既有 feature flags 不变、group delivery=false、API Key fallback=0。pending outbox=0、active jobs=0、数据库 integrity=ok、无外键异常；原过时反馈状态为 `cancelled`。
+- 生产只读真实数据生成 2 页完整文字卡、104 个白板节点及 1160×2347、152019B 的 PNG，SHA-256 为 `8854df602910211b9882f3c471ee3a3d128abc1db8a582d3c628146956f74bd2`；布局、内容、隐藏策略与 10MB 限制全部通过。全程未向群发送消息，下一步只执行一次 D4 `查看工作地图`。
+- 最终本地回归为 97 个测试文件、833 项测试全部通过，TypeScript typecheck、生产 build 和 `git diff --check` 全部通过。

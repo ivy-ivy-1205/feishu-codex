@@ -1,7 +1,7 @@
 # Founder 白板版式一致性修复变更单
 
 日期：2026-10-14
-状态：本地修复和回归已完成；D1 运行门禁通过，但 D2 无业务数据探针证实缺少 `im:resource` 后停止；生产部署、重启和群消息均未执行
+状态：D1–D3 已完成；生产运行 revision `f04442e4702d4d65de7bf2212798aa5d50bac95f`；等待 D4 唯一一次群内人工验收
 
 ## 问题与根因
 
@@ -106,3 +106,12 @@
 - 唯一一次获批的无业务数据探针在第一阶段 `upload_preview_image` 返回飞书码 `99991672`。由于失败发生在图片上传，未创建新的文档、白板或群消息；这直接证明生产应用尚未开通消息图片上传需要的 `im:resource`。
 - 按本单停止条件，D3 未执行：Bridge 未停止、未重启、未替换 app／镜像、未修改 env／SQLite，也未读取真实业务内容进行渲染。失败后复核仍为原 revision、healthy、restart count `0`、active jobs=`0`、pending outbox=`0`、数据库完整。
 - 下一步需单独批准：在 sharon 的生产 `Codex` 应用中只补齐并发布应用身份权限 `im:resource`，然后运行一次新的无业务数据探针。只有该探针完整通过图片上传、文档创建、白板节点和群编辑授权后，才恢复 D3；此前不邀请 Ivy 做 D4 群内测试。
+
+## 2026-10-14 D3 执行记录
+
+- `im:resource` 发布后的无业务数据探针已通过图片上传、文档/白板创建、节点写入与批准群编辑授权；未发群消息。D3 与获批的批量纠正恢复合并为一次停机窗口，避免重复重启。
+- 切换前旧 revision `c99c1325dc8edd64cfff07ff3b89c5cdcb7529ef` 仍 healthy、restart 0、任务队列为空；唯一 pending outbox 是已确认过时的批量纠正澄清回执。候选 image ID `sha256:f9e2bb545c9fd45dc4b6eccf05639d30104e7fe24fedf684d66435f5d57ee6ac`，OCI revision 与候选提交完全一致。
+- 生产现运行 revision `f04442e4702d4d65de7bf2212798aa5d50bac95f`，healthy、restart 0、health/ready 200、ChatGPT 登录有效，capture/analysis/daily reconciliation/manual query/whiteboard/worker 均为 true，group delivery=false，无 API Key fallback。
+- 生产数据库只读生成结果为：23 个 canonical topic、20 个可见 topic、2 页完整文字卡、104 个白板节点；群内 PNG 为 1160×2347、152019B，SHA-256 `8854df602910211b9882f3c471ee3a3d128abc1db8a582d3c628146956f74bd2`。A/B/C 三条主线、完整文字保留、隐藏内容、状态纠正和图片限制自动断言全部通过；未发送群消息。
+- 回滚资产保留于 `/opt/feishu-codex/backups/bridge-pre-correction-20261014T125608Z.sqlite`、`/opt/feishu-codex/checkpoints/app-pre-correction-20261014T125608Z` 和 `aijia/feishu-codex-bridge:rollback-pre-correction-20261014T125608Z`。下一步只需 Ivy 执行一次 D4 `查看工作地图`。
+- 合并后的最终本地回归为 97 个测试文件、833 项测试全部通过，TypeScript typecheck、生产 build 和 `git diff --check` 全部通过。
