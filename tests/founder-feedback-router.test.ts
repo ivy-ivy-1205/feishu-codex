@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { routeFounderFeedback } from '../src/services/founder-feedback-router.js';
 import { renderFounderWorkMap } from '../src/services/founder-work-map-renderer.js';
 import { applyFounderBatchDraft } from '../src/services/founder-batch-correction.js';
-import { feedbackHarness } from './helpers/founder-feedback-fixtures.js';
+import { feedbackHarness, feedbackNow } from './helpers/founder-feedback-fixtures.js';
 
 describe('founder feedback routing', () => {
   it('binds Chinese numbered merge to the delivered card numbers', () => {
@@ -133,6 +133,28 @@ describe('founder feedback routing', () => {
       expect.objectContaining({ kind: 'update_topic', topic: expect.objectContaining({ id: goal.id }),
         outcome: expect.stringContaining('飞书 CLI 接入已完成') })
     ]));
+    h.db.client.close();
+  });
+  it('does not append another version for a numbered item already confirmed closed', () => {
+    const h = feedbackHarness(3);
+    expect(routeFounderFeedback({ ...h.input, text: '第 1 项改为已结束' }, h.dependencies).kind).toBe('corrected');
+    const current=h.topics.listCurrentTopics();
+    const [card]=renderFounderWorkMap({since:'2026-09-01T10:00:00.000Z',until:'2026-09-21T10:01:00.000Z',
+      topics:current.map(topic=>({...topic,evidence:[]})),uncertainGrouping:[],coverageGaps:[]});
+    h.db.client.prepare('DELETE FROM outbox').run();
+    h.outbox.enqueueFounderWorkMap({...card!,mapId:'map_after_close',targetChatId:h.input.chatId});
+    h.outbox.acknowledgeFounderWorkMapDelivery({mapId:'map_after_close',page:1,messageId:'om_after_close',deliveredAt:feedbackNow});
+    const closedRef=card!.itemRefs.find(ref=>ref.id===h.topicAt(1).id)!;
+    const closedNumber=closedRef.displayedNumber;
+    const otherNumbers=card!.itemRefs.filter(ref=>ref.id!==closedRef.id).map(ref=>ref.displayedNumber);
+    const decision=routeFounderFeedback({...h.input,messageId:'om_batch_after_close',replyTo:'om_after_close',text:[
+      `#${closedNumber} 已结束，无需重复写版本`,
+      `#${otherNumbers[0]} 已完成未发布`,
+      `#${otherNumbers[1]} 暂停投入`
+    ].join('\n')},h.dependencies);
+    expect(decision.kind).toBe('drafted');
+    const operations=JSON.parse((h.db.client.prepare('SELECT operations_json FROM founder_feedback_drafts').get() as {operations_json:string}).operations_json);
+    expect(operations.some((operation:{topic?:{id:string}})=>operation.topic?.id===closedRef.id)).toBe(false);
     h.db.client.close();
   });
   it('keeps an unformed idea as idea when this refers to exactly one bound topic', () => {

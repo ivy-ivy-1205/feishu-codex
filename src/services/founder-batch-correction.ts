@@ -151,6 +151,7 @@ export function parseFounderBatchCorrection(text:string,binding:FounderWorkMapMe
       continue;
     }
     if(refs.length===1){const ref=refs[0]!,topic=byId.get(ref.id);if(!topic)continue;
+      if(topic.stage==='closed'&&/(?:已结束|无需重复)/u.test(line))continue;
       let stage:typeof topic.stage|undefined;
       if(/(?:不能作为独立项目|只是观点|只是想法)/u.test(line))stage='idea';
       else if(/(?:暂停|暂且不再投入精力)/u.test(line))stage='paused';
@@ -184,8 +185,8 @@ export function parseFounderBatchCorrection(text:string,binding:FounderWorkMapMe
 function cleanOutcome(line:string,number:number,name:string):string{
   let value=line.replace(new RegExp(`^.*?#\\s*${number}\\s*[·.、|｜:：\\-]*\\s*`,'u'),'').trim();
   value=value.replace(/^(?:项目|子项目)\s*[|｜:：]\s*/u,'').trim();
-  const nameAt=value.indexOf(name);if(nameAt>=0)value=value.slice(nameAt+name.length)
-    .replace(/^[（(].*?[）)]\s*/u,'').replace(/^[，,:：|｜\s]+/u,'').trim();
+  const nameAt=value.indexOf(name);if(nameAt>=0)value=value.slice(nameAt+name.length).replace(/^[，,:：|｜\s]+/u,'').trim();
+  if(/^[（(].*[）)]$/u.test(value))value=value.slice(1,-1).trim();
   return value.slice(0,800);
 }
 function dedupeOperations(operations:FounderBatchOperation[]):FounderBatchOperation[]{
