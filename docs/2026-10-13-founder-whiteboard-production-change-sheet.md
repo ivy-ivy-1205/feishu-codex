@@ -2,6 +2,8 @@
 
 状态：**Ivy 已批准；2026-10-13 执行至 D2 权限探针失败后按停止条件暂停**。
 
+2026-10-14 补充：带安全阶段诊断的第二次获批探针在 `create_document` 返回飞书码 `99991672`；D3/D4 继续暂停。后续权限变更见 [`2026-10-14-founder-whiteboard-permission-change-sheet.md`](./2026-10-14-founder-whiteboard-permission-change-sheet.md)。
+
 目标提交：`d853f5c537cbb3b0d68b25bc51fe94eb2293e9f5`。
 
 tracked-only 发布归档：`/tmp/feishu-founder-whiteboard-d853f5c.tar`，大小 `2457600` bytes，SHA-256 `7538734e7f2c47005b1d3eacb7c44d72238d5055cc06da0506f823aabf11ef89`。
@@ -122,3 +124,13 @@ Ivy 批准本变更单即授权 D1–D4 及成功后的上述临时资产清理�
 - 唯一一次 `preflight-founder-whiteboard --create` 返回失败；CLI 为防止泄露只输出通用权限错误，未返回 document ID 或 whiteboard ID，因此不能证明是否产生了部分文档。按本单停止条件没有重试创建，也没有进入 D3/D4。
 - 停止后复核：生产 Bridge 仍是旧 revision、原 startedAt 和 restart=0；`FOUNDER_STREAM_WHITEBOARD_ENABLED` 未写入，`FOUNDER_STREAM_GROUP_DELIVERY_ENABLED=false`；没有回填、停服、重启、镜像切换或主动群消息。
 - 失败现场保留在服务器的本次上传、隔离 build、候选镜像与构建日志中。下一步需要单独批准飞书开发者后台权限核对／修改及一次新的无业务数据探针；在此之前不得开启白板功能。
+
+## 9. 2026-10-14 安全诊断与第二次探针
+
+- 新增诊断提交 `bd5ebe4a941017155cecab6c859ce4dc6a99a36c`，失败输出严格限制为阶段名与飞书数字错误码，不打印远端消息、响应正文或凭据。
+- 完整本地门禁为 96 个测试文件、817 项测试通过；`pnpm typecheck`、`pnpm build`、`git diff --check` 均通过。
+- 新归档 `/tmp/feishu-whiteboard-diagnostic-bd5ebe4.tar` 为 `2467840` bytes，SHA-256 `6ad95e96d9a80dcb8a704871951d43e60ed9021f173cc46c5dc89d254924e0b2`；压缩包 SHA-256 `c9b47e5bb1fa4deedf81d1198a1c5b8500f7f7c679c65258764fe2d81b650de2`。服务器双重校验一致。
+- 服务器隔离构建得到 `aijia/feishu-codex-bridge:diagnostic-bd5ebe4`，OCI revision 与提交精确一致；配置解析和诊断产物检查通过，未挂载生产 SQLite。
+- 恰好一次获批的第二次探针返回 `{"status":"failed","stage":"create_document","feishuCode":99991672}`，退出码为 1。失败发生在第一个创建文档 API，因此本次没有创建飞书文档，后续三个阶段没有执行。
+- 本次未执行 D3/D4，没有回填、停服、重启、env／数据库修改、镜像切换或群消息。生产仍运行 `25b2269306e72e5cc212da3a5de22891d9027f7f`、healthy、restart=0、group delivery=false。
+- 下一步只允许按 2026-10-14 权限变更单核对并增加最小应用身份权限；该外部变更和新的探针需要独立批准。
