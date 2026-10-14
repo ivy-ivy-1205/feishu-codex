@@ -34,7 +34,9 @@ async function findMessage(context:FeishuSdkContextClient,args:Arguments):Promis
   await read('chat',args.chatId);
   if(!messages.has(args.messageId))for(const thread of threads){await read('thread',thread);if(messages.has(args.messageId))break}
   const message=messages.get(args.messageId);
-  if(!message||message.deleted||message.edited||message.senderType!=='user'||!message.senderId||!message.text?.trim()||
+  // Feishu returns the current visible body for edited messages. The exact message ID,
+  // founder identity, reply binding and stored content hash remain the authority checks.
+  if(!message||message.deleted||message.senderType!=='user'||!message.senderId||!message.text?.trim()||
     !['text','post'].includes(message.messageType)||!Number.isFinite(Date.parse(message.createdAt)))
     throw new Error('FOUNDER_CORRECTION_RECOVERY_MESSAGE_INVALID');
   return message;
