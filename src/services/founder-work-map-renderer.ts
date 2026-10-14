@@ -149,7 +149,9 @@ function perspectivePreview(topicName:string,items:NonNullable<FounderWorkMapTop
 }
 
 function evidencePreview(evidence: readonly FounderCardEvidence[],linkedSourceCount=0): string {
-  const first = [...evidence].sort(compareId)[0];
+  const first = [...evidence].sort((a,b)=>Number(Boolean(a.isFounderCorrection))-Number(Boolean(b.isFounderCorrection))||compareId(a,b))[0];
+  if(first?.isFounderCorrection)return `\n来源：Ivy 工作地图纠正 · ${new Date(first.occurredAt).toISOString()}${evidence.length > 1 ?
+    `\n另有 ${evidence.length - 1} 条来源，完整来源保留在记录中。` : ''}`;
   if(first){const source=first.locator.kind==='group_message'
     ?`来源：群聊 · ${new Date(first.occurredAt).toISOString()}\n原文：${founderText(first.excerpt,240)}`:founderSourceText(first);
     return `\n${source}${evidence.length > 1 ? `\n另有 ${evidence.length - 1} 条来源，完整来源保留在记录中。` : ''}`;}

@@ -112,8 +112,8 @@ function buildWorkMapBoard(title:string,palette:FounderPalette,view:FounderWorkM
   const byName=new Map(view.topics.map(topic=>[topic.name,topic]));
   const root=(topic:FounderWorkMapBoardTopic):string=>{let current=topic,guard=0;while(current.parentName&&guard++<20){const parent=byName.get(current.parentName);if(!parent)break;current=parent}return current.name};
   const visible=view.topics.filter(topic=>!Object.values(lineNames).includes(topic.name as typeof lineNames[keyof typeof lineNames]));
-  const history=visible.filter(topic=>topic.stage==='closed'||topic.stage==='paused');
-  const current=visible.filter(topic=>topic.stage!=='closed'&&topic.stage!=='paused');
+  const history=visible.filter(topic=>topic.stage==='closed');
+  const current=visible.filter(topic=>topic.stage!=='closed');
   const a=current.filter(topic=>root(topic)===lineNames.A),b=current.filter(topic=>root(topic)===lineNames.B),c=current.filter(topic=>root(topic)===lineNames.C);
   const classified=new Set([...a,...b,...c].map(topic=>topic.id)),other=visible.filter(topic=>!classified.has(topic.id));
   const currentOther=other.filter(topic=>topic.stage!=='closed'&&topic.stage!=='paused');

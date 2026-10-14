@@ -60,6 +60,21 @@ describe('founder whiteboard',()=>{
     expect(result.height).toBeLessThan(2600);
   });
 
+  it('keeps paused projects in their business lane instead of treating them as ended history',()=>{
+    const result=buildFounderWhiteboard({title:'工作地图',paletteId:'court-press',cards:[],view:{
+      kind:'work_map',since:'2026-08-31T00:00:00.000Z',until:'2026-10-14T05:09:41.892Z',coverageGaps:[],topics:[
+        {id:'c',name:'公司协作基础设施',stage:'active_project',kind:'project',outcome:null},
+        {id:'active',name:'飞书合伙人对齐',stage:'active_project',kind:'project',outcome:'继续推进',parentName:'公司协作基础设施'},
+        {id:'paused',name:'企业微信接入',stage:'paused',kind:'project',outcome:'暂停投入',parentName:'公司协作基础设施'},
+        {id:'closed',name:'旧项目',stage:'closed',kind:'project',outcome:'已结束'}
+      ]
+    }});
+    const textNodes=result.nodes.filter(node=>node.type==='text_shape'&&node.text?.text);
+    const y=(value:string)=>textNodes.find(node=>node.text!.text!.includes(value))?.y;
+    expect(y('企业微信接入')).toBeGreaterThan(y('C / 公司协作基础设施')!);
+    expect(y('企业微信接入')).toBeLessThan(y('已结束 / 历史')!);
+  });
+
   it('renders the exact whiteboard nodes into a bounded PNG preview for the chat card',async()=>{
     const board=buildFounderWhiteboard({title:'工作地图',paletteId:'coral',cards:[{
       header:{title:{content:'工作地图 · 1/1'}},elements:[{text:{content:'当前阶段\n正在推进'}}]

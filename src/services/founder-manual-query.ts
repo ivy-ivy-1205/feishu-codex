@@ -168,11 +168,25 @@ function processingStatus(client:Database.Database,chatId:string):string{
   const completedSources=new Set(scoped.filter(row=>row.type==='analyze_founder_stream_batch'&&row.status==='completed').flatMap(row=>row.sourceIds));
   const analyzedAt=scoped.filter(row=>row.type==='analyze_founder_stream_batch'&&row.status==='completed')
     .map(row=>row.updated_at).sort().at(-1)??null;
+  const analyzedSourceAt=latestSourceOccurredAt(client,[...completedSources]);
   const pending=scoped.filter(row=>['queued','retry','processing'].includes(row.status)).length;
-  const unresolvedFailures=scoped.filter(row=>row.status==='failed'&&(row.sourceIds.length===0||row.sourceIds.some(id=>!completedSources.has(id)))).length;
+  const unresolvedSources=new Set(scoped.filter(row=>row.type==='analyze_founder_stream_batch'&&row.status==='failed')
+    .flatMap(row=>row.sourceIds).filter(id=>!completedSources.has(id)));
+  const invalidAnalysisJobs=scoped.filter(row=>row.type==='analyze_founder_stream_batch'&&row.status==='failed'&&row.sourceIds.length===0).length;
+  const failedCaptureJobs=scoped.filter(row=>['capture_group_message','capture_founder_attachment'].includes(row.type)&&row.status==='failed').length;
   const gaps=countPersistedGaps(client,chatId);
   const audit=latestCoverageAudit(client,chatId);
-  return `处理状态\n最后收到：${received.value??'尚无记录'}\n最后完成分析：${analyzedAt??'尚无完成记录'}\n最后防漏复核：${audit??'尚无记录'}\n待处理：${pending}；未补偿失败：${unresolvedFailures}；不可读/跳过缺口：${gaps}\n“待处理为 0”只证明已入库任务没有积压；缺口会单独显示，不把未读取内容算作已覆盖。`;
+  const failureStatus=[`未补偿分析来源：${unresolvedSources.size}`,...(invalidAnalysisJobs?[`分析异常任务：${invalidAnalysisJobs}`]:[]),
+    `采集失败任务：${failedCaptureJobs}`].join('；');
+  return `处理状态\n最后收到：${received.value??'尚无记录'}\n最后完成分析：${analyzedAt??'尚无完成记录'}\n最新已分析语料：${analyzedSourceAt??'尚无完成记录'}\n最后防漏复核：${audit??'尚无记录'}\n待处理：${pending}；${failureStatus}；不可读/跳过缺口：${gaps}\n“待处理为 0”只证明已入库任务没有积压；缺口会单独显示，不把未读取内容算作已覆盖。`;
+}
+
+function latestSourceOccurredAt(client:Database.Database,sourceIds:readonly string[]):string|null{
+  let latest:string|null=null;
+  for(let offset=0;offset<sourceIds.length;offset+=500){const chunk=sourceIds.slice(offset,offset+500);if(!chunk.length)continue;
+    const row=client.prepare(`SELECT MAX(occurred_at) AS value FROM context_sources WHERE id IN (${chunk.map(()=>'?').join(',')})`)
+      .get(...chunk) as {value:string|null};if(row.value&&(!latest||row.value>latest))latest=row.value}
+  return latest;
 }
 
 function latestCoverageAudit(client:Database.Database,chatId:string):string|null{

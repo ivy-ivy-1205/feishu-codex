@@ -85,16 +85,38 @@ describe('current founder work map publisher',()=>{
   it('keeps canonical integrity counts while hiding Space-managed and orphan active topics from the daily map',()=>{
     const h=fixture();
     const orphan=h.topics.createTopic({displayName:'未归类讨论',stage:'active_project',createdAt:new Date('2026-09-12T00:00:00Z')});
+    const candidate=h.topics.createTopic({displayName:'零散候选项目',stage:'project_candidate',createdAt:new Date('2026-09-13T00:00:00Z')});
+    const exploring=h.topics.createTopic({displayName:'零散探索话题',stage:'exploring',createdAt:new Date('2026-09-14T00:00:00Z')});
     h.db.client.prepare(`INSERT INTO founder_topic_visibility(topic_id,visibility,source_message_id,updated_at)
       VALUES(?,'space_managed','om_correction','2026-09-21T00:00:00Z')`).run(h.child.id);
     h.db.client.prepare(`INSERT INTO founder_work_map_preferences(chat_id,hide_orphan_active,source_message_id,updated_at)
       VALUES(?,1,'om_correction','2026-09-21T00:00:00Z')`).run(chatId);
     const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-09-24T00:00:00Z',
-      approvedChatIds:[chatId],expectedCanonicalTopicCount:3});
-    expect(result.canonicalTopicCount).toBe(3);
+      approvedChatIds:[chatId],expectedCanonicalTopicCount:5});
+    expect(result.canonicalTopicCount).toBe(5);
     expect(JSON.stringify(result.cards)).not.toContain('子项目');
     expect(JSON.stringify(result.cards)).not.toContain('未归类讨论');
     expect(result.boardView.topics.map((topic)=>topic.id)).toEqual([h.parent.id]);
-    expect(result.boardView.topics).not.toEqual(expect.arrayContaining([expect.objectContaining({id:orphan.id})]));
+    expect(result.boardView.topics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({id:orphan.id}),expect.objectContaining({id:candidate.id}),expect.objectContaining({id:exploring.id})
+    ]));
+  });
+
+  it('cleans legacy display-name punctuation and summarizes founder corrections without repeating the full reply',()=>{
+    const h=fixture();
+    const correctionText='这里对于工作地图中的部分内容进行 update/修正：这是一段不应在每个项目下重复的批量纠正原文。';
+    const evidence=h.add('om_correction','ou_ivy',correctionText,'2026-09-22T00:00:00Z');
+    h.topics.createTopic({displayName:'：\nB_Ivy交接包_V2',stage:'closed',outcome:'交接完成',evidenceIds:[evidence],createdAt:new Date('2026-09-22T00:01:00Z')});
+    h.db.client.prepare(`INSERT INTO founder_feedback_corrections
+      (id,chat_id,source_message_id,author_open_id,binding_message_id,evidence_id,input_hash,correction_json,result_json,created_at)
+      VALUES('correction_1',?,'om_correction','ou_ivy','om_map',?,'hash','{}','{"status":"applied"}','2026-09-22T00:02:00Z')`)
+      .run(chatId,evidence);
+    const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-09-24T00:00:00Z',
+      approvedChatIds:[chatId],expectedCanonicalTopicCount:3});
+    const body=JSON.stringify(result.cards);
+    expect(body).toContain('项目｜B_Ivy交接包_V2（已结束）');
+    expect(body).not.toContain('： B_Ivy交接包_V2');
+    expect(body).toContain('来源：Ivy 工作地图纠正 · 2026-09-22T00:00:00.000Z');
+    expect(body).not.toContain('这是一段不应在每个项目下重复的批量纠正原文');
   });
 });

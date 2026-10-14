@@ -2,7 +2,9 @@ import type { ContextEvidenceRecord } from '../repositories/context-source-repos
 
 export type FounderCardKind = 'founder_work_map' | 'alignment_question' | 'alignment_resolution';
 export interface FounderCard { kind: FounderCardKind; card: Record<string, unknown> }
-export type FounderCardEvidence = Pick<ContextEvidenceRecord, 'id' | 'sourceId' | 'sourceVersion' | 'excerpt' | 'locator'> & { occurredAt: string; minuteToken?: string };
+export type FounderCardEvidence = Pick<ContextEvidenceRecord, 'id' | 'sourceId' | 'sourceVersion' | 'excerpt' | 'locator'> & {
+  occurredAt: string; minuteToken?: string; isFounderCorrection?: boolean;
+};
 export const founderSourceExcerptLimit = 240;
 
 /** Display-only projection: never serialize a domain record into a card. */

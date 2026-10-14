@@ -40,19 +40,23 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
   }
   const hiddenRoots=new Set((input.client.prepare("SELECT topic_id FROM founder_topic_visibility WHERE visibility='space_managed'").all() as {topic_id:string}[])
     .flatMap(row=>{const root=rootByTopic.get(row.topic_id);return root?[root]:[]}));
+  const correctionMessageIds=new Set((input.client.prepare('SELECT source_message_id FROM founder_feedback_corrections WHERE chat_id=?')
+    .all(input.chatId) as {source_message_id:string}[])
+    .map(row=>row.source_message_id));
   const preference=input.client.prepare('SELECT hide_orphan_active FROM founder_work_map_preferences WHERE chat_id=?').get(input.chatId) as
     {hide_orphan_active:number}|undefined;
   const parentsWithChildren=new Set(parentByChild.values());
   const visibleCanonical=canonical.filter(topic=>!hiddenRoots.has(topic.id)&&!(preference?.hide_orphan_active===1&&
-    topic.stage==='active_project'&&!parentByChild.has(topic.id)&&!parentsWithChildren.has(topic.id)));
+    ['active_project','project_candidate','exploring'].includes(topic.stage)&&!parentByChild.has(topic.id)&&!parentsWithChildren.has(topic.id)));
   const projected:FounderWorkMapTopic[]=visibleCanonical.map(topic=>{
     const componentIds=[...rootByTopic].filter(([,root])=>root===topic.id).map(([id])=>id);
-    const evidence=loadEvidence(input.client,componentIds);
+    const evidence=loadEvidence(input.client,componentIds,correctionMessageIds);
     const parentId=parentByChild.get(topic.id);
-    return{...topic,evidence:evidence.items,linkedSourceCount:evidence.linkedSourceCount,
+    const displayName=cleanDisplayName(topic.displayName);
+    return{...topic,displayName,evidence:evidence.items,linkedSourceCount:evidence.linkedSourceCount,
       displayKind:displayKindFor(topics,topic.id,topic.stage),
-      parentName:parentId?canonicalById.get(parentId)?.displayName:undefined,
-      perspectives:alignment.listCanonicalPerspectives(topic.id).filter(perspective=>!isTopicLabelOnly(topic.displayName,perspective.statement))
+      parentName:parentId?cleanDisplayName(canonicalById.get(parentId)?.displayName??''):undefined,
+      perspectives:alignment.listCanonicalPerspectives(topic.id).filter(perspective=>!isTopicLabelOnly(displayName,perspective.statement))
         .map(perspective=>projectPerspective(topic,perspective))};
   });
   const coverageGaps=loadCoverageGaps(input.client,input.chatId,input.since,input.until);
@@ -119,7 +123,7 @@ function isTopicLabelOnly(displayName:string,statement:string):boolean{
   return view===label||(view.endsWith(label)&&view.length-label.length<=12);
 }
 
-function loadEvidence(client:Database.Database,topicIds:readonly string[]):{items:FounderCardEvidence[];linkedSourceCount:number}{
+function loadEvidence(client:Database.Database,topicIds:readonly string[],correctionMessageIds:ReadonlySet<string>):{items:FounderCardEvidence[];linkedSourceCount:number}{
   if(topicIds.length===0)return{items:[],linkedSourceCount:0};
   const placeholders=topicIds.map(()=>'?').join(',');
   const links=client.prepare(`SELECT DISTINCT ts.source_id,ts.evidence_id FROM context_topic_sources ts
@@ -130,9 +134,15 @@ function loadEvidence(client:Database.Database,topicIds:readonly string[]):{item
       FROM context_evidence e JOIN context_sources s ON s.id=e.source_id WHERE e.id=?`).get(id) as {id:string;source_id:string;source_version:number;excerpt:string;locator_json:string;occurred_at:string;metadata_json:string}|undefined;
     if(!row)return[];const locator=contextEvidenceLocatorSchema.safeParse(JSON.parse(row.locator_json));if(!locator.success)return[];
     let minuteToken:string|undefined;try{const token=(JSON.parse(row.metadata_json) as {minuteToken?:unknown}).minuteToken;if(typeof token==='string')minuteToken=token}catch{}
-    return[{id:row.id,sourceId:row.source_id,sourceVersion:row.source_version,excerpt:row.excerpt,locator:locator.data,occurredAt:row.occurred_at,...(minuteToken?{minuteToken}:{})}];
+    const isFounderCorrection=locator.data.kind==='group_message'&&correctionMessageIds.has(locator.data.messageId);
+    return[{id:row.id,sourceId:row.source_id,sourceVersion:row.source_version,excerpt:row.excerpt,locator:locator.data,occurredAt:row.occurred_at,
+      ...(minuteToken?{minuteToken}:{}),...(isFounderCorrection?{isFounderCorrection:true}:{})}];
   });
   return{items,linkedSourceCount:new Set(links.map(link=>link.source_id)).size};
+}
+
+function cleanDisplayName(value:string):string{
+  return value.normalize('NFKC').replace(/^[\s,，:：;；|｜·.。]+/u,'').trim();
 }
 
 function loadCoverageGaps(client:Database.Database,chatId:string,since:string,until:string):{id:string;summary:string}[]{

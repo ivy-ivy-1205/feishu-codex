@@ -75,7 +75,7 @@ describe('founder manual queries',()=>{
     expect(JSON.stringify(payload.card)).toContain('处理状态');
     expect(JSON.stringify(payload.card)).toContain('最后防漏复核');
     expect(JSON.stringify(payload.card)).toContain('待处理');
-    expect(JSON.stringify(payload.card)).toContain('未补偿失败');
+    expect(JSON.stringify(payload.card)).toContain('未补偿分析来源');
     db.close();
   });
 
@@ -325,6 +325,32 @@ describe('founder manual queries',()=>{
     expect(body).toContain('不可读/跳过缺口：1');
     expect(body).toContain('最后防漏复核：2026-09-10T00:00:00.000Z');
     expect(body).toContain('仅展示前');
+    db.close();
+  });
+
+  it('reports unique unanalyzed sources separately from failed capture jobs',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    const topics=new TopicRepository(db.client),sources=new ContextSourceRepository(db.client);
+    topics.createTopic({displayName:'Smart Listing',stage:'active_project',createdAt:at});
+    const save=(id:string,occurredAt:string)=>{
+      const captured=captureGroupMessageSource({chatId,messageId:id,threadId:null,rootId:null,author:{openId:'ou_ivy',displayName:null},
+        senderType:'user',messageType:'text',text:`语料 ${id}`,occurredAt},new Date(occurredAt));
+      return sources.saveSource(captured.source).source.id;
+    };
+    const recovered=save('om_recovered','2026-09-23T00:00:00.000Z');
+    const missing=save('om_missing','2026-09-24T00:00:00.000Z');
+    const insert=(id:string,type:string,status:string,payload:unknown,updatedAt:string)=>db.client.prepare(`INSERT INTO batch_jobs
+      (id,type,stable_key,payload,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`)
+      .run(id,type,id,JSON.stringify(payload),status,'2026-09-25T00:00:00.000Z',updatedAt);
+    insert('analysis_done','analyze_founder_stream_batch','completed',{chatId,sourceIds:[recovered]},'2026-09-25T01:00:00.000Z');
+    insert('analysis_failed_1','analyze_founder_stream_batch','failed',{chatId,sourceIds:[recovered,missing]},'2026-09-25T02:00:00.000Z');
+    insert('analysis_failed_2','analyze_founder_stream_batch','failed',{chatId,sourceIds:[missing]},'2026-09-25T03:00:00.000Z');
+    insert('attachment_failed','capture_founder_attachment','failed',{chatId,messageId:'om_file',attempt:3},'2026-09-25T04:00:00.000Z');
+    const body=JSON.stringify(buildFounderManualQueryMessages({client:db.client,query:{kind:'work_map'},queryMessageId:'om_status',
+      chatId,approvedChatIds:[chatId],now:at})[0]!.card);
+    expect(body).toContain('最新已分析语料：2026-09-23T00:00:00.000Z');
+    expect(body).toContain('未补偿分析来源：1；采集失败任务：1');
+    expect(body).not.toContain('未补偿失败：');
     db.close();
   });
 });
