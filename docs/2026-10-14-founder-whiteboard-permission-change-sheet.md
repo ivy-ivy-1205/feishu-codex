@@ -1,6 +1,6 @@
 # Founder 白板最小权限变更单
 
-状态：**Ivy 已批准；2026-10-14 已执行 P1–P3，探针在 `create_nodes` 失败后按规则停止**。
+状态：**Ivy 已批准并执行 P1–P3；原探针在 `create_nodes` 停止，随后经独立批准完成 schema 修复与一次新探针，新探针已通过；生产仍未部署或重启**。
 
 目标应用：生产 `AiJia Context` / `Codex` 企业自建应用，App ID `cli_aad1fef1c7b81bda`。操作账号为 `sharon`。
 
@@ -127,6 +127,31 @@ preflight-founder-whiteboard --chat-id <唯一批准群> --create
 - 本机 `/health` 与 `/ready` 均返回 200；`FOUNDER_STREAM_WHITEBOARD_ENABLED` 仍不存在，`FOUNDER_STREAM_GROUP_DELIVERY_ENABLED=false`。
 - 未部署或重启 Bridge，未修改生产 env／SQLite，未回填语料，未发送群消息，也未运行第二次探针。
 
-### 下一步审批边界
+### 当时的下一步审批边界（已完成）
 
-下一步需要独立批准：在本地把白板节点生成改为官方 CLI 可接受的 OpenAPI 结构，完成测试与隔离候选构建，然后只运行一次新的无业务数据探针。该步骤仍不包含 Bridge 部署／重启、生产配置或数据库修改、历史回填和群消息。
+当时要求独立批准：在本地把白板节点生成改为官方 CLI 可接受的 OpenAPI 结构，完成测试与隔离候选构建，然后只运行一次新的无业务数据探针。Ivy 后续已明确批准并完成该范围，结果见第 8 节；该批准不包含 Bridge 部署／重启、生产配置或数据库修改、历史回填和群消息。
+
+## 8. Schema 修复与新探针执行记录
+
+Ivy 已独立批准本地 schema 修复、隔离候选构建和一次新探针，明确不部署或重启 Bridge。
+
+- TDD 红灯准确捕获现有文本节点携带 `style.fill_color="#FFFFFF00"`；该 8 位透明色和额外文本节点 `style` 不在官方 CLI 生成的文本节点格式中。
+- 提交 `3b19b2de362c081f291bd573f647e01882e34fdd` 移除文本节点透明 `style`，并补齐官方输出中的 `line_through`、`underline`、`italic`、`angle`、颜色类型和主题颜色码；布局、卡片文字、矩形节点与 25 套配色逻辑未改。
+- 本地完整门禁通过：96 个测试文件、818 项测试；`pnpm typecheck`、`pnpm build`、`git diff --check` 均成功。
+- tracked-only 归档 `/tmp/feishu-whiteboard-schema-3b19b2d.tar` 为 2,488,320 bytes，SHA-256 `2b97d5a7ea6b6f57d00c3c8948f0e7a146d7cb94422f197d90db180f4fe3fd73`；压缩包为 437,304 bytes，SHA-256 `b3e836c2241c3110a3d7116fed609cf9d676adaf728d764d331875dc816b2262`。服务器端压缩包哈希一致。
+- 隔离候选镜像为 `aijia/feishu-codex-bridge:diagnostic-3b19b2d`，image ID `sha256:e752cbf9ec652b9b92052df7e04140d2dc70ad0b87c326591b18a9fd0d325081`，OCI revision 与提交精确一致。编译产物确认不含旧 `#FFFFFF00`，包含新的规范字段。
+- 恰好一次获批的新探针完整通过，返回 document ID `Q0bydHfIDom0zoxXBJKclBPWnKW`、whiteboard ID `FCltwXNXZhSc0XbDJ5hcdgxPnCe`、palette ID `grove`，文档链接为 <https://icnua99ny9c4.feishu.cn/docx/Q0bydHfIDom0zoxXBJKclBPWnKW>。返回发生在 `grant_group_edit` 成功之后，因此唯一批准群已经获得编辑权限；未发送群消息。
+- 探针后生产仍运行 revision `25b2269306e72e5cc212da3a5de22891d9027f7f`，状态 `running/healthy`、restart 0、原 startedAt 不变；whiteboard flag 不存在、group delivery=false、health/ready=200。未部署、未重启、未修改 env/SQLite、未回填语料。
+
+## 9. 飞书应用后续更新的影响
+
+白板 schema 修复位于本仓库的 Bridge 代码，并打包在服务器 Docker 镜像中；它不是上传到飞书开发者后台的一段代码。飞书应用只提供固定 App ID 对应的身份、权限、机器人能力和事件配置，因此发布普通的名称、图标、描述或其他功能更新，不会覆盖本次 Bridge 代码。
+
+后续更新飞书应用时需保留以下运行合同，否则对应能力会失效：
+
+- 保留本单四项权限及现有消息／历史读取权限，发布后确认均为“已开通／已发布”；
+- 不更换应用身份；若轮换 App Secret，先按单独变更单同步服务器凭据位置，再验证 token 获取；
+- 保持生产机器人在唯一批准群内，并保留现有事件订阅、回调、安全设置和必要的 IP 白名单；
+- 飞书升级白板 API 或 SDK 后，先用本变更单同类的无业务数据探针验证 schema，再更新生产 Bridge。
+
+因此可以继续更新飞书应用；风险来自运行合同被改动，而不是“发布新版本”这个动作本身。

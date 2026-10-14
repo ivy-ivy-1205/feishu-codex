@@ -1,10 +1,12 @@
 # Founder 三类查询原生飞书白板上线变更单
 
-状态：**Ivy 已批准；2026-10-13 执行至 D2 权限探针失败后按停止条件暂停**。
+状态：**旧候选在 D2 权限／schema 探针失败后停止；替代候选 `3b19b2d` 的隔离探针已通过，D3/D4 尚未执行，等待新的上线批准**。
 
 2026-10-14 补充：带安全阶段诊断的第二次获批探针在 `create_document` 返回飞书码 `99991672`；D3/D4 继续暂停。后续权限变更见 [`2026-10-14-founder-whiteboard-permission-change-sheet.md`](./2026-10-14-founder-whiteboard-permission-change-sheet.md)。
 
 目标提交：`d853f5c537cbb3b0d68b25bc51fe94eb2293e9f5`。
+
+替代部署目标：`3b19b2de362c081f291bd573f647e01882e34fdd`（包含原目标功能、阶段诊断和白板文本节点 schema 修复）。
 
 tracked-only 发布归档：`/tmp/feishu-founder-whiteboard-d853f5c.tar`，大小 `2457600` bytes，SHA-256 `7538734e7f2c47005b1d3eacb7c44d72238d5055cc06da0506f823aabf11ef89`。
 
@@ -142,3 +144,12 @@ Ivy 批准本变更单即授权 D1–D4 及成功后的上述临时资产清理�
 - 探针 CLI 没有保留后续失败前取得的 document ID / whiteboard ID，因此无法定位本次孤立探针文档；没有重试或删除。
 - 飞书官方白板流程建议使用 `@larksuite/whiteboard-cli` 生成 OpenAPI 节点并明确不推荐手写 raw JSON；现有候选实现手写节点参数，离线对比已发现与官方生成格式的差异。下一步先在本地修正并重新完成隔离门禁，再申请一次新的探针。
 - D3/D4 继续未执行。停止后生产仍为 revision `25b2269`、running/healthy、restart=0，原 startedAt 未变；白板开关不存在、group delivery=false，health/ready=200；未回填、未改 env／数据库、未重启或发群消息。
+
+## 11. 2026-10-14 Schema 修复候选与成功探针
+
+- TDD 修复提交为 `3b19b2de362c081f291bd573f647e01882e34fdd`：文本节点移除与官方 CLI 生成格式不一致的 8 位透明 `style.fill_color`，并补齐官方 OpenAPI 文本字段；业务内容、布局和配色逻辑不变。成功探针验证的是这一组 schema 修复，不单独断言某一个字段是唯一根因。
+- 完整本地门禁为 96 个测试文件、818 项测试通过；typecheck、build、diff check 均通过。
+- 服务器隔离候选 `aijia/feishu-codex-bridge:diagnostic-3b19b2d` 的 image ID 为 `sha256:e752cbf9ec652b9b92052df7e04140d2dc70ad0b87c326591b18a9fd0d325081`，OCI revision 与提交一致。
+- 唯一一次新探针完整通过，生成文档 <https://icnua99ny9c4.feishu.cn/docx/Q0bydHfIDom0zoxXBJKclBPWnKW>，whiteboard ID 为 `FCltwXNXZhSc0XbDJ5hcdgxPnCe`，palette ID 为 `grove`；节点创建与唯一批准群编辑授权均成功，没有发送群消息。
+- 探针后生产仍为旧 revision `25b2269`、running/healthy、restart 0、原 startedAt 不变；whiteboard flag 不存在、group delivery=false、health/ready=200。D3/D4 未执行。
+- 若 Ivy 再次批准上线，D3/D4 必须使用替代目标 `3b19b2d`，不得部署旧候选 `d853f5c` 或诊断提交 `bd5ebe4`；仍按原单执行覆盖落库、停止态备份、唯一一次服务切换和切换后短窗口回填。
