@@ -1,6 +1,6 @@
 # Founder 白板入口可见性修复变更单
 
-状态：**本地候选完成，等待 Ivy 批准生产部署**。
+状态：**H1–H4 已完成，生产已运行修复候选；等待 Ivy／James 重新调用查询做真实视觉验收**。
 
 目标提交：`c99c1325dc8edd64cfff07ff3b89c5cdcb7529ef`。
 
@@ -75,3 +75,14 @@ Ivy 在批准群输入 `查看工作地图` 后收到了两页完整文本卡。
 批准本单即授权 H1–H4：生产只读核验、候选上传／隔离构建、停止态备份、一次 Bridge 切换、验证和临时资产清理。
 
 不包含主动发送群消息、替 Ivy/James 调用查询、第二次重启、数据库恢复、权限／env 修改、扩大群范围或删除已有白板文档。
+
+## 9. 2026-10-14 执行记录
+
+- H1 通过：生产原 revision 为 `3b19b2de362c081f291bd573f647e01882e34fdd`，running/healthy、restart 0、health/ready 200；SQLite 完整且无外键异常，active jobs=0、pending outbox=0、Ivy/James 身份各 1。Ivy 首次查询产生的两页卡使 outbox 总数为 14，全部 delivered。
+- H2 通过：服务器压缩包与原始 tar 的 SHA-256 分别精确为 `c29393d0df4a552594769d0e21ce6d19c670dfb995709b459463e0a679f3af20` 和 `613dad39cc6b2d00046ec73a2cbb3940d2c0c21528715fdd206f7763f03e68be`。候选 image ID 为 `sha256:d766768ce6b15768a3b3791267e0c79b5f630a8d107d0357b9924947f935f23d`，OCI revision 与目标提交一致；隔离配置与编译产物检查通过，未挂载生产 SQLite、未调用飞书或发送消息。
+- 首次 H3 脚本在 `docker stop` 前因误用宿主机不存在的 `node` 解析安全计数而 fail closed；只读复核确认旧容器、app、build、镜像标签、队列和 health/ready 均未变化。修正为容器内输出计数后继续，未产生额外停服或启动。
+- UTC `20261014T050408Z` 停止旧 Bridge 后创建 SQLite 备份 `/opt/feishu-codex/backups/bridge-pre-whiteboard-entry-20261014T050408Z.sqlite`（mode 600、`integrity_check=ok`、无外键异常）、app checkpoint `/opt/feishu-codex/checkpoints/app-pre-whiteboard-entry-20261014T050408Z` 和回滚镜像 `aijia/feishu-codex-bridge:rollback-pre-whiteboard-entry-20261014T050408Z`。
+- 新 Bridge 于 `2026-10-14T05:04:11.576575308Z` 启动，生产 revision 为 `c99c1325dc8edd64cfff07ff3b89c5cdcb7529ef`；running/healthy、restart 0、health/ready 200，ChatGPT 登录有效，无 API Key fallback。whiteboard/manual/capture/analysis/daily/worker=true，group-delivery=false，唯一批准群不变。
+- 最终数据库与停服备份逐项一致：282 sources、177 jobs、19 个历史 failed、active jobs=0、14 条 outbox 全部 delivered、pending outbox=0、Ivy/James 身份各 1；没有业务数据、任务或群消息增量。Docker 事件确认本轮恰好一次新容器 start。
+- 运行镜像编译产物确认包含“可编辑看板已生成”、打开按钮和配色说明；上传归档、隔离 build 和候选标签已清理，运行镜像与回滚资产保留。
+- 部署脚本未主动调用任何查询。下一步由 Ivy 或 James 重新发送 `查看工作地图`，验证每一页首屏入口。
