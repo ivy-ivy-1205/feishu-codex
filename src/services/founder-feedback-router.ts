@@ -3,6 +3,7 @@ import { OutboxRepository, type FounderWorkMapMessage } from '../repositories/ou
 import { applyTopicCorrection, findFeedbackReplay, founderFeedbackInputSchema, staleFeedback, topicCorrectionSchema,
   type FounderFeedbackDecision, type FounderFeedbackDependencies, type TopicCorrection } from './topic-correction-service.js';
 import type { TopicStage } from '../domain/topic.js';
+import { confirmFounderBatchCorrection, draftFounderBatchCorrection } from './founder-batch-correction.js';
 
 export type { FounderFeedbackDecision, FounderFeedbackDependencies } from './topic-correction-service.js';
 
@@ -16,12 +17,17 @@ export function routeFounderFeedback(raw: unknown, dependencies: FounderFeedback
     return { kind: 'reject', reason: 'unknown_founder' };
   }
   const replay = findFeedbackReplay(input, dependencies.client); if (replay) return replay;
+  const confirmation=input.text.normalize('NFKC').trim().match(/^确认修正\s+(feedbackdraft_[a-f0-9]{32})$/u);
+  if(confirmation)return confirmFounderBatchCorrection(input,confirmation[1]!,dependencies);
   if (!input.replyTo) return { kind: 'clarify', reason: 'missing_reply_context', text: '请在对应工作地图或对齐问题卡片下回复，方便确认你指的是哪件事。' };
   const binding = new OutboxRepository(dependencies.client).findDeliveredFounderMessage(input.chatId, input.replyTo);
   if (!binding) return { kind: 'reject', reason: 'unrelated_message' };
   const text = input.text.normalize('NFKC').trim().replace(/[。!！]$/u, '');
   let correction: TopicCorrection | null = null;
-  if (binding.kind === 'founder_work_map') correction = parseTopicCorrection(text, binding);
+  if (binding.kind === 'founder_work_map') {
+    const batch=draftFounderBatchCorrection(input,binding,dependencies);if(batch)return batch;
+    correction = parseTopicCorrection(text, binding);
+  }
   else {
     const issue = new AlignmentIssueRepository(dependencies.client).get(binding.issueId);
     if (!issue || issue.status !== 'asked' || issue.deliveredMessageId !== input.replyTo || issue.evidenceSetHash !== binding.evidenceSetHash) return staleFeedback();

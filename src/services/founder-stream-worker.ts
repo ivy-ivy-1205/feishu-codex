@@ -30,6 +30,7 @@ import { classifyFounderFailure, type FounderFailureStage } from './founder-anal
 import { buildFounderManualQueryMessages, enqueueFounderManualQuery, isConfiguredFounder, parseFounderManualQuery } from './founder-manual-query.js';
 import { FounderWhiteboardPublishError, founderPalettes, type FounderWhiteboardArtifact } from './founder-whiteboard.js';
 import type { FounderBoardView } from './founder-board-view.js';
+import { founderBatchOperationsSchema } from './founder-batch-correction.js';
 
 export interface FounderPerspectiveAnalysisPort {
   analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[];
@@ -123,7 +124,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
       }
       if (disposition === 'captured') {
         const replyTo = message.parent_id || message.root_id || null;
-        const correctionLike = /^(?:第\s*\d+\s*项(?:改|只是|拆)|\d+\s*(?:和|与)\s*\d+\s*是同一个|这个(?:只是想法|改名为|改为|拆分为)|暂停\s*\d+\s*项)/u.test(text!);
+        const correctionLike = /^(?:第\s*\d+\s*项(?:改|只是|拆)|\d+\s*(?:和|与)\s*\d+\s*是同一个|这个(?:只是想法|改名为|改为|拆分为)|暂停\s*\d+\s*项|确认修正\s+feedbackdraft_[a-f0-9]{32})/u.test(text!);
         if ((replyTo && outbox.findDeliveredFounderMessage(chatId, replyTo)) || correctionLike) {
           decision = routeFounderFeedback({ chatId, openId: event.sender.sender_id.open_id ?? '', messageId: message.message_id,
             replyTo, text, occurredAt: at, threadId: message.thread_id || null, rootId: message.root_id || null },
@@ -352,8 +353,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
       }
       policy.reconcilePending(now());
       if (!options.delivery) return;
-      if (!options.flags.groupDeliveryEnabled) return;
-      await deliverFounderMessages(options, outbox, policy, now, allowed);
+      if (options.flags.groupDeliveryEnabled) await deliverFounderMessages(options, outbox, policy, now, allowed);
+      if (!options.flags.manualQueryEnabled) await deliverFounderFeedbackMessages(options,now,allowed);
   };
   const consumer = new DurableJobConsumer({ now, intervalMs: options.intervalMs,
     leaseNext: at => options.jobRepository.leaseNextSupportedJob(at,supportedKinds),
@@ -361,8 +362,10 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   });
   const manualQueryConsumer = new DurableJobConsumer({ now, intervalMs: options.intervalMs,
     leaseNext: () => null, process: async () => 'completed',
-    afterTick: async () => { if(options.flags.manualQueryEnabled&&options.delivery)
-      await deliverManualQueryMessages(options,now,allowed); }
+    afterTick: async () => { if(options.flags.manualQueryEnabled&&options.delivery){
+      await deliverManualQueryMessages(options,now,allowed);
+      await deliverFounderFeedbackMessages(options,now,allowed);
+    } }
   });
   function enqueueMinute(source: ContextSourceRecord) {
     return options.jobRepository.enqueueFounderStreamBatch({chatId:approvedGroup,sourceIds:[source.id],since:source.occurredAt,until:now().toISOString(),capturedAt:now()});
@@ -576,7 +579,16 @@ function topicAuthority(client: Database.Database, topics: TopicRepository, topi
   ].includes(version.rationale));
   if(baseline)return{snapshot:baseline,correctionId:null,evidenceId:null,occurredAt:baseline.changedAt};
   for(const row of rows) {
-    const correction=topicCorrectionSchema.safeParse(JSON.parse(row.correction_json));
+    const rawCorrection=JSON.parse(row.correction_json) as unknown;
+    const batch=rawCorrection&&typeof rawCorrection==='object'&&'kind'in rawCorrection&&rawCorrection.kind==='batch_correction'&&
+      'operations'in rawCorrection?founderBatchOperationsSchema.safeParse(rawCorrection.operations):null;
+    if(batch?.success&&JSON.parse(row.result_json).status==='applied'){
+      const touches=batch.data.some(operation=>operation.kind==='update_topic'?operation.topic.id===topic.id:
+        operation.kind==='set_work_map_preference'?false:operation.topics.some(ref=>ref.id===topic.id));
+      if(touches){const snapshot=versions.find(version=>version.evidenceIds.includes(row.evidence_id));
+        if(snapshot)return{snapshot,correctionId:row.id,evidenceId:row.evidence_id,occurredAt:row.occurred_at};}
+    }
+    const correction=topicCorrectionSchema.safeParse(rawCorrection);
     if(!correction.success || !['merge_topics','split_topic','reclassify_stage','rename_topic','pause_topic'].includes(correction.data.kind) ||
       JSON.parse(row.result_json).status!=='applied')continue;
     const refs='topics' in correction.data ? correction.data.topics : 'topic' in correction.data ? [correction.data.topic] : [];
@@ -647,17 +659,29 @@ async function deliverFounderMessages(options: FounderStreamOptions, outbox: Out
     AND (next_attempt_at IS NULL OR next_attempt_at<=?)`).all(now().toISOString()) as {idempotency_key:string;payload:string}[];
   for (const row of rows) {
     const message = JSON.parse(row.payload);
-    if (!['founder_feedback','founder_work_map'].includes(message.kind) || !allowed(message.targetChatId)) continue;
+    if (message.kind!=='founder_work_map' || !allowed(message.targetChatId)) continue;
     policy.reconcilePending(now());
     try {
-      const sent = message.kind==='founder_feedback' ? await options.delivery!.sendTextMessage({chatId:message.targetChatId,text:message.text,idempotencyKey:row.idempotency_key}) :
-        await options.delivery!.sendInteractiveCard({chatId:message.targetChatId,card:message.card,idempotencyKey:row.idempotency_key});
+      const sent = await options.delivery!.sendInteractiveCard({chatId:message.targetChatId,card:message.card,idempotencyKey:row.idempotency_key});
       if (!sent.messageId.trim() || sent.messageId.startsWith('pending:')) throw new Error('invalid delivery');
-      if (message.kind==='founder_work_map') outbox.acknowledgeFounderWorkMapDelivery({...message,messageId:sent.messageId,deliveredAt:now()});
-      else options.client.prepare("UPDATE outbox SET status='delivered',delivered_message_id=?,delivered_at=? WHERE idempotency_key=? AND status='pending'")
-        .run(sent.messageId,now().toISOString(),row.idempotency_key);
+      outbox.acknowledgeFounderWorkMapDelivery({...message,messageId:sent.messageId,deliveredAt:now()});
     } catch { options.client.prepare('UPDATE outbox SET attempt_count=attempt_count+1,next_attempt_at=?,last_error_code=? WHERE idempotency_key=? AND status=\'pending\'')
       .run(new Date(now().getTime()+30_000).toISOString(),'FOUNDER_DELIVERY_FAILED',row.idempotency_key); }
+  }
+}
+async function deliverFounderFeedbackMessages(options:FounderStreamOptions,now:()=>Date,allowed:(id:string)=>boolean):Promise<void>{
+  const rows=options.client.prepare(`SELECT idempotency_key,payload FROM outbox WHERE status='pending'
+    AND (next_attempt_at IS NULL OR next_attempt_at<=?) ORDER BY created_at,id`).all(now().toISOString()) as {idempotency_key:string;payload:string}[];
+  for(const row of rows){
+    const message=JSON.parse(row.payload) as {kind?:unknown;targetChatId?:unknown;text?:unknown};
+    if(message.kind!=='founder_feedback'||typeof message.targetChatId!=='string'||typeof message.text!=='string'||!allowed(message.targetChatId))continue;
+    try{
+      const sent=await options.delivery!.sendTextMessage({chatId:message.targetChatId,text:message.text,idempotencyKey:row.idempotency_key});
+      if(!sent.messageId.trim()||sent.messageId.startsWith('pending:'))throw new Error('invalid delivery');
+      options.client.prepare("UPDATE outbox SET status='delivered',delivered_message_id=?,delivered_at=?,next_attempt_at=NULL,last_error_code=NULL WHERE idempotency_key=? AND status='pending'")
+        .run(sent.messageId,now().toISOString(),row.idempotency_key);
+    }catch{options.client.prepare("UPDATE outbox SET attempt_count=attempt_count+1,next_attempt_at=?,last_error_code='FOUNDER_DELIVERY_FAILED' WHERE idempotency_key=? AND status='pending'")
+      .run(new Date(now().getTime()+30_000).toISOString(),row.idempotency_key)}
   }
 }
 function parseTime(value:string):string|null {

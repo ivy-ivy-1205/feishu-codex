@@ -93,7 +93,15 @@ export class OutboxRepository {
     const row = this.client.prepare(`SELECT payload FROM outbox WHERE destination = ? AND delivered_message_id = ?
       AND status = 'delivered' AND delivered_at IS NOT NULL`).get(chatId, messageId) as { payload: string } | undefined;
     const message = row ? parseOutboxMessage(row.payload) : null;
-    return message?.targetChatId === chatId && (message.kind === 'founder_work_map' || message.kind === 'alignment_question') ? message : null;
+    if (message?.targetChatId !== chatId || (message.kind !== 'founder_work_map' && message.kind !== 'alignment_question')) return null;
+    if (message.kind === 'alignment_question') return message;
+    const pages = (this.client.prepare(`SELECT payload FROM outbox WHERE destination = ? AND status = 'delivered'
+      AND delivered_at IS NOT NULL ORDER BY created_at, id`).all(chatId) as { payload: string }[])
+      .map((item) => parseOutboxMessage(item.payload))
+      .filter((item): item is FounderWorkMapMessage => item?.kind === 'founder_work_map' && item.mapId === message.mapId);
+    const itemRefs = pages.flatMap((page) => page.itemRefs).sort((a, b) => a.displayedNumber - b.displayedNumber);
+    if (new Set(itemRefs.map((item) => item.displayedNumber)).size !== itemRefs.length) return null;
+    return { ...message, itemRefs };
   }
 
   enqueueAlignmentQuestion(message: AlignmentQuestionMessage, now = new Date()): { created: boolean } {

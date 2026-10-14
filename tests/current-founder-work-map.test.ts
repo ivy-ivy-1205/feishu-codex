@@ -82,4 +82,19 @@ describe('current founder work map publisher',()=>{
     expect(body).not.toContain('历史提议（James，2026-09-13）：项目暂定名称：合伙人对齐室');
     expect(body).not.toContain('待对齐（James，2026-09-13）：项目暂定名称：合伙人对齐室');
   });
+  it('keeps canonical integrity counts while hiding Space-managed and orphan active topics from the daily map',()=>{
+    const h=fixture();
+    const orphan=h.topics.createTopic({displayName:'未归类讨论',stage:'active_project',createdAt:new Date('2026-09-12T00:00:00Z')});
+    h.db.client.prepare(`INSERT INTO founder_topic_visibility(topic_id,visibility,source_message_id,updated_at)
+      VALUES(?,'space_managed','om_correction','2026-09-21T00:00:00Z')`).run(h.child.id);
+    h.db.client.prepare(`INSERT INTO founder_work_map_preferences(chat_id,hide_orphan_active,source_message_id,updated_at)
+      VALUES(?,1,'om_correction','2026-09-21T00:00:00Z')`).run(chatId);
+    const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-09-24T00:00:00Z',
+      approvedChatIds:[chatId],expectedCanonicalTopicCount:3});
+    expect(result.canonicalTopicCount).toBe(3);
+    expect(JSON.stringify(result.cards)).not.toContain('子项目');
+    expect(JSON.stringify(result.cards)).not.toContain('未归类讨论');
+    expect(result.boardView.topics.map((topic)=>topic.id)).toEqual([h.parent.id]);
+    expect(result.boardView.topics).not.toEqual(expect.arrayContaining([expect.objectContaining({id:orphan.id})]));
+  });
 });

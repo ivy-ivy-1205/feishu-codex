@@ -166,6 +166,31 @@ export const founderFeedbackCorrections = sqliteTable('founder_feedback_correcti
   createdAt: text('created_at').notNull()
 }, (table) => [uniqueIndex('founder_feedback_source_unique').on(table.chatId, table.sourceMessageId)]);
 
+export const founderFeedbackDrafts = sqliteTable('founder_feedback_drafts', {
+  id: text('id').primaryKey(),
+  chatId: text('chat_id').notNull(),
+  mapId: text('map_id').notNull(),
+  bindingMessageId: text('binding_message_id').notNull(),
+  sourceMessageId: text('source_message_id').notNull(),
+  authorOpenId: text('author_open_id').notNull(),
+  inputHash: text('input_hash').notNull(),
+  inputJson: text('input_json').notNull(),
+  operationsJson: text('operations_json').notNull(),
+  status: text('status', { enum: ['pending', 'applied', 'cancelled'] }).notNull(),
+  createdAt: text('created_at').notNull(),
+  appliedAt: text('applied_at')
+}, (table) => [
+  uniqueIndex('founder_feedback_drafts_source_unique').on(table.chatId, table.sourceMessageId),
+  check('founder_feedback_drafts_status_allowed', sql`${table.status} IN ('pending','applied','cancelled')`)
+]);
+
+export const founderWorkMapPreferences = sqliteTable('founder_work_map_preferences', {
+  chatId: text('chat_id').primaryKey(),
+  hideOrphanActive: integer('hide_orphan_active').notNull(),
+  sourceMessageId: text('source_message_id').notNull(),
+  updatedAt: text('updated_at').notNull()
+}, (table) => [check('founder_work_map_preferences_hide_orphan_active_allowed', sql`${table.hideOrphanActive} IN (0,1)`) ]);
+
 export const alignmentIssues = sqliteTable('alignment_issues', {
   id: text('id').primaryKey(),
   topicId: text('topic_id').notNull().references(() => contextTopics.id),
@@ -271,6 +296,13 @@ export const contextTopics = sqliteTable('context_topics', {
 }, (table) => [
   check('context_topics_current_version_positive', sql`${table.currentVersion} > 0`)
 ]);
+
+export const founderTopicVisibility = sqliteTable('founder_topic_visibility', {
+  topicId: text('topic_id').primaryKey().references(() => contextTopics.id),
+  visibility: text('visibility', { enum: ['visible', 'space_managed'] }).notNull(),
+  sourceMessageId: text('source_message_id').notNull(),
+  updatedAt: text('updated_at').notNull()
+}, (table) => [check('founder_topic_visibility_allowed', sql`${table.visibility} IN ('visible','space_managed')`)]);
 
 export const contextTopicVersions = sqliteTable('context_topic_versions', {
   id: text('id').primaryKey(),

@@ -4,7 +4,7 @@ export interface FounderWorkMapBoardTopic {
   id:string;
   name:string;
   stage:TopicStage;
-  kind:'project'|'task'|'goal';
+  kind:'project'|'task'|'goal'|'idea';
   outcome:string|null;
   parentName?:string;
   sourceCount?:number;

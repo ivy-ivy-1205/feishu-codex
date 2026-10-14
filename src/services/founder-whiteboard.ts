@@ -159,7 +159,8 @@ function layoutLane(topics:readonly FounderWorkMapBoardTopic[],x:number,y:number
   const groups=[...roots.flatMap(root=>[subtree(root)]),...topics.filter(topic=>!visited.has(topic.id)).map(topic=>subtree(topic))].filter(group=>group.length);
   for(const group of groups){const column=heights.indexOf(Math.min(...heights));
     for(const topic of group){const depth=topicDepth(topic,byName,lineRoot),indent=Math.min(2,Math.max(0,depth-1))*16,cardWidth=columnWidth-indent;
-      const title=topic.kind==='goal'?`阶段目标 / ${topic.name}`:topic.kind==='task'?`任务 / ${topic.name}`:topic.name;
+      const title=topic.kind==='goal'?`阶段目标 / ${topic.name}`:topic.kind==='task'?`任务 / ${topic.name}`:
+        topic.kind==='idea'?`观点 / ${topic.name}`:topic.name;
       const titleLines=wrapText(title,textUnits(cardWidth-36,26),2).split('\n').length;
       const body=topic.outcome?.trim()?wrapText(topic.outcome,textUnits(cardWidth-36,21),2):'';
       const bodyLines=body?body.split('\n').length:0,cardHeight=32+titleLines*34+(bodyLines?10+bodyLines*29:0)+34;
@@ -184,7 +185,8 @@ function appendLane(nodes:FounderWhiteboardNode[],lane:LaneLayout,palette:Founde
   for(const placement of lane.placements){const {topic,x,y,width,height}=placement,fill=topic.kind==='project'?palette.surface:topic.kind==='goal'?palette.secondary:palette.highlight;
     nodes.push(shape(x+6,y+6,width,height,palette.ink,palette.ink,'none'));
     nodes.push(shape(x,y,width,height,fill,palette.ink));
-    const title=topic.kind==='goal'?`阶段目标 / ${topic.name}`:topic.kind==='task'?`任务 / ${topic.name}`:topic.name;
+    const title=topic.kind==='goal'?`阶段目标 / ${topic.name}`:topic.kind==='task'?`任务 / ${topic.name}`:
+      topic.kind==='idea'?`观点 / ${topic.name}`:topic.name;
     const wrappedTitle=wrapText(title,textUnits(width-36,26),2),titleLines=wrappedTitle.split('\n').length;
     nodes.push(textNode(x+18,y+16,width-36,titleLines*34,wrappedTitle,26,palette.ink,'bold'));
     if(topic.outcome)nodes.push(textNode(x+18,y+22+titleLines*34,width-36,height-86,

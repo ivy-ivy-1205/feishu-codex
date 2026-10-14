@@ -38,12 +38,19 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
     const child=rootByTopic.get(relation.fromTopicId),parent=rootByTopic.get(relation.toTopicId);
     if(child&&parent&&child!==parent)parentByChild.set(child,parent);
   }
-  const projected:FounderWorkMapTopic[]=canonical.map(topic=>{
+  const hiddenRoots=new Set((input.client.prepare("SELECT topic_id FROM founder_topic_visibility WHERE visibility='space_managed'").all() as {topic_id:string}[])
+    .flatMap(row=>{const root=rootByTopic.get(row.topic_id);return root?[root]:[]}));
+  const preference=input.client.prepare('SELECT hide_orphan_active FROM founder_work_map_preferences WHERE chat_id=?').get(input.chatId) as
+    {hide_orphan_active:number}|undefined;
+  const parentsWithChildren=new Set(parentByChild.values());
+  const visibleCanonical=canonical.filter(topic=>!hiddenRoots.has(topic.id)&&!(preference?.hide_orphan_active===1&&
+    topic.stage==='active_project'&&!parentByChild.has(topic.id)&&!parentsWithChildren.has(topic.id)));
+  const projected:FounderWorkMapTopic[]=visibleCanonical.map(topic=>{
     const componentIds=[...rootByTopic].filter(([,root])=>root===topic.id).map(([id])=>id);
     const evidence=loadEvidence(input.client,componentIds);
     const parentId=parentByChild.get(topic.id);
     return{...topic,evidence:evidence.items,linkedSourceCount:evidence.linkedSourceCount,
-      displayKind:displayKindFor(topics,topic.id),
+      displayKind:displayKindFor(topics,topic.id,topic.stage),
       parentName:parentId?canonicalById.get(parentId)?.displayName:undefined,
       perspectives:alignment.listCanonicalPerspectives(topic.id).filter(perspective=>!isTopicLabelOnly(topic.displayName,perspective.statement))
         .map(perspective=>projectPerspective(topic,perspective))};
@@ -54,11 +61,13 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
     topics:projected.map(topic=>({id:topic.id,name:topic.displayName,stage:topic.stage,kind:topic.displayKind??'project',
       outcome:topic.outcome,parentName:topic.parentName,sourceCount:topic.linkedSourceCount??topic.evidence.length}))};
   const mapId=stableId('foundermap',canonicalJson({chatId:input.chatId,since:input.since,until:input.until,
-    topics:canonical.map(topic=>({id:topic.id,version:topic.currentVersion})),pages:cards.length}));
+    topics:canonical.map(topic=>({id:topic.id,version:topic.currentVersion})),hiddenRoots:[...hiddenRoots].sort(),
+    hideOrphanActive:preference?.hide_orphan_active===1,pages:cards.length}));
   return{mapId,canonicalTopicCount:canonical.length,cards,boardView};
 }
 
-function displayKindFor(topics:TopicRepository,topicId:string):'project'|'task'|'goal'{
+function displayKindFor(topics:TopicRepository,topicId:string,stage:CurrentTopic['stage']):'project'|'task'|'goal'|'idea'{
+  if(stage==='idea')return'idea';
   for(const version of [...topics.listVersions(topicId)].reverse()){
     if(version.rationale==='Ivy confirmed Founder work map task')return'task';
     if(version.rationale==='Ivy confirmed Founder work map goal')return'goal';

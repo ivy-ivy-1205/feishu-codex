@@ -27,6 +27,31 @@ const migrationSql = `
   CREATE UNIQUE INDEX IF NOT EXISTS founder_feedback_source_unique
     ON founder_feedback_corrections(chat_id, source_message_id);
 
+  CREATE TABLE IF NOT EXISTS founder_feedback_drafts (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    map_id TEXT NOT NULL,
+    binding_message_id TEXT NOT NULL,
+    source_message_id TEXT NOT NULL,
+    author_open_id TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    input_json TEXT NOT NULL,
+    operations_json TEXT NOT NULL,
+    status TEXT NOT NULL CONSTRAINT founder_feedback_drafts_status_allowed
+      CHECK(status IN ('pending','applied','cancelled')),
+    created_at TEXT NOT NULL,
+    applied_at TEXT,
+    UNIQUE(chat_id, source_message_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS founder_work_map_preferences (
+    chat_id TEXT PRIMARY KEY,
+    hide_orphan_active INTEGER NOT NULL
+      CONSTRAINT founder_work_map_preferences_hide_orphan_active_allowed CHECK(hide_orphan_active IN (0,1)),
+    source_message_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS alignment_issues (
     id TEXT PRIMARY KEY,
     topic_id TEXT NOT NULL REFERENCES context_topics(id),
@@ -239,6 +264,14 @@ const migrationSql = `
     current_version INTEGER NOT NULL
       CONSTRAINT context_topics_current_version_positive CHECK(current_version > 0),
     created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS founder_topic_visibility (
+    topic_id TEXT PRIMARY KEY REFERENCES context_topics(id),
+    visibility TEXT NOT NULL CONSTRAINT founder_topic_visibility_allowed
+      CHECK(visibility IN ('visible','space_managed')),
+    source_message_id TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
 

@@ -35,7 +35,8 @@ export type TopicCorrection = z.infer<typeof topicCorrectionSchema>;
 export type FounderFeedbackDecision =
   | { kind: 'reject'; reason: 'invalid_input' | 'wrong_chat' | 'unknown_founder' | 'unrelated_message' | 'message_conflict' }
   | { kind: 'clarify'; reason: 'missing_reply_context' | 'ambiguous_feedback' | 'stale_context'; text: string }
-  | { kind: 'corrected' | 'duplicate'; correctionKind: TopicCorrection['kind'];
+  | { kind: 'drafted' | 'duplicate'; correctionKind: 'batch_correction'; status: 'pending_confirmation'; draftId: string; text: string }
+  | { kind: 'corrected' | 'duplicate'; correctionKind: TopicCorrection['kind'] | 'batch_correction';
       status: 'applied' | 'awaiting_other_founder' | 'resolved' | 'historical_only' | 'support_withdrawn'; text: string };
 export interface FounderFeedbackDependencies { client: Database.Database; approvedChatIds: readonly string[]; now(): Date }
 

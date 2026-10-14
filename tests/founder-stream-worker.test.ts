@@ -515,7 +515,7 @@ describe('founder stream durable wiring', () => {
     expect(h.topics.listCurrentTopics()[0]?.evidenceIds).toHaveLength(26);
     await h.app.close(); h.db.close();
   });
-  it('stores correction receipts durably, sends only under delivery flag and retries safely', async () => {
+  it('delivers correction receipts through the manual-query channel while automatic group delivery stays off', async () => {
     const h = harness();
     new AlignmentRepository(h.db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:start});
     const topic=h.topics.createTopic({displayName:'讨论',stage:'exploring',createdAt:start});
@@ -528,14 +528,16 @@ describe('founder stream durable wiring', () => {
     expect(h.jobs.list()).toHaveLength(0);
     expect(h.db.client.prepare("SELECT status FROM outbox WHERE idempotency_key LIKE 'founder-feedback:%'").get()).toEqual({status:'pending'});
     const keys:string[]=[]; let allow=false;
-    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:true},
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,flags:{captureEnabled:true,analysisEnabled:true,
+      manualQueryEnabled:true,groupDeliveryEnabled:false},
       approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>start,delivery:{
         async sendTextMessage(input){keys.push(input.idempotencyKey!);if(!allow)throw new Error('network');return{messageId:'om_receipt'}},
         async sendInteractiveCard(){throw new Error('unexpected card')}
       }});
-    await runtime.runOnce(); expect(keys).toHaveLength(1);
+    await runtime.runManualQueriesOnce(); expect(keys).toHaveLength(1);
     allow=true; h.db.client.prepare("UPDATE outbox SET next_attempt_at=NULL WHERE idempotency_key LIKE 'founder-feedback:%'").run();
-    await runtime.runOnce(); await runtime.runOnce(); expect(keys).toEqual([`founder-feedback:${chat}:om_1`,`founder-feedback:${chat}:om_1`]);
+    await runtime.runManualQueriesOnce(); await runtime.runManualQueriesOnce();
+    expect(keys).toEqual([`founder-feedback:${chat}:om_1`,`founder-feedback:${chat}:om_1`]);
     expect(h.db.client.prepare("SELECT status,delivered_message_id FROM outbox WHERE idempotency_key LIKE 'founder-feedback:%'").get()).toEqual({status:'delivered',delivered_message_id:'om_receipt'});
     await h.app.close(); h.db.close();
   });

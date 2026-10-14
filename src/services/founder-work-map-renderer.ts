@@ -3,7 +3,7 @@ import { founderCard, founderSourceText, founderText, type FounderCardEvidence }
 
 export interface FounderWorkMapTopic extends Pick<CurrentTopic, 'id' | 'currentVersion' | 'displayName' | 'stage' | 'outcome'> {
   evidence: readonly FounderCardEvidence[];
-  displayKind?: 'project'|'task'|'goal';
+  displayKind?: 'project'|'task'|'goal'|'idea';
   linkedSourceCount?: number;
   parentName?: string;
   perspectives?: readonly { founder:'Ivy'|'James'|'双方';status:'current'|'historical'|'unresolved';statement:string;observedAt:string }[];
@@ -63,7 +63,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
       throw new Error('valid work-map topic is required');
     }
     const displayKind=topic.displayKind??'project';
-    if(!['project','task','goal'].includes(displayKind))throw new Error('valid work-map display kind is required');
+    if(!['project','task','goal','idea'].includes(displayKind))throw new Error('valid work-map display kind is required');
     const suffix = topic.stage === 'paused' ? '（暂停）' : topic.stage === 'closed' ? '（已结束）' : '';
     const hierarchy=hierarchyFor(topic,topicByName),framework=frameworkFor(hierarchy);
     const section=framework==='A'?`A 线｜${aLine}`:framework==='B'?`B 线｜${bLine}`:
@@ -72,9 +72,10 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     const nestedProject=framework?hierarchy.length>2:hierarchy.length>1;
     const nestedSupporting=(framework?hierarchy.length>2:hierarchy.length>1)?'↳ ':'';
     const title=displayKind==='task'?`${nestedSupporting}任务｜${topic.displayName}`:displayKind==='goal'?`${nestedSupporting}阶段目标｜${topic.displayName}`:
+      displayKind==='idea'?`观点｜${topic.displayName}`:
       `${nestedProject?'↳ 子项目':'项目'}｜${topic.displayName}`;
     const text=`${founderText(title, 120)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.displayName,topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}`;
-    if(displayKind==='project')add(section,text,{ kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
+    if(displayKind==='project'||displayKind==='idea')add(section,text,{ kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
     else addSupporting(section,text);
   }
   for (const grouping of [...input.uncertainGrouping].sort(compareId)) {
@@ -85,7 +86,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
   }
   for (const gap of [...input.coverageGaps].sort(compareId)) add('覆盖缺口', founderText(gap.summary, 240), { kind: 'coverage_gap', id: gap.id });
   const preface = `整理范围：${new Date(start).toISOString()} 至 ${new Date(end).toISOString()}\n这是根据已读取语料整理的工作地图，可继续纠正。`;
-  const footer = `归类待确认：${input.uncertainGrouping.length} 项；覆盖缺口：${input.coverageGaps.length} 项。未报告缺口不代表完整同步。\n可直接在本卡下用自然语言回复，例如“2 和 4 是同一个项目”“第 1 项只是想法”。编号只给项目和待确认项；任务与阶段目标挂在所属项目下。`;
+  const footer = `归类待确认：${input.uncertainGrouping.length} 项；覆盖缺口：${input.coverageGaps.length} 项。未报告缺口不代表完整同步。\n可直接在本卡下用自然语言回复，例如“2 和 4 是同一个项目”“第 1 项只是想法”。编号用于项目、观点和待确认项的纠正定位；任务与阶段目标挂在所属项目下。`;
   const chunks: Item[][] = [[]];
   for (const item of items) {
     const chunk = chunks.at(-1)!;
