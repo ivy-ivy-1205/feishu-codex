@@ -95,6 +95,14 @@ describe('FeishuSdkApiClient', () => {
     }]);
   });
 
+  it('uploads a generated work-map PNG as a Feishu message image',async()=>{
+    const calls:unknown[]=[];
+    const client=new FeishuSdkApiClient({sdkClient:createFakeSdkClient({calls,imageKey:'img_workmap'})});
+    const body=Buffer.from([137,80,78,71]);
+    await expect(client.uploadMessageImage(body)).resolves.toEqual({imageKey:'img_workmap'});
+    expect(calls).toEqual([{method:'im.image.create',payload:{data:{image_type:'message',image:body}}}]);
+  });
+
   it('reads minute basic info and transcript through official minutes APIs', async () => {
     const calls: unknown[] = [];
     const client = new FeishuSdkApiClient({
@@ -522,10 +530,14 @@ function createFakeSdkClient(options: {
   transcriptStream?: Readable;
   transcriptStreams?: Readable[];
   contextMessages?: unknown[];
+  imageKey?:string;
   calls?: unknown[];
 }): FeishuSdkClientLike {
   return {
     im: {
+      image:{
+        async create(payload){options.calls?.push({method:'im.image.create',payload});return{image_key:options.imageKey}}
+      },
       message: {
         async create(payload) {
           options.calls?.push({ method: 'im.message.create', payload });

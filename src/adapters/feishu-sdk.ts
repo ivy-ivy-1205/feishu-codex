@@ -23,6 +23,9 @@ export interface FeishuSdkClientOptions {
 
 export interface FeishuSdkClientLike {
   im: {
+    image?:{
+      create(payload:{data:{image_type:'message'|'avatar';image:Buffer}}):Promise<{image_key?:string}|null>;
+    };
     message: {
       create(payload: {
         params: { receive_id_type: 'chat_id' };
@@ -341,6 +344,15 @@ export class FeishuSdkApiClient implements FeishuApiClient {
       throw new Error('Feishu SDK sendInteractiveMessage did not return a message ID');
     }
     return { messageId };
+  }
+
+  async uploadMessageImage(body:Buffer):Promise<{imageKey:string}>{
+    const image=this.#sdkClient.im.image;
+    if(!image)throw new Error('Feishu SDK image upload is unavailable');
+    const response=await image.create({data:{image_type:'message',image:body}});
+    const imageKey=response?.image_key?.trim();
+    if(!imageKey)throw new Error('Feishu SDK image upload did not return an image key');
+    return{imageKey};
   }
 
   #requestOptions(options?: FeishuApiRequestOptions): unknown {

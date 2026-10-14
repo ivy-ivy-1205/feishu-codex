@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { FounderWhiteboardPublishError } from '../src/services/founder-whiteboard.js';
 import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
 import { JobRepository } from '../src/repositories/job-repository.js';
@@ -120,7 +121,7 @@ describe('founder manual queries',()=>{
       flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false,manualQueryEnabled:true},
       approvedChatIds:[chatId],ivyPrivateChatId:'oc_private',now:()=>at,
       analyzer:{async analyze(){return{topics:[]}}},whiteboardPublisher:{async publish(){publishes++;return{
-        documentId:'doc_1',whiteboardId:'board_1',url:'https://example.test/docx/doc_1',paletteId:'coral'}}},delivery:{
+        documentId:'doc_1',whiteboardId:'board_1',url:'https://example.test/docx/doc_1',paletteId:'coral',previewImageKey:'img_preview'}}},delivery:{
         async sendTextMessage(){return{messageId:'om_text'}},
         async sendInteractiveCard(input){cards.push(input.card);if(sends++===0)throw new Error('temporary');return{messageId:'om_after_retry'}}}});
     runtime.route.ingest(event('查看工作地图'));
@@ -143,18 +144,20 @@ describe('founder manual queries',()=>{
       flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false,manualQueryEnabled:true},
       approvedChatIds:[chatId],ivyPrivateChatId:'oc_private',now:()=>at,
       analyzer:{async analyze(){return{topics:[]}}},whiteboardPublisher:{async publish(){return{
-        documentId:'doc_1',whiteboardId:'board_1',url:'https://example.test/docx/doc_1',paletteId:'coral'}}},delivery:{
+        documentId:'doc_1',whiteboardId:'board_1',url:'https://example.test/docx/doc_1',paletteId:'coral',previewImageKey:'img_preview'}}},delivery:{
         async sendTextMessage(){return{messageId:'om_text'}},
         async sendInteractiveCard(input){sent.push(input.card);return{messageId:`om_page_${sent.length}`}}}});
     runtime.route.ingest(event('查看工作地图'));
     await runtime.runManualQueriesOnce();
     expect(sent).toHaveLength(2);
-    for(const card of sent){
-      const elements=card.elements as {tag?:unknown;text?:{content?:unknown};actions?:{url?:unknown}[]}[];
-      expect(elements[0]).toMatchObject({tag:'div',text:{content:expect.stringContaining('可编辑看板已生成')}});
-      expect(elements[0]).toMatchObject({text:{content:expect.stringContaining('Coral')}});
-      expect(elements[1]).toMatchObject({tag:'action',actions:[{url:'https://example.test/docx/doc_1'}]});
-    }
+    const first=sent[0]!.elements as {tag?:unknown;img_key?:unknown;mode?:unknown;text?:{content?:unknown};actions?:{url?:unknown}[]}[];
+    expect(first[0]).toMatchObject({tag:'img',img_key:'img_preview',mode:'fit_horizontal'});
+    expect(first[1]).toMatchObject({tag:'div',text:{content:expect.stringContaining('可编辑看板已生成')}});
+    expect(first[1]).toMatchObject({text:{content:expect.stringContaining('Coral')}});
+    expect(first[2]).toMatchObject({tag:'action',actions:[{type:'default',text:{content:'打开可编辑白板'},url:'https://example.test/docx/doc_1'}]});
+    expect(Buffer.byteLength(JSON.stringify(sent[0]),'utf8')).toBeLessThan(30_000);
+    const second=sent[1]!.elements as {tag?:unknown}[];
+    expect(second.some(element=>element.tag==='img')).toBe(false);
     db.close();
   });
 
@@ -174,6 +177,27 @@ describe('founder manual queries',()=>{
     expect(JSON.stringify(sentCard)).toContain('看板生成失败');
     const delivered=db.client.prepare("SELECT payload FROM outbox WHERE status='delivered'").get() as {payload:string};
     expect(JSON.parse(delivered.payload).boardFailure.code).toBe('FOUNDER_WHITEBOARD_PUBLISH_FAILED');
+    db.close();
+  });
+
+  it('still delivers the inline overview when only editable board creation fails',async()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    new AlignmentRepository(db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:at});
+    new TopicRepository(db.client).createTopic({displayName:'Smart Listing',stage:'active_project',createdAt:at});
+    let sentCard:Record<string,unknown>|undefined;
+    const runtime=createFounderStreamRuntime({client:db.client,jobRepository:new JobRepository(db.client),
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false,manualQueryEnabled:true},
+      approvedChatIds:[chatId],ivyPrivateChatId:'oc_private',now:()=>at,
+      analyzer:{async analyze(){return{topics:[]}}},whiteboardPublisher:{async publish(){
+        throw new FounderWhiteboardPublishError('img_preview',new Error('board unavailable'))}},delivery:{
+        async sendTextMessage(){return{messageId:'om_text'}},
+        async sendInteractiveCard(input){sentCard=input.card;return{messageId:'om_preview_only'}}}});
+    runtime.route.ingest(event('查看工作地图'));
+    await runtime.runManualQueriesOnce();
+    const elements=sentCard?.elements as {tag?:unknown;img_key?:unknown}[];
+    expect(elements[0]).toMatchObject({tag:'img',img_key:'img_preview'});
+    expect(JSON.stringify(sentCard)).toContain('群内总览已生成');
+    expect(JSON.stringify(sentCard)).not.toContain('打开可编辑看板');
     db.close();
   });
 

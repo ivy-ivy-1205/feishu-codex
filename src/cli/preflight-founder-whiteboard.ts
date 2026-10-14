@@ -2,10 +2,10 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createFeishuSdkClient } from '../adapters/feishu-sdk.js';
 import { createFeishuWhiteboardGateway, type FeishuWhiteboardSdkLike } from '../adapters/feishu-whiteboard.js';
-import { publishFounderWhiteboard, type FounderWhiteboardGateway } from '../services/founder-whiteboard.js';
+import { FounderWhiteboardPublishError, publishFounderWhiteboard, type FounderWhiteboardGateway } from '../services/founder-whiteboard.js';
 
 const approvedChatId='oc_a84d5b6ca478220d0a37964b50776edb';
-type WhiteboardPreflightStage='create_document'|'create_board'|'create_nodes'|'grant_group_edit'|'unknown';
+type WhiteboardPreflightStage='upload_preview_image'|'create_document'|'create_board'|'create_nodes'|'grant_group_edit'|'unknown';
 
 class WhiteboardPreflightStageError extends Error {
   constructor(readonly stage:Exclude<WhiteboardPreflightStage,'unknown'>,readonly original:unknown){
@@ -26,6 +26,7 @@ export async function runWhiteboardPreflightCli(args:string[],dependencies:{gate
   write:(value:string)=>void}):Promise<void>{
   const input=parseWhiteboardPreflightArguments(args);
   const gateway:FounderWhiteboardGateway={
+    uploadMessageImage:value=>atStage('upload_preview_image',()=>dependencies.gateway.uploadMessageImage(value)),
     createDocument:value=>atStage('create_document',()=>dependencies.gateway.createDocument(value)),
     createBoard:value=>atStage('create_board',()=>dependencies.gateway.createBoard(value)),
     createNodes:value=>atStage('create_nodes',()=>dependencies.gateway.createNodes(value)),
@@ -39,7 +40,8 @@ export async function runWhiteboardPreflightCli(args:string[],dependencies:{gate
 
 export function formatWhiteboardPreflightFailure(error:unknown):{status:'failed';stage:WhiteboardPreflightStage;
   feishuCode:number|null}{
-  const staged=error instanceof WhiteboardPreflightStageError?error:null;
+  const candidate=error instanceof FounderWhiteboardPublishError?error.original:error;
+  const staged=candidate instanceof WhiteboardPreflightStageError?candidate:null;
   return{status:'failed',stage:staged?.stage??'unknown',feishuCode:feishuCode(staged?.original??error)};
 }
 

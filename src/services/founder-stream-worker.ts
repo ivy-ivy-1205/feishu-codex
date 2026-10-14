@@ -28,7 +28,8 @@ import { isSelfMediaProposal, projectFounderWorkMap, type FounderWorkMapClassifi
 import { parseFeishuAttachment } from './feishu-attachment-parser.js';
 import { classifyFounderFailure, type FounderFailureStage } from './founder-analysis-failure.js';
 import { buildFounderManualQueryMessages, enqueueFounderManualQuery, isConfiguredFounder, parseFounderManualQuery } from './founder-manual-query.js';
-import { founderPalettes, type FounderWhiteboardArtifact } from './founder-whiteboard.js';
+import { FounderWhiteboardPublishError, founderPalettes, type FounderWhiteboardArtifact } from './founder-whiteboard.js';
+import type { FounderBoardView } from './founder-board-view.js';
 
 export interface FounderPerspectiveAnalysisPort {
   analyze(input: { sourceIds: readonly string[]; topicIds: readonly string[];
@@ -49,7 +50,7 @@ export interface FounderStreamOptions {
   policy?: Pick<AlignmentNotificationPolicy, 'reconcilePending'>;
   dailyReconciliation?:{bootstrapSince:string;run(input:{since:string;until:string;now:Date}):Promise<unknown>};
   whiteboardPublisher?:{publish(input:{title:string;chatId:string;cards:readonly Record<string,unknown>[];
-    previousPaletteId?:string|null}):Promise<FounderWhiteboardArtifact>};
+    previousPaletteId?:string|null;view?:FounderBoardView}):Promise<FounderWhiteboardArtifact>};
   delivery?: { sendTextMessage(input: { chatId: string; text: string; idempotencyKey?: string }): Promise<{ messageId: string }>;
     sendInteractiveCard(input: { chatId: string; card: Record<string, unknown>; idempotencyKey?: string }): Promise<{ messageId: string }> };
 }
@@ -441,21 +442,25 @@ async function deliverManualQueryMessages(options:FounderStreamOptions,now:()=>D
           const previous=options.client.prepare(`SELECT payload FROM outbox WHERE status='delivered' AND json_valid(payload)
             AND json_extract(payload,'$.boardArtifact.paletteId') IS NOT NULL ORDER BY delivered_at DESC LIMIT 1`).get() as {payload:string}|undefined;
           const previousPaletteId=previous?JSON.parse(previous.payload).boardArtifact?.paletteId:null;
+          const view=grouped.find(value=>value.boardView)?.boardView as FounderBoardView|undefined;
           artifact=await options.whiteboardPublisher.publish({title:manualQueryTitle(grouped[0]?.card),chatId:message.targetChatId,
-            cards:grouped.map(value=>value.card),previousPaletteId});artifacts.set(queryMessageId,artifact);
+            cards:grouped.map(value=>value.card),previousPaletteId,...(view?{view}:{})});artifacts.set(queryMessageId,artifact);
           const update=options.client.prepare("UPDATE outbox SET payload=? WHERE idempotency_key=? AND status='pending'");
           for(const candidate of rows){try{const value=JSON.parse(candidate.payload);const id=value.kind==='founder_manual_query'?
-            value.queryMessageId:value.manualQueryMessageId;if(id===queryMessageId){value.boardArtifact=artifact;value.card=withWhiteboardLink(value.card,artifact);
+            value.queryMessageId:value.manualQueryMessageId;if(id===queryMessageId){value.boardArtifact=artifact;value.card=withWhiteboardLink(value.card,artifact,value.page===1);
               update.run(JSON.stringify(value),candidate.idempotency_key)}}catch{/* An invalid unrelated row remains untouched. */}}
         }
-        message.boardArtifact=artifact;message.card=withWhiteboardLink(message.card,artifact);
-      }catch{
+        message.boardArtifact=artifact;message.card=withWhiteboardLink(message.card,artifact,message.page===1);
+      }catch(error){
         const failure={code:'FOUNDER_WHITEBOARD_PUBLISH_FAILED' as const,at:now().toISOString()};failures.set(queryMessageId,failure);
+        const previewImageKey=error instanceof FounderWhiteboardPublishError?error.previewImageKey.trim():'';
         const update=options.client.prepare("UPDATE outbox SET payload=? WHERE idempotency_key=? AND status='pending'");
         for(const candidate of rows){try{const value=JSON.parse(candidate.payload);const id=value.kind==='founder_manual_query'?
           value.queryMessageId:value.manualQueryMessageId;if(id===queryMessageId){value.boardFailure=failure;
-            value.card=withWhiteboardFailure(value.card);update.run(JSON.stringify(value),candidate.idempotency_key)}}catch{/* Invalid rows are untouched. */}}
-        message.boardFailure=failure;message.card=withWhiteboardFailure(message.card);
+            value.card=previewImageKey?withWhiteboardPreviewOnly(value.card,previewImageKey,value.page===1):withWhiteboardFailure(value.card);
+            update.run(JSON.stringify(value),candidate.idempotency_key)}}catch{/* Invalid rows are untouched. */}}
+        message.boardFailure=failure;message.card=previewImageKey?
+          withWhiteboardPreviewOnly(message.card,previewImageKey,message.page===1):withWhiteboardFailure(message.card);
       }
     }
     try{
@@ -472,17 +477,20 @@ function manualQueryTitle(card:Record<string,unknown>|undefined):string{
   const content=(card?.header as {title?:{content?:unknown}}|undefined)?.title?.content;
   return typeof content==='string'&&content.trim()?content.replace(/\s*·\s*\d+\/\d+\s*$/u,'').trim():'AiJia 工作看板';
 }
-function withWhiteboardLink(card:Record<string,unknown>,artifact:FounderWhiteboardArtifact):Record<string,unknown>{
+function withWhiteboardLink(card:Record<string,unknown>,artifact:FounderWhiteboardArtifact,showPreview:boolean):Record<string,unknown>{
   const elements=Array.isArray(card.elements)?[...card.elements]:[];
   const paletteName=founderPalettes.find(palette=>palette.id===artifact.paletteId)?.name??artifact.paletteId;
   const visible=elements.filter(element=>{
-    const candidate=element as {actions?:{url?:unknown}[];text?:{content?:unknown}};
+    const candidate=element as {actions?:{url?:unknown}[];text?:{content?:unknown};img_key?:unknown};
     return !candidate.actions?.some(action=>action.url===artifact.url)&&
+      candidate.img_key!==artifact.previewImageKey&&
       !(typeof candidate.text?.content==='string'&&candidate.text.content.startsWith('**可编辑看板已生成**'));
   });
+  const previewImageKey=typeof artifact.previewImageKey==='string'?artifact.previewImageKey.trim():'';
   return{...card,elements:[
+    ...(showPreview&&previewImageKey?[{tag:'img',img_key:previewImageKey,alt:{tag:'plain_text',content:'工作地图风格化总览'},mode:'fit_horizontal'}]:[]),
     {tag:'div',text:{tag:'lark_md',content:`**可编辑看板已生成**\n当前查询的完整内容已同步到飞书白板；配色：${paletteName}。`}},
-    {tag:'action',actions:[{tag:'button',type:'primary',text:{tag:'plain_text',content:'打开可编辑看板'},url:artifact.url}]},
+    {tag:'action',actions:[{tag:'button',type:'default',text:{tag:'plain_text',content:'打开可编辑白板'},url:artifact.url}]},
     ...visible
   ]};
 }
@@ -492,6 +500,14 @@ function withWhiteboardFailure(card:Record<string,unknown>):Record<string,unknow
     tag:'note',elements:[{tag:'plain_text',content:'看板生成失败，已返回完整文本；请稍后重新查询。'}]
   });
   return{...card,elements};
+}
+function withWhiteboardPreviewOnly(card:Record<string,unknown>,previewImageKey:string,showPreview:boolean):Record<string,unknown>{
+  const elements=Array.isArray(card.elements)?[...card.elements]:[];
+  return{...card,elements:[
+    ...(showPreview?[{tag:'img',img_key:previewImageKey,alt:{tag:'plain_text',content:'工作地图风格化总览'},mode:'fit_horizontal'}]:[]),
+    {tag:'note',elements:[{tag:'plain_text',content:'群内总览已生成；可编辑白板暂不可用。'}]},
+    ...elements
+  ]};
 }
 
 export function buildFounderStreamInput(sources: ContextSourceRepository, topics: TopicRepository, sourceIds: readonly string[], chatId: string): FounderStreamInput {

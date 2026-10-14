@@ -3,10 +3,14 @@ import { createFeishuWhiteboardGateway } from '../src/adapters/feishu-whiteboard
 
 describe('Feishu whiteboard adapter', () => {
   it('creates a docx board, batches native nodes, and grants the group edit access', async () => {
-    const calls: { documents: unknown[]; blocks: unknown[]; nodeBatches: unknown[]; grants: unknown[] } = {
-      documents: [], blocks: [], nodeBatches: [], grants: []
+    const calls: { images: unknown[]; documents: unknown[]; blocks: unknown[]; nodeBatches: unknown[]; grants: unknown[] } = {
+      images: [], documents: [], blocks: [], nodeBatches: [], grants: []
     };
     const sdk = {
+      im: { image: { async create(payload: unknown) {
+        calls.images.push(payload);
+        return { image_key: 'img_preview' };
+      } } },
       docx: { v1: {
         document: { async create(payload: unknown) {
           calls.documents.push(payload);
@@ -37,12 +41,15 @@ describe('Feishu whiteboard adapter', () => {
       text: { text: `Line ${index}` }
     }));
 
+    const imageBody=Buffer.from('preview');
+    expect(await gateway.uploadMessageImage({body:imageBody})).toEqual({imageKey:'img_preview'});
     expect(await gateway.createDocument({ title: '工作地图' })).toEqual({ documentId: 'doc_1' });
     expect(await gateway.createBoard({ documentId: 'doc_1', width: 1800, height: 1200 }))
       .toEqual({ whiteboardId: 'board_1' });
     await gateway.createNodes({ whiteboardId: 'board_1', nodes });
     await gateway.grantGroupEdit({ documentId: 'doc_1', chatId: 'oc_group' });
 
+    expect(calls.images).toEqual([{data:{image_type:'message',image:imageBody}}]);
     expect(calls.documents).toEqual([{ data: { title: '工作地图' } }]);
     expect(calls.blocks).toEqual([{ path: { document_id: 'doc_1', block_id: 'doc_1' },
       data: { children: [{ block_type: 43, board: { align: 1, width: 1800, height: 1200 } }] } }]);
@@ -56,7 +63,18 @@ describe('Feishu whiteboard adapter', () => {
   });
 
   it('fails closed when Feishu omits required identifiers or returns an error code', async () => {
+    const missingImage = createFeishuWhiteboardGateway({
+      im: { image: { async create() { return null; } } },
+      docx: { v1: { document: { async create() { return { code: 0, data: {} }; } },
+        documentBlockChildren: { async create() { return { code: 0, data: {} }; } } } },
+      board: { v1: { whiteboardNode: { async create() { return { code: 0 }; } } } },
+      drive: { v1: { permissionMember: { async create() { return { code: 0 }; } } } }
+    });
+    await expect(missingImage.uploadMessageImage({body:Buffer.from('preview')}))
+      .rejects.toThrow(/image key/i);
+
     const missingDocument = createFeishuWhiteboardGateway({
+      im: { image: { async create() { return { image_key: 'img' }; } } },
       docx: { v1: { document: { async create() { return { code: 0, data: {} }; } },
         documentBlockChildren: { async create() { return { code: 0, data: {} }; } } } },
       board: { v1: { whiteboardNode: { async create() { return { code: 0 }; } } } },
@@ -66,6 +84,7 @@ describe('Feishu whiteboard adapter', () => {
       .rejects.toThrow(/document id/i);
 
     const failedNodeCreate = createFeishuWhiteboardGateway({
+      im: { image: { async create() { return { image_key: 'img' }; } } },
       docx: { v1: { document: { async create() { return { code: 0, data: { document: { document_id: 'doc' } } }; } },
         documentBlockChildren: { async create() { return { code: 0, data: { children: [{ board: { token: 'board' } }] } }; } } } },
       board: { v1: { whiteboardNode: { async create() { return { code: 999, msg: 'denied' }; } } } },

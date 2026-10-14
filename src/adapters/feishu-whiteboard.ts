@@ -3,6 +3,7 @@ import type { FounderWhiteboardGateway, FounderWhiteboardNode } from '../service
 
 interface FeishuResponse<T = unknown> { code?:number;msg?:string;data?:T }
 export interface FeishuWhiteboardSdkLike {
+  im:{image:{create(input:{data:{image_type:'message';image:Buffer}}):Promise<{image_key?:string}|null>}};
   docx:{v1:{
     document:{create(input:{data:{title:string}}):Promise<FeishuResponse<{document?:{document_id?:string}}>>};
     documentBlockChildren:{create(input:{path:{document_id:string;block_id:string};data:{children:Array<{
@@ -20,6 +21,12 @@ const nodeBatchSize=50;
 
 export function createFeishuWhiteboardGateway(sdk:FeishuWhiteboardSdkLike):FounderWhiteboardGateway {
   return {
+    async uploadMessageImage(input){
+      const response=await sdk.im.image.create({data:{image_type:'message',image:input.body}});
+      const imageKey=response?.image_key?.trim();
+      if(!imageKey)throw new Error('Feishu whiteboard preview image key is missing');
+      return{imageKey};
+    },
     async createDocument(input){
       const response=await sdk.docx.v1.document.create({data:{title:input.title}});
       assertSuccess(response,'create document');

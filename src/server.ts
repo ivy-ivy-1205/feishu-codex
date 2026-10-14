@@ -135,7 +135,7 @@ const founderRuntime = createFounderStreamRuntime({
       jobRepository,dryRun:false,enqueueAnalysis:config.founderStream.analysisEnabled,syncPurpose:'daily_reconciliation'});
   }}}:{}),
   ...(founderWhiteboardGateway?{whiteboardPublisher:{async publish(input:{title:string;chatId:string;
-    cards:readonly Record<string,unknown>[];previousPaletteId?:string|null}){
+    cards:readonly Record<string,unknown>[];previousPaletteId?:string|null;view?:import('./services/founder-board-view.js').FounderBoardView}){
     const palette=selectFounderPalette(input.previousPaletteId);
     return publishFounderWhiteboard({...input,paletteId:palette.id},founderWhiteboardGateway);
   }}}:{}),

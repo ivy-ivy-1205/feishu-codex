@@ -8,6 +8,7 @@ import { TopicRepository } from '../repositories/topic-repository.js';
 import { canonicalJson, stableId } from './canonical-json.js';
 import type { FounderCardEvidence } from './founder-card.js';
 import { renderFounderWorkMap, type FounderWorkMapCard, type FounderWorkMapTopic } from './founder-work-map-renderer.js';
+import type { FounderWorkMapBoardView } from './founder-board-view.js';
 
 export interface CurrentFounderWorkMapInput {
   client: Database.Database;
@@ -22,6 +23,7 @@ export interface CurrentFounderWorkMapResult {
   mapId: string;
   canonicalTopicCount: number;
   cards: FounderWorkMapCard[];
+  boardView:FounderWorkMapBoardView;
 }
 
 export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):CurrentFounderWorkMapResult{
@@ -46,10 +48,14 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
       perspectives:alignment.listCanonicalPerspectives(topic.id).filter(perspective=>!isTopicLabelOnly(topic.displayName,perspective.statement))
         .map(perspective=>projectPerspective(topic,perspective))};
   });
-  const cards=renderFounderWorkMap({since:input.since,until:input.until,topics:projected,uncertainGrouping:[],coverageGaps:loadCoverageGaps(input.client,input.chatId,input.since,input.until)});
+  const coverageGaps=loadCoverageGaps(input.client,input.chatId,input.since,input.until);
+  const cards=renderFounderWorkMap({since:input.since,until:input.until,topics:projected,uncertainGrouping:[],coverageGaps});
+  const boardView:FounderWorkMapBoardView={kind:'work_map',since:input.since,until:input.until,coverageGaps,
+    topics:projected.map(topic=>({id:topic.id,name:topic.displayName,stage:topic.stage,kind:topic.displayKind??'project',
+      outcome:topic.outcome,parentName:topic.parentName,sourceCount:topic.linkedSourceCount??topic.evidence.length}))};
   const mapId=stableId('foundermap',canonicalJson({chatId:input.chatId,since:input.since,until:input.until,
     topics:canonical.map(topic=>({id:topic.id,version:topic.currentVersion})),pages:cards.length}));
-  return{mapId,canonicalTopicCount:canonical.length,cards};
+  return{mapId,canonicalTopicCount:canonical.length,cards,boardView};
 }
 
 function displayKindFor(topics:TopicRepository,topicId:string):'project'|'task'|'goal'{

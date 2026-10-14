@@ -5,6 +5,7 @@ import { TopicRepository } from '../repositories/topic-repository.js';
 import { buildCurrentFounderWorkMap } from './current-founder-work-map.js';
 import { founderCard, founderText } from './founder-card.js';
 import type { FounderWorkMapCard } from './founder-work-map-renderer.js';
+import type { FounderBoardView } from './founder-board-view.js';
 
 export type FounderManualQuery =
   | { kind:'work_map' }
@@ -17,7 +18,7 @@ export interface FounderManualCardQueryMessage {
   targetChatId:string; card:Record<string,unknown>;
 }
 export type FounderManualQueryMessage=FounderManualCardQueryMessage|(FounderWorkMapCard&{
-  mapId:string;targetChatId:string;manualQueryMessageId:string;
+  mapId:string;targetChatId:string;manualQueryMessageId:string;boardView:FounderBoardView;
 });
 
 const baselineSince='2026-08-31T00:00:00.000Z';
@@ -41,7 +42,7 @@ export function buildFounderManualQueryMessages(input:{client:Database.Database;
   const status=processingStatus(input.client,input.chatId);
   if(input.query.kind==='work_map'){
     const result=buildWorkMap(input);
-    if(result)return result.cards.map(item=>({...item,mapId:result.mapId,targetChatId:input.chatId,
+    if(result)return result.cards.map(item=>({...item,mapId:result.mapId,targetChatId:input.chatId,boardView:result.boardView,
       manualQueryMessageId:input.queryMessageId,card:withProcessingStatus(item.card,status)}));
   }
   const cards=input.query.kind==='project_progress'?[buildProjectProgress(input,input.query.topicName)]:
@@ -96,12 +97,12 @@ export function enqueueFounderManualQuery(client:Database.Database,messages:read
 }
 
 function buildWorkMap(input:{client:Database.Database;chatId:string;approvedChatIds:readonly string[];now:Date}):
-  {mapId:string;cards:FounderWorkMapCard[]}|null {
+  {mapId:string;cards:FounderWorkMapCard[];boardView:FounderBoardView}|null {
   const count=new TopicRepository(input.client).listCanonicalTopics().length;
   if(count===0)return null;
   const result=buildCurrentFounderWorkMap({client:input.client,chatId:input.chatId,approvedChatIds:input.approvedChatIds,
     expectedCanonicalTopicCount:count,since:baselineSince,until:input.now.toISOString()});
-  return{mapId:result.mapId,cards:result.cards};
+  return{mapId:result.mapId,cards:result.cards,boardView:result.boardView};
 }
 
 function buildTopicAlignment(input:{client:Database.Database;now:Date},name:string):Record<string,unknown>{

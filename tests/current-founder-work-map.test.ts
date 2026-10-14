@@ -41,6 +41,11 @@ describe('current founder work map publisher',()=>{
     expect(body).toContain('历史记录：1 条，可用“查看对齐：A 线”查看');
     expect(body).toContain('待对齐（Ivy，2026-09-20）');
     expect(body).toContain('↳ 子项目｜子项目');
+    expect(result.boardView).toMatchObject({kind:'work_map',since:'2026-08-31T00:00:00Z',until:'2026-09-24T00:00:00Z'});
+    expect(result.boardView.topics).toEqual(expect.arrayContaining([
+      expect.objectContaining({id:h.parent.id,name:'A 线',kind:'project'}),
+      expect.objectContaining({id:h.child.id,name:'子项目',parentName:'A 线',kind:'project'})
+    ]));
   });
 
   it('previews without writes and requires both the delivery gate and exact target before enqueue',()=>{
