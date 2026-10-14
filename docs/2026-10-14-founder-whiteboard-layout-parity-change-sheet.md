@@ -1,7 +1,7 @@
 # Founder 白板版式一致性修复变更单
 
 日期：2026-10-14
-状态：本地修复和回归已完成；生产部署、重启和群消息均未执行
+状态：本地修复和回归已完成；D1 运行门禁通过，但 D2 无业务数据探针证实缺少 `im:resource` 后停止；生产部署、重启和群消息均未执行
 
 ## 问题与根因
 
@@ -97,3 +97,12 @@
 ## 回滚
 
 生产阶段继续使用现有 SQLite 一致性快照、应用 checkpoint 和旧镜像标签。若新版布局发布失败，恢复旧镜像只影响白板外观生成；文字卡兜底仍保留完整查询结果。
+
+## 2026-10-14 D1–D2 执行记录
+
+- D1 运行门禁通过：生产仍运行 revision `c99c1325dc8edd64cfff07ff3b89c5cdcb7529ef`，`running/healthy`、restart count `0`、`/health` 与 `/ready` 均为 200；active jobs=`0`、pending outbox=`0`、SQLite `integrity_check=ok`、无外键异常。capture/analysis/manual-query/daily-reconciliation/whiteboard/worker 均为 `true`，group delivery=`false`；ChatGPT 登录有效且没有 OpenAI API Key fallback。
+- tracked-only 候选归档 SHA-256 为 `68f5896d95f18c65afe4998a932e99dbeee894a56c75d3de3c34bff9a233d8b3`。服务器隔离镜像 `aijia/feishu-codex-bridge:inline-e10cd6d` 的 OCI revision 为 `e10cd6d52504cdd4722f9b0ae4e23e3fe631a694`。
+- 候选镜像包含 Noto Sans/Serif CJK 字体文件。使用候选运行时和正式 `renderFounderWhiteboardPng` 生成的无业务数据 PNG 为 1160×552、SHA-256 `7971520aa78b0ffaff1ff1070858e31bc28c937c7f81bd0df64b6958835f3f6a`，人工目检中文字符完整、无方框。运行时仍打印 Fontconfig 默认配置缺失告警，但本次实际像素输出正常；后续可通过安装 `fontconfig` 消除告警，不作为本次权限阻断的根因。
+- 唯一一次获批的无业务数据探针在第一阶段 `upload_preview_image` 返回飞书码 `99991672`。由于失败发生在图片上传，未创建新的文档、白板或群消息；这直接证明生产应用尚未开通消息图片上传需要的 `im:resource`。
+- 按本单停止条件，D3 未执行：Bridge 未停止、未重启、未替换 app／镜像、未修改 env／SQLite，也未读取真实业务内容进行渲染。失败后复核仍为原 revision、healthy、restart count `0`、active jobs=`0`、pending outbox=`0`、数据库完整。
+- 下一步需单独批准：在 sharon 的生产 `Codex` 应用中只补齐并发布应用身份权限 `im:resource`，然后运行一次新的无业务数据探针。只有该探针完整通过图片上传、文档创建、白板节点和群编辑授权后，才恢复 D3；此前不邀请 Ivy 做 D4 群内测试。
