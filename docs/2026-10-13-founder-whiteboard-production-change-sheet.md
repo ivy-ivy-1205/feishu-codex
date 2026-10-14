@@ -134,3 +134,11 @@ Ivy 批准本变更单即授权 D1–D4 及成功后的上述临时资产清理�
 - 恰好一次获批的第二次探针返回 `{"status":"failed","stage":"create_document","feishuCode":99991672}`，退出码为 1。失败发生在第一个创建文档 API，因此本次没有创建飞书文档，后续三个阶段没有执行。
 - 本次未执行 D3/D4，没有回填、停服、重启、env／数据库修改、镜像切换或群消息。生产仍运行 `25b2269306e72e5cc212da3a5de22891d9027f7f`、healthy、restart=0、group delivery=false。
 - 下一步只允许按 2026-10-14 权限变更单核对并增加最小应用身份权限；该外部变更和新的探针需要独立批准。
+
+## 10. 2026-10-14 权限变更与第三次探针
+
+- 权限变更单 P1/P2 已完成：生产 `Codex` 应用只新增并自动发布 `docx:document:create`、`docx:document:write_only`、`board:whiteboard:node:create`、`docs:permission.member:create` 四项应用身份权限，均为免审且显示已开通。
+- P3 恰好运行一次无业务数据探针，返回 `{"status":"failed","stage":"create_nodes","feishuCode":2890002}`。这证明创建文档和插入空白画板已经成功；节点写入失败，群编辑授权未执行，群内未发送消息。
+- 探针 CLI 没有保留后续失败前取得的 document ID / whiteboard ID，因此无法定位本次孤立探针文档；没有重试或删除。
+- 飞书官方白板流程建议使用 `@larksuite/whiteboard-cli` 生成 OpenAPI 节点并明确不推荐手写 raw JSON；现有候选实现手写节点参数，离线对比已发现与官方生成格式的差异。下一步先在本地修正并重新完成隔离门禁，再申请一次新的探针。
+- D3/D4 继续未执行。停止后生产仍为 revision `25b2269`、running/healthy、restart=0，原 startedAt 未变；白板开关不存在、group delivery=false，health/ready=200；未回填、未改 env／数据库、未重启或发群消息。

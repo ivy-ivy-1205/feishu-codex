@@ -1,6 +1,6 @@
 # Founder 白板最小权限变更单
 
-状态：**待 Ivy 批准；尚未修改飞书开发者后台**。
+状态：**Ivy 已批准；2026-10-14 已执行 P1–P3，探针在 `create_nodes` 失败后按规则停止**。
 
 目标应用：生产 `AiJia Context` / `Codex` 企业自建应用，App ID `cli_aad1fef1c7b81bda`。操作账号为 `sharon`。
 
@@ -89,3 +89,44 @@ preflight-founder-whiteboard --chat-id <唯一批准群> --create
 批准本变更单即授权：在生产 App ID `cli_aad1fef1c7b81bda` 中增加上述 4 项里当前缺失的应用身份权限；在没有无关草稿且无需额外管理员审批的前提下发布；随后运行**恰好一次**无业务数据探针。
 
 不包含：Bridge 部署或重启、生产 env／SQLite 修改、历史回填、主动群消息、自动群投递、扩大群范围、删除探针文档、第二次探针或额外权限。
+
+## 7. 2026-10-14 执行记录
+
+### P1：后台核对通过
+
+- 账号与应用匹配：`sharon`、正式应用 `Codex`、App ID `cli_aad1fef1c7b81bda`。
+- 执行前上述 4 项权限均未开通；后台显示“当前修改均已发布”，没有与本单无关的待发布权限或版本草稿。
+
+### P2：最小权限已开通并发布
+
+- 仅新增 `docx:document:create`、`docx:document:write_only`、`board:whiteboard:node:create`、`docs:permission.member:create` 四项应用身份权限。
+- 后台逐项显示“免审权限”；确认后四项均显示“已开通”，应用页继续显示“当前修改均已发布”。没有加入额外 scope，也没有触发管理员审批或扩大可用范围。
+
+### P3：唯一一次探针已运行并停止
+
+探针精确返回：
+
+```json
+{"status":"failed","stage":"create_nodes","feishuCode":2890002}
+```
+
+该结果证明 `create_document` 与 `create_board` 已通过：本次创建了一份标题为“AiJia 机器人白板权限核验”的文档和其中的空白画板。失败发生在第一批原生节点写入，因此没有进入 `grant_group_edit`，唯一批准群没有获得该探针文档的编辑权限，机器人也没有向群内发送消息。
+
+诊断 CLI 在后续阶段失败时没有输出已取得的 document ID / whiteboard ID，所以当前无法定位该孤立探针文档的链接；不运行第二次探针来补取 ID，也不未经授权删除外部对象。
+
+飞书开发者后台在同一时间窗口只检索到 tenant access token 日志，尚未返回文档／画板／节点三次 API 明细。离线核对得到的最窄结论是：权限门已经越过，现有 Bridge 手写的 OpenAPI raw 节点参数不被服务端接受。飞书官方白板流程明确要求复杂画板先由 `@larksuite/whiteboard-cli` 生成 OpenAPI 节点，并提示不要直接创作 raw JSON；本机缓存的官方 CLI `0.2.11` 生成的文本节点不带现有实现使用的透明 `style.fill_color="#FFFFFF00"`，同时补齐颜色类型等规范字段。该差异是下一步的首要修复方向，但在新的真实探针通过前不把某个单独字段宣称为唯一根因。
+
+官方依据：
+
+- <https://github.com/larksuite/cli/blob/main/skills/lark-whiteboard/references/lark-whiteboard-update.md>
+- <https://github.com/larksuite/cli/blob/main/skills/lark-whiteboard/references/lark-whiteboard-workflow.md>
+
+### 停止后生产复核
+
+- 生产 Bridge 仍运行 revision `25b2269306e72e5cc212da3a5de22891d9027f7f`，状态 `running/healthy`，restart count 为 `0`，startedAt 仍为 `2026-09-26T10:52:57.884143047Z`。
+- 本机 `/health` 与 `/ready` 均返回 200；`FOUNDER_STREAM_WHITEBOARD_ENABLED` 仍不存在，`FOUNDER_STREAM_GROUP_DELIVERY_ENABLED=false`。
+- 未部署或重启 Bridge，未修改生产 env／SQLite，未回填语料，未发送群消息，也未运行第二次探针。
+
+### 下一步审批边界
+
+下一步需要独立批准：在本地把白板节点生成改为官方 CLI 可接受的 OpenAPI 结构，完成测试与隔离候选构建，然后只运行一次新的无业务数据探针。该步骤仍不包含 Bridge 部署／重启、生产配置或数据库修改、历史回填和群消息。
