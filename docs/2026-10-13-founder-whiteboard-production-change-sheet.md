@@ -1,8 +1,8 @@
 # Founder 三类查询原生飞书白板上线变更单
 
-状态：**旧候选在 D2 权限／schema 探针失败后停止；替代候选 `3b19b2d` 的隔离探针已通过，D3/D4 尚未执行，等待新的上线批准**。
+状态：**替代候选 `3b19b2d` 已完成 D3/D4 生产上线；等待 James 按 D5 在批准群执行真实查询验收**。
 
-2026-10-14 补充：带安全阶段诊断的第二次获批探针在 `create_document` 返回飞书码 `99991672`；D3/D4 继续暂停。后续权限变更见 [`2026-10-14-founder-whiteboard-permission-change-sheet.md`](./2026-10-14-founder-whiteboard-permission-change-sheet.md)。
+2026-10-14 历史补充：带安全阶段诊断的第二次获批探针曾在 `create_document` 返回飞书码 `99991672`，因此当时暂停 D3/D4；权限与 schema 修复过程见 [`2026-10-14-founder-whiteboard-permission-change-sheet.md`](./2026-10-14-founder-whiteboard-permission-change-sheet.md)，最终上线结果见第 12 节。
 
 目标提交：`d853f5c537cbb3b0d68b25bc51fe94eb2293e9f5`。
 
@@ -152,4 +152,16 @@ Ivy 批准本变更单即授权 D1–D4 及成功后的上述临时资产清理�
 - 服务器隔离候选 `aijia/feishu-codex-bridge:diagnostic-3b19b2d` 的 image ID 为 `sha256:e752cbf9ec652b9b92052df7e04140d2dc70ad0b87c326591b18a9fd0d325081`，OCI revision 与提交一致。
 - 唯一一次新探针完整通过，生成文档 <https://icnua99ny9c4.feishu.cn/docx/Q0bydHfIDom0zoxXBJKclBPWnKW>，whiteboard ID 为 `FCltwXNXZhSc0XbDJ5hcdgxPnCe`，palette ID 为 `grove`；节点创建与唯一批准群编辑授权均成功，没有发送群消息。
 - 探针后生产仍为旧 revision `25b2269`、running/healthy、restart 0、原 startedAt 不变；whiteboard flag 不存在、group delivery=false、health/ready=200。D3/D4 未执行。
-- 若 Ivy 再次批准上线，D3/D4 必须使用替代目标 `3b19b2d`，不得部署旧候选 `d853f5c` 或诊断提交 `bd5ebe4`；仍按原单执行覆盖落库、停止态备份、唯一一次服务切换和切换后短窗口回填。
+- 当时的上线门要求 D3/D4 必须使用替代目标 `3b19b2d`，不得部署旧候选 `d853f5c` 或诊断提交 `bd5ebe4`；第 12 节记录了该门实际执行的结果。
+
+## 12. 2026-10-14 D3/D4 生产执行记录
+
+- D3 切换前门通过：旧 Bridge 为 revision `25b2269306e72e5cc212da3a5de22891d9027f7f`、running/healthy、restart 0，`/health` 与 `/ready` 均为 200；SQLite `integrity_check=ok`、无外键异常、active jobs=0、pending outbox=0，Ivy/James 身份各 1 条。
+- 固定窗口 `2026-10-13T08:44:14.981Z` 至 `2026-10-13T12:54:22.000Z` 已持久化：根分页 1 页、`next_cursor_null`、0 消息、0 gap、0 新 source、0 新 job。
+- UTC `20261014T043113Z` 停止旧 Bridge 后创建回滚资产：SQLite `/opt/feishu-codex/backups/bridge-pre-whiteboard-20261014T043113Z.sqlite`（mode 600、`integrity_check=ok`、无外键异常）、env `/opt/feishu-codex/backups/bridge.env.pre-whiteboard-20261014T043113Z`（mode 600）、app checkpoint `/opt/feishu-codex/checkpoints/app-pre-whiteboard-20261014T043113Z`、镜像 `aijia/feishu-codex-bridge:rollback-pre-whiteboard-20261014T043113Z`。
+- 生产 env 只新增 `FOUNDER_STREAM_WHITEBOARD_ENABLED=true`；worker、capture、analysis、manual-query、daily-reconciliation 继续为 true，唯一批准群不变，group-delivery 继续为 false。
+- 第一次 D4 脚本在调用 Docker Compose 前因错误要求宿主源码目录包含 `dist/` 而 fail closed；现场确认旧容器仍停止、app/build/image 标签均未变化、Docker 无 create/start 事件。删除该错误断言后才执行实际切换，因此生产只有一次新容器启动。
+- 新 Bridge 于 `2026-10-14T04:32:52.000775152Z` 启动，冻结 `T1=2026-10-14T04:32:52.000Z`。运行 image ID 为 `sha256:e752cbf9ec652b9b92052df7e04140d2dc70ad0b87c326591b18a9fd0d325081`，OCI revision 精确为 `3b19b2de362c081f291bd573f647e01882e34fdd`；running/healthy、restart 0、health/ready 200，ChatGPT 登录有效，未设置 OpenAI/Codex API Key fallback。
+- 短窗口 `2026-10-13T12:54:22.000Z` 至 `T1` 已持久化：根分页 1 页、`next_cursor_null`、0 消息、0 gap、0 新业务 source、0 新 job。相对停服备份只新增 1 条 `feishu_sync_coverage`；group message 仍为 168、jobs 仍为 177、历史 failed 仍为 19、outbox 仍为 12 条 delivered，active jobs=0、pending outbox=0。
+- 没有主动调用三类群查询，也没有新增 outbox 或发送群消息。成功后已删除上传归档与诊断候选标签；隔离 build 目录已提升为生产 app，运行镜像、旧镜像回滚标签和三类停止态备份均保留。
+- D5 尚未执行：由 James 在唯一批准群先发送 `查看工作地图`，再按需测试项目进展和分歧视图。
