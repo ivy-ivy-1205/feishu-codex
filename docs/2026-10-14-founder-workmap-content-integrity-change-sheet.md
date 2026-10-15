@@ -1,7 +1,7 @@
 # Founder 工作地图内容治理与完整性修复变更单
 
 日期：2026-10-14
-状态：本地候选 `28e82e7` 与完整回归已通过，等待生产 P1–P3 授权
+状态：P1–P3 已完成；生产运行 revision `f6ea74c5153c20a1fd41eb7b4e20058ac8e63645`
 
 ## D4 现场结论
 
@@ -19,7 +19,7 @@
 ### L1｜内容归类
 
 - 白板只把 `closed` 放入历史区；`paused` 继续留在所属 A/B/C 主线并显示暂停状态。
-- 已启用“隐藏孤立 active”偏好时，同时隐藏未归入主线的 `active_project`、`project_candidate` 与 `exploring`；不删除 topic、来源、版本或关系。
+- 已启用“隐藏孤立 active”偏好时，同时隐藏未归入主线的 `active_project`、`project_candidate`、`exploring` 与 `idea`；不删除 topic、来源、版本或关系。已归入主线的 `idea` 继续显示。
 - `idea` 若已归入主线，继续以“观点”展示；不把它升级为独立项目。
 
 ### L2｜展示清洁
@@ -36,7 +36,7 @@
 
 ## 生产步骤（待一次性批准）
 
-本地门禁：`pnpm test` 99 个测试文件、839 项测试全部通过；`pnpm typecheck`、`pnpm build` 与 `git diff --check` 全部通过。
+最终本地门禁：`pnpm test` 99 个测试文件、840 项测试全部通过；`pnpm typecheck`、`pnpm build` 与 `git diff --check` 全部通过。
 
 ### P1｜只读现场核验
 
@@ -61,3 +61,13 @@
 - 不删除 topic、版本、来源、关系或失败任务；失败任务只在精确确认后从 `failed` 重排为 `queued`，原 stable key 保留。
 - 不读取非白名单群或私人聊天，不下载视频／普通音频，不开启 OpenAI API Key fallback。
 - 生产副本与派生 PNG 在验收后删除；正式关闭态备份、checkpoint 与 rollback image 保留。
+
+## 执行记录（2026-10-15）
+
+- P1 确认旧生产 revision `f04442e4702d4d65de7bf2212798aa5d50bac95f` 为 running/healthy、restart 0，health/ready 200，active jobs=0、pending outbox=0，SQLite `integrity_check=ok` 且无外键异常；既有 feature flags 不变，group delivery=false，无 API Key fallback。恢复 preview 为 20 个分析任务、34 个唯一未补偿来源、0 个采集任务，`recoveryId=founderjobrecovery_ef8a9881f5dd8d25afcafc4dd83b364f`。
+- 首轮隔离恢复暴露两个生产数据路径缺口：较新的 Founder 批量纠正会被更早的确认基线覆盖；未归入 A/B/C 的孤立 `idea` 仍形成第四栏。提交 `be5357d` 改为较新的 Founder 纠正优先于旧基线，提交 `f6ea74c` 在隐藏孤立条目时同时覆盖 `idea`，并新增回归测试。
+- P2 最终候选镜像 `aijia/feishu-codex-bridge:content-f6ea74c` 的 OCI revision 精确为 `f6ea74c5153c20a1fd41eb7b4e20058ac8e63645`。全新隔离副本的 20 个恢复任务全部完成，最终 preview 为 0；内容与图片门禁通过：`企业微信接入` 为 paused 且位于 C 线，无“待核对 / 其他项目”第四栏，名称已清洁，纠正显示为摘要且不重复原文，A/B/C 层级完整。
+- P3 于 `2026-10-15T05:33:06.183487493Z` 启动新 Bridge。正式 SQLite 备份为 `/opt/feishu-codex/backups/bridge-pre-content-integrity-20261015T053026Z.sqlite`，3305472 bytes，SHA-256 `515f10a0cc900482da2e7da317ad82b693211fd4c785430f1ccce94d39917550`；app checkpoint 为 `/opt/feishu-codex/checkpoints/app-pre-content-integrity-20261015T053026Z`；rollback image 为 `aijia/feishu-codex-bridge:rollback-pre-content-integrity-20261015T053026Z`。
+- 生产 20 个恢复任务全部完成；唯一保留的旧 failed 记录已被后续成功分析覆盖，恢复 preview 为 0。真实无业务数据 Codex 结构化探针返回 `{"ok":true}`。终态 revision 为 `f6ea74c5153c20a1fd41eb7b4e20058ac8e63645`，image `sha256:f1760204e0e99809435d73708b3738c2893e7dd6a6526e356a9db0609f40a40a`，running/healthy、restart 0、health/ready 200，active jobs=0、pending outbox=0，数据库完整且无外键异常，feature flags 不变、group delivery=false、API Key fallback=0。
+- 生产只读最终地图为 33 个 canonical topics、19 个可见条目、2 页文字卡；固定门禁配色 `court-press` 的 PNG 为 1160×2431、151590 bytes、SHA-256 `1999e058595e987263d9ae69dc76e97d0dfb95bf02378c5f67f6bc426c83e386`，98 个节点。全部结构断言通过，未发送群消息，现有群内图片 + 完整文字 + 次要编辑入口的交互形式未改变。
+- 两次切换在备份验证阶段因 WAL 模式备份缺少 sidecar、只读连接返回 `SQLITE_CANTOPEN` 而自动回滚；备份文件本身经可写连接验证均完整。最终改为停止态 SQLite Backup API 后以根用户可写连接只做 integrity/FK 验证，切换成功。失败尝试备份、隔离副本、候选上传物和候选标签已清理，仅保留正式回滚资产。
