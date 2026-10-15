@@ -284,6 +284,48 @@ describe('founder stream durable wiring', () => {
     expect(h.db.client.prepare('SELECT count(*) n FROM founder_feedback_corrections').get()).toEqual({n:1});
     await h.app.close();h.db.close();
   });
+  it('keeps a later approved batch correction authoritative over an older confirmed baseline',async()=>{
+    const h=harness();
+    const baselineSource=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_batch_baseline',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'企业微信接入继续探索',occurredAt:start.toISOString()},start).source).source;
+    const baselineEvidence=saveFounderEvidence(h.sources,baselineSource.id,baselineSource.contentText,start);
+    const topic=h.topics.createTopic({displayName:'企业微信接入',stage:'exploring',outcome:null,evidenceIds:[baselineEvidence],
+      rationale:'Ivy confirmed Founder work map V2 baseline',createdAt:start});
+    const correctedAt=new Date(start.getTime()+1000);
+    const correctionSource=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_batch_correction',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'企业微信接入暂且不再投入精力，标注为暂停',occurredAt:correctedAt.toISOString()},correctedAt).source).source;
+    const correctionEvidence=saveFounderEvidence(h.sources,correctionSource.id,correctionSource.contentText,correctedAt);
+    h.topics.appendVersion({topicId:topic.id,expectedVersion:1,displayName:topic.displayName,stage:'paused',outcome:null,
+      rationale:'群内批量人工纠正',evidenceIds:[baselineEvidence,correctionEvidence],changedAt:correctedAt});
+    const operations=[
+      {kind:'update_topic',topic:{id:topic.id,expectedVersion:1},stage:'paused'},
+      {kind:'set_work_map_preference',hideOrphanActive:true}
+    ];
+    h.db.client.prepare(`INSERT INTO founder_feedback_corrections
+      (id,chat_id,source_message_id,author_open_id,binding_message_id,evidence_id,input_hash,correction_json,result_json,created_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`).run('feedback_batch_authority',chat,'om_batch_correction','ou_ivy','om_map',correctionEvidence,'hash',
+        JSON.stringify({kind:'batch_correction',draftId:'feedbackdraft_batch_authority',operations}),
+        JSON.stringify({kind:'corrected',correctionKind:'batch_correction',status:'applied'}),correctedAt.toISOString());
+    const laterAt=new Date(start.getTime()+2000);
+    const later=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_batch_later',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'企业微信接入继续推进',occurredAt:laterAt.toISOString()},laterAt).source).source;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',
+      now:()=>new Date(start.getTime()+600_000),analyzer:{async analyze(){return{topics:[{displayName:'企业微信接入',stage:'active_project',
+        outcome:'继续推进',currentAction:'继续推进',confidence:'high',sourceIds:[later.id],
+        evidenceExcerpts:[{sourceId:later.id,excerpt:later.contentText}],
+        joinDecision:{kind:'exact_continuation',topicId:topic.id,confidence:'high',sharedTerms:['企业微信接入']},splitSuggestions:[]}]}}}});
+    const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:laterAt.toISOString(),until:laterAt.toISOString(),sourceIds:[later.id],capturedAt:laterAt});
+    await runtime.runOnce();
+    const queuedRow=h.db.client.prepare('SELECT status,payload FROM batch_jobs WHERE stable_key=?').get(queued.key);
+    expect(queuedRow)
+      .toMatchObject({status:'completed'});
+    const current=h.topics.listCurrentTopics().find(item=>item.id===topic.id)!;
+    expect(current).toMatchObject({displayName:'企业微信接入',stage:'paused',outcome:null});
+    expect(current.currentVersion).toBe(3);
+    expect(JSON.parse(current.rationale).humanAuthority.correctionId).toBe('feedback_batch_authority');
+    await h.app.close();h.db.close();
+  });
   it('recovers a completed capture-only interval once after enabling analysis and restarting', async () => {
     const h=harness({captureEnabled:true,analysisEnabled:false,groupDeliveryEnabled:false});
     for(let i=0;i<25;i++){await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload:event(`om_recover_${i}`)});await h.runtime.runOnce();}

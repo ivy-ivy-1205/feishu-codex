@@ -577,8 +577,10 @@ function topicAuthority(client: Database.Database, topics: TopicRepository, topi
   const baseline=[...versions].reverse().find(version=>/^Ivy confirmed Founder work map(?: V\d+)? baseline$/u.test(version.rationale)||[
     'Ivy confirmed Founder work map task','Ivy confirmed Founder work map goal'
   ].includes(version.rationale));
-  if(baseline)return{snapshot:baseline,correctionId:null,evidenceId:null,occurredAt:baseline.changedAt};
   for(const row of rows) {
+    // A later explicit Founder correction supersedes the initial confirmed
+    // baseline. Older corrections must not roll a newer baseline backwards.
+    if(baseline&&row.occurred_at<baseline.changedAt)continue;
     const rawCorrection=JSON.parse(row.correction_json) as unknown;
     const batch=rawCorrection&&typeof rawCorrection==='object'&&'kind'in rawCorrection&&rawCorrection.kind==='batch_correction'&&
       'operations'in rawCorrection?founderBatchOperationsSchema.safeParse(rawCorrection.operations):null;
@@ -600,6 +602,7 @@ function topicAuthority(client: Database.Database, topics: TopicRepository, topi
     const snapshot=versions.find(v=>v.evidenceIds.includes(row.evidence_id));
     if(snapshot)return {snapshot,correctionId:row.id,evidenceId:row.evidence_id,occurredAt:row.occurred_at};
   }
+  if(baseline)return{snapshot:baseline,correctionId:null,evidenceId:null,occurredAt:baseline.changedAt};
   // Legacy paused/closed rows also require explicit human reactivation.
   return ['paused','closed'].includes(topic.stage) ? {snapshot:topic,correctionId:null,evidenceId:null,occurredAt:topic.updatedAt} : null;
 }
