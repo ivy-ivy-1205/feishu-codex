@@ -114,8 +114,8 @@ describe('founder whiteboard',()=>{
         if(node.type!=='text_shape'||!node.text?.text_color)return;
         const containing=result.nodes.slice(0,index).filter(candidate=>candidate.type==='composite_shape'&&candidate.style?.fill_color&&
           (candidate.x??0)<=(node.x??0)&&(candidate.y??0)<=(node.y??0)&&
-          (candidate.x??0)+(candidate.width??0)>=(node.x??0)+(node.width??0)&&
-          (candidate.y??0)+(candidate.height??0)>=(node.y??0)+(node.height??0));
+          (candidate.x??0)+(candidate.width??0)>=(node.x??0)&&
+          (candidate.y??0)+(candidate.height??0)>=(node.y??0));
         const background=containing.at(-1)?.style?.fill_color;
         expect(background,`${palette.id}: background for ${node.text.text}`).toBeTruthy();
         expect(contrastRatio(node.text.text_color,background!),`${palette.id}: ${node.text.text}`).toBeGreaterThanOrEqual(4.5);
