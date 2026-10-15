@@ -1,7 +1,7 @@
 # Founder 工作地图可读性与重复主题修复变更单
 
 日期：2026-10-15  
-状态：待 Ivy 批准；尚未修改业务代码、访问生产或发送群消息
+状态：P1–P3 已完成；等待 Ivy 唯一一次群内验收
 
 ## 本次唯一群测结论
 
@@ -78,3 +78,12 @@
 
 - 生产切换前保留带时间戳的数据库备份、应用 checkpoint 与旧镜像标签，并记录 SHA-256、权限和 revision。
 - 本次同名治理默认只改匹配与展示投影，不删除底层主题或证据；因此回滚代码即可恢复旧投影，数据无需破坏性逆向迁移。
+
+## 执行结果
+
+- P1 确认旧生产为 revision `f6ea74c5153c20a1fd41eb7b4e20058ac8e63645`，running/healthy、restart 0、health/ready 200、active jobs=0、pending outbox=0、数据库完整且无外键异常。两个同名条目均为 closed：旧 Founder baseline 隶属 B 线，新条目是带前导竖线且缺少右书名号的孤立分析结果；新条目的 rationale 已携带 canonical name，却因旧逻辑排除 closed topic 而重复建档。
+- 本地修复提交为 `66cc65b`，门禁几何校正提交为 `558c39a`。最终 99 个测试文件、846 项测试，以及 `pnpm typecheck`、`pnpm build`、`git diff --check` 全部通过。工作地图只使用 5 套确认配色；项目详情、共识和分歧仍保留 25 套池。唯一且阶段兼容的规范名称会续写原主题，多命中时不再新建第三条；展示投影折叠兼容历史重复，父级或阶段冲突时标记“同名待确认”。
+- P2 候选 image 为 `sha256:83d2746344c2f1408d0d06e89ea957f7f8d7c6f3dc513da4d7a2d91398765626`，OCI revision 精确为 `558c39a0c5678c6d8bc17237f2b301e41527112f`。生产一致性副本 SHA-256 为 `26dcd12f783915ca70448138893159bbe35d0b48da03e4de824a56477428fffe`；地图保持 A/B/C，33 个 canonical topic 投影为 18 个可见条目、2 页完整文字，`EP00《挺好》` 只出现一次。五套真实 PNG 均为 1160×2313、约 146–149KB，最低对比度 `4.762:1`；25 套无业务 fixture、四种卡片类型、900 个节点最低为 `4.758:1`。四个无业务中文字符渲染出四组不同字形，排除方框 fallback。
+- 首次 P3 候选已经 healthy、ready 且 `codex login status` 实际返回 `Logged in using ChatGPT`，但该 CLI 把状态写到 stderr，部署脚本只检查 stdout，因此安全触发自动回滚。旧 revision、数据库、队列与登录随后全部核验正常。修正门禁为合并 stdout/stderr 后重试，同一候选成功切换。
+- 当前生产运行 revision `558c39a0c5678c6d8bc17237f2b301e41527112f` / image `sha256:83d2746344c2f1408d0d06e89ea957f7f8d7c6f3dc513da4d7a2d91398765626`，startedAt `2026-10-15T09:02:19.045469977Z`，running/healthy、restart 0、health/ready 200、ChatGPT 登录有效、API Key fallback=0。capture/analysis/daily/manual/whiteboard/worker 仍为 true，group delivery=false，active jobs=0、pending outbox=0，数据库完整且无外键异常。部署后真实副本与 P2 的结构、PNG 哈希和对比度完全一致；未发送群消息。
+- 正式回滚资产为 `/opt/feishu-codex/backups/bridge-pre-workmap-readability-20261015T090111Z.sqlite`（SHA-256 `26dcd12f783915ca70448138893159bbe35d0b48da03e4de824a56477428fffe`）、`/opt/feishu-codex/checkpoints/app-pre-workmap-readability-20261015T090111Z` 和 `aijia/feishu-codex-bridge:rollback-pre-workmap-readability-20261015T090111Z`。隔离数据库、派生 PNG、构建目录与候选标签已清理。
