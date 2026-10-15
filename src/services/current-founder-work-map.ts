@@ -47,7 +47,7 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
     {hide_orphan_active:number}|undefined;
   const parentsWithChildren=new Set(parentByChild.values());
   const visibleCanonical=canonical.filter(topic=>!hiddenRoots.has(topic.id)&&!(preference?.hide_orphan_active===1&&
-    ['active_project','project_candidate','exploring'].includes(topic.stage)&&!parentByChild.has(topic.id)&&!parentsWithChildren.has(topic.id)));
+    ['active_project','project_candidate','exploring','idea'].includes(topic.stage)&&!parentByChild.has(topic.id)&&!parentsWithChildren.has(topic.id)));
   const projected:FounderWorkMapTopic[]=visibleCanonical.map(topic=>{
     const componentIds=[...rootByTopic].filter(([,root])=>root===topic.id).map(([id])=>id);
     const evidence=loadEvidence(input.client,componentIds,correctionMessageIds);

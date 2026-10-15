@@ -82,23 +82,28 @@ describe('current founder work map publisher',()=>{
     expect(body).not.toContain('历史提议（James，2026-09-13）：项目暂定名称：合伙人对齐室');
     expect(body).not.toContain('待对齐（James，2026-09-13）：项目暂定名称：合伙人对齐室');
   });
-  it('keeps canonical integrity counts while hiding Space-managed and orphan active topics from the daily map',()=>{
+  it('keeps canonical integrity counts while hiding Space-managed and orphan project or idea topics from the daily map',()=>{
     const h=fixture();
     const orphan=h.topics.createTopic({displayName:'未归类讨论',stage:'active_project',createdAt:new Date('2026-09-12T00:00:00Z')});
     const candidate=h.topics.createTopic({displayName:'零散候选项目',stage:'project_candidate',createdAt:new Date('2026-09-13T00:00:00Z')});
     const exploring=h.topics.createTopic({displayName:'零散探索话题',stage:'exploring',createdAt:new Date('2026-09-14T00:00:00Z')});
+    const orphanIdea=h.topics.createTopic({displayName:'零散观点',stage:'idea',createdAt:new Date('2026-09-15T00:00:00Z')});
+    const linkedIdea=h.topics.createTopic({displayName:'主线观点',stage:'idea',createdAt:new Date('2026-09-16T00:00:00Z')});
+    h.topics.addRelation({fromTopicId:linkedIdea.id,toTopicId:h.parent.id,relationType:'part_of',rationale:'属于主线的观点',
+      createdAt:new Date('2026-09-16T00:01:00Z')});
     h.db.client.prepare(`INSERT INTO founder_topic_visibility(topic_id,visibility,source_message_id,updated_at)
       VALUES(?,'space_managed','om_correction','2026-09-21T00:00:00Z')`).run(h.child.id);
     h.db.client.prepare(`INSERT INTO founder_work_map_preferences(chat_id,hide_orphan_active,source_message_id,updated_at)
       VALUES(?,1,'om_correction','2026-09-21T00:00:00Z')`).run(chatId);
     const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-09-24T00:00:00Z',
-      approvedChatIds:[chatId],expectedCanonicalTopicCount:5});
-    expect(result.canonicalTopicCount).toBe(5);
+      approvedChatIds:[chatId],expectedCanonicalTopicCount:7});
+    expect(result.canonicalTopicCount).toBe(7);
     expect(JSON.stringify(result.cards)).not.toContain('子项目');
     expect(JSON.stringify(result.cards)).not.toContain('未归类讨论');
-    expect(result.boardView.topics.map((topic)=>topic.id)).toEqual([h.parent.id]);
+    expect(result.boardView.topics.map((topic)=>topic.id)).toEqual([h.parent.id,linkedIdea.id]);
     expect(result.boardView.topics).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({id:orphan.id}),expect.objectContaining({id:candidate.id}),expect.objectContaining({id:exploring.id})
+      expect.objectContaining({id:orphan.id}),expect.objectContaining({id:candidate.id}),expect.objectContaining({id:exploring.id}),
+      expect.objectContaining({id:orphanIdea.id})
     ]));
   });
 
