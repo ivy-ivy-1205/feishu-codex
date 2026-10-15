@@ -48,7 +48,7 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
   const parentsWithChildren=new Set(parentByChild.values());
   const visibleCanonical=canonical.filter(topic=>!hiddenRoots.has(topic.id)&&!(preference?.hide_orphan_active===1&&
     ['active_project','project_candidate','exploring','idea'].includes(topic.stage)&&!parentByChild.has(topic.id)&&!parentsWithChildren.has(topic.id)));
-  const projected:FounderWorkMapTopic[]=visibleCanonical.map(topic=>{
+  const projectedRaw:FounderWorkMapTopic[]=visibleCanonical.map(topic=>{
     const componentIds=[...rootByTopic].filter(([,root])=>root===topic.id).map(([id])=>id);
     const evidence=loadEvidence(input.client,componentIds,correctionMessageIds);
     const parentId=parentByChild.get(topic.id);
@@ -59,6 +59,7 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
       perspectives:alignment.listCanonicalPerspectives(topic.id).filter(perspective=>!isTopicLabelOnly(displayName,perspective.statement))
         .map(perspective=>projectPerspective(topic,perspective))};
   });
+  const projected=coalesceDisplayDuplicates(projectedRaw);
   const coverageGaps=loadCoverageGaps(input.client,input.chatId,input.since,input.until);
   const cards=renderFounderWorkMap({since:input.since,until:input.until,topics:projected,uncertainGrouping:[],coverageGaps});
   const boardView:FounderWorkMapBoardView={kind:'work_map',since:input.since,until:input.until,coverageGaps,
@@ -143,6 +144,28 @@ function loadEvidence(client:Database.Database,topicIds:readonly string[],correc
 
 function cleanDisplayName(value:string):string{
   return value.normalize('NFKC').replace(/^[\s,，:：;；|｜·.。]+/u,'').trim();
+}
+
+function coalesceDisplayDuplicates(topics:readonly FounderWorkMapTopic[]):FounderWorkMapTopic[]{
+  const byName=new Map<string,FounderWorkMapTopic[]>();
+  for(const topic of topics){const key=normalizeDisplayName(topic.displayName),group=byName.get(key)??[];group.push(topic);byName.set(key,group)}
+  return topics.flatMap(topic=>{
+    const key=normalizeDisplayName(topic.displayName),group=byName.get(key)!;
+    if(group[0]!==topic)return[];
+    if(group.length===1)return[topic];
+    const stages=new Set(group.map(item=>item.stage)),parents=new Set(group.flatMap(item=>item.parentName?[item.parentName]:[]));
+    if(stages.size!==1||parents.size>1)return group.map(item=>({...item,displayName:`${cleanDisplayName(item.displayName)}（同名待确认）`}));
+    const evidence=[...new Map(group.flatMap(item=>item.evidence).map(item=>[item.id,item])).values()];
+    const perspectives=[...new Map(group.flatMap(item=>item.perspectives??[])
+      .map(item=>[JSON.stringify([item.founder,item.status,item.statement,item.observedAt]),item])).values()];
+    return[{...topic,displayName:cleanDisplayName(topic.displayName),parentName:group.find(item=>item.parentName)?.parentName,
+      outcome:topic.outcome??group.find(item=>item.outcome)?.outcome??null,evidence,perspectives,
+      linkedSourceCount:group.reduce((sum,item)=>sum+(item.linkedSourceCount??item.evidence.length),0)}];
+  });
+}
+
+function normalizeDisplayName(value:string):string{
+  return cleanDisplayName(value).toLocaleLowerCase('und').replace(/[\p{P}\p{S}\s]+/gu,'');
 }
 
 function loadCoverageGaps(client:Database.Database,chatId:string,since:string,until:string):{id:string;summary:string}[]{

@@ -326,6 +326,45 @@ describe('founder stream durable wiring', () => {
     expect(JSON.parse(current.rationale).humanAuthority.correctionId).toBe('feedback_batch_authority');
     await h.app.close();h.db.close();
   });
+  it('joins a classified closed canonical name instead of creating a punctuated duplicate',async()=>{
+    const h=harness();
+    const baseline=h.topics.createTopic({displayName:'EP00《挺好》',stage:'closed',outcome:'已经发布',
+      rationale:'Ivy confirmed Founder work map baseline',createdAt:start});
+    const laterAt=new Date(start.getTime()+1000);
+    const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_ep00_duplicate',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'｜EP00《挺好》已经结束',occurredAt:laterAt.toISOString()},laterAt).source).source;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>new Date(start.getTime()+600_000),
+      analyzer:{async analyze(){return{topics:[{displayName:'｜EP00《挺好',stage:'closed',outcome:'已经结束',currentAction:null,confidence:'high',
+        sourceIds:[source.id],evidenceExcerpts:[{sourceId:source.id,excerpt:source.contentText}],
+        joinDecision:{kind:'new',topicId:null,confidence:'high',sharedTerms:[]},splitSuggestions:[]}]}}},
+      classifier:{async classify(){return{items:[{proposalIndex:0,kind:'project',lifecycle:'completed',parentProposalIndex:null}]}}}});
+    const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:laterAt.toISOString(),until:laterAt.toISOString(),sourceIds:[source.id],capturedAt:laterAt});
+    await runtime.runOnce();
+    expect(h.db.client.prepare('SELECT status FROM batch_jobs WHERE stable_key=?').get(queued.key)).toEqual({status:'completed'});
+    expect(h.topics.listCurrentTopics()).toHaveLength(1);
+    expect(h.topics.listCurrentTopics()[0]).toMatchObject({id:baseline.id,displayName:'EP00《挺好》',stage:'closed',currentVersion:2});
+    await h.app.close();h.db.close();
+  });
+  it('does not create a third topic when a normalized closed name is already ambiguous',async()=>{
+    const h=harness();
+    h.topics.createTopic({displayName:'EP00《挺好》',stage:'closed',createdAt:start});
+    h.topics.createTopic({displayName:'｜EP00《挺好',stage:'closed',createdAt:new Date(start.getTime()+1)});
+    const laterAt=new Date(start.getTime()+1000);
+    const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_ep00_ambiguous',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'EP00《挺好》已经结束',occurredAt:laterAt.toISOString()},laterAt).source).source;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>new Date(start.getTime()+600_000),
+      analyzer:{async analyze(){return{topics:[{displayName:'EP00《挺好》',stage:'closed',outcome:'已经结束',currentAction:null,confidence:'high',
+        sourceIds:[source.id],evidenceExcerpts:[{sourceId:source.id,excerpt:source.contentText}],
+        joinDecision:{kind:'new',topicId:null,confidence:'high',sharedTerms:[]},splitSuggestions:[]}]}}},
+      classifier:{async classify(){return{items:[{proposalIndex:0,kind:'project',lifecycle:'completed',parentProposalIndex:null}]}}}});
+    const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:laterAt.toISOString(),until:laterAt.toISOString(),sourceIds:[source.id],capturedAt:laterAt});
+    await runtime.runOnce();
+    expect(h.db.client.prepare('SELECT status FROM batch_jobs WHERE stable_key=?').get(queued.key)).toEqual({status:'completed'});
+    expect(h.topics.listCurrentTopics()).toHaveLength(2);
+    await h.app.close();h.db.close();
+  });
   it('recovers a completed capture-only interval once after enabling analysis and restarting', async () => {
     const h=harness({captureEnabled:true,analysisEnabled:false,groupDeliveryEnabled:false});
     for(let i=0;i<25;i++){await h.app.inject({method:'POST',url:'/webhooks/feishu/events',payload:event(`om_recover_${i}`)});await h.runtime.runOnce();}

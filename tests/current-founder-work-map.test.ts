@@ -124,4 +124,31 @@ describe('current founder work map publisher',()=>{
     expect(body).toContain('来源：Ivy 工作地图纠正 · 2026-09-22T00:00:00.000Z');
     expect(body).not.toContain('这是一段不应在每个项目下重复的批量纠正原文');
   });
+
+  it('shows one card for compatible canonical topics with the same cleaned name without deleting either topic',()=>{
+    const h=fixture();
+    const line=h.topics.createTopic({displayName:'自媒体生产线',stage:'active_project',createdAt:new Date('2026-09-12T00:00:00Z')});
+    const baseline=h.topics.createTopic({displayName:'EP00《挺好》',stage:'closed',outcome:'已经发布',
+      rationale:'Ivy confirmed Founder work map baseline',createdAt:new Date('2026-09-13T00:00:00Z')});
+    h.topics.addRelation({fromTopicId:baseline.id,toTopicId:line.id,relationType:'part_of',rationale:'confirmed',createdAt:new Date('2026-09-13T00:01:00Z')});
+    const duplicate=h.topics.createTopic({displayName:'｜EP00《挺好',stage:'closed',outcome:'已结束',
+      rationale:'founder stream analysis',createdAt:new Date('2026-10-15T00:00:00Z')});
+    const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-10-15T01:00:00Z',
+      approvedChatIds:[chatId],expectedCanonicalTopicCount:5});
+    expect(result.canonicalTopicCount).toBe(5);
+    expect(result.boardView.topics.filter(topic=>topic.name==='EP00《挺好》')).toEqual([
+      expect.objectContaining({id:baseline.id,parentName:'自媒体生产线',stage:'closed'})
+    ]);
+    expect(result.boardView.topics.some(topic=>topic.id===duplicate.id)).toBe(false);
+  });
+
+  it('keeps conflicting same-name topics separate and labels them for confirmation',()=>{
+    const h=fixture();
+    h.topics.createTopic({displayName:'同名方向',stage:'active_project',outcome:'继续推进',createdAt:new Date('2026-09-12T00:00:00Z')});
+    h.topics.createTopic({displayName:'｜同名方向',stage:'closed',outcome:'已经结束',createdAt:new Date('2026-09-13T00:00:00Z')});
+    const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-10-15T01:00:00Z',
+      approvedChatIds:[chatId],expectedCanonicalTopicCount:4});
+    const names=result.boardView.topics.filter(topic=>topic.name.includes('同名方向')).map(topic=>topic.name);
+    expect(names).toEqual(['同名方向（同名待确认）','同名方向（同名待确认）']);
+  });
 });

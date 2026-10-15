@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
-import { buildFounderWhiteboard, FounderWhiteboardPublishError, publishFounderWhiteboard, renderFounderWhiteboardPng, selectFounderPalette } from '../src/services/founder-whiteboard.js';
+import { buildFounderWhiteboard, founderPalettes, FounderWhiteboardPublishError, publishFounderWhiteboard, renderFounderWhiteboardPng, selectFounderPalette } from '../src/services/founder-whiteboard.js';
 
 describe('founder whiteboard',()=>{
   it('keeps every card line as native text and uses no image nodes',()=>{
@@ -91,6 +91,38 @@ describe('founder whiteboard',()=>{
     expect(selectFounderPalette('coral',()=>0).id).not.toBe('coral');
   });
 
+  it('uses only the five approved palettes for work maps while detail views retain all favorites',()=>{
+    const approved=new Set(['grove','salmon-stamp','editorial-forest','riso-brut','court-press']);
+    const samples=[0,0.12,0.28,0.44,0.56,0.72,0.88,0.999];
+    expect(samples.map(random=>selectFounderPalette(null,()=>random,'work_map').id).every(id=>approved.has(id))).toBe(true);
+    expect(selectFounderPalette(null,()=>0.52,'project_detail').id).toBe('riptide-cobalt');
+  });
+
+  it('keeps every text node readable against its actual fill in all 25 palettes',()=>{
+    for(const palette of founderPalettes){
+      const result=buildFounderWhiteboard({title:'工作地图',paletteId:palette.id,cards:[],view:{
+        kind:'work_map',since:'2026-08-31T00:00:00.000Z',until:'2026-10-15T00:00:00.000Z',coverageGaps:[{id:'gap',summary:'不可读取 1 条'}],topics:[
+          {id:'a',name:'AiJia AI Native 房产业务',stage:'active_project',kind:'project',outcome:'主线'},
+          {id:'project',name:'Smart Listing',stage:'active_project',kind:'project',outcome:'项目卡',parentName:'AiJia AI Native 房产业务'},
+          {id:'site',name:'AiJia AI Native 官网',stage:'active_project',kind:'project',outcome:'官网',parentName:'AiJia AI Native 房产业务'},
+          {id:'task',name:'团队更新',stage:'active_project',kind:'task',outcome:'任务卡',parentName:'AiJia AI Native 房产业务'},
+          {id:'goal',name:'阶段一',stage:'active_project',kind:'goal',outcome:'目标卡',parentName:'AiJia AI Native 房产业务'},
+          {id:'idea',name:'讨论观点',stage:'idea',kind:'idea',outcome:'观点卡',parentName:'AiJia AI Native 房产业务'}
+        ]
+      }});
+      result.nodes.forEach((node,index)=>{
+        if(node.type!=='text_shape'||!node.text?.text_color)return;
+        const containing=result.nodes.slice(0,index).filter(candidate=>candidate.type==='composite_shape'&&candidate.style?.fill_color&&
+          (candidate.x??0)<=(node.x??0)&&(candidate.y??0)<=(node.y??0)&&
+          (candidate.x??0)+(candidate.width??0)>=(node.x??0)+(node.width??0)&&
+          (candidate.y??0)+(candidate.height??0)>=(node.y??0)+(node.height??0));
+        const background=containing.at(-1)?.style?.fill_color;
+        expect(background,`${palette.id}: background for ${node.text.text}`).toBeTruthy();
+        expect(contrastRatio(node.text.text_color,background!),`${palette.id}: ${node.text.text}`).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  });
+
   it('creates one editable board document and grants the invoking group edit access',async()=>{
     const state:{documentId?:string;boardId?:string;nodes?:unknown[];group?:string;imageBytes?:number}={};
     const artifact=await publishFounderWhiteboard({title:'项目进展 · Smart Listing',paletteId:'coral',chatId:'oc_group',cards:[{
@@ -123,3 +155,11 @@ describe('founder whiteboard',()=>{
     expect((failure as FounderWhiteboardPublishError).previewImageKey).toBe('img_preview');
   });
 });
+
+function contrastRatio(left:string,right:string):number{
+  const luminance=(hex:string)=>{const channels=hex.replace('#','').match(/.{2}/g)!.map(value=>parseInt(value,16)/255)
+    .map(value=>value<=0.04045?value/12.92:Math.pow((value+0.055)/1.055,2.4));
+    return channels[0]!*0.2126+channels[1]!*0.7152+channels[2]!*0.0722};
+  const values=[luminance(left),luminance(right)].sort((a,b)=>b-a);
+  return(values[0]!+0.05)/(values[1]!+0.05);
+}

@@ -31,6 +31,7 @@ export interface FounderWhiteboardGateway {
   grantGroupEdit(input:{documentId:string;chatId:string}):Promise<void>;
 }
 export interface BuiltFounderWhiteboard {palette:FounderPalette;width:number;height:number;nodes:FounderWhiteboardNode[]}
+export type FounderPalettePool='work_map'|'project_detail';
 
 const paletteRows:[string,string,string[]][]=[
   ['grove','Grove',['#E8E4D6','#192B1B','#C8524A']],['jade-lens','Jade Lens',['#F5F1EE','#2BA483','#1E2421']],
@@ -54,8 +55,11 @@ export const founderPalettes:FounderPalette[]=paletteRows.map(([id,name,colors])
   return{id,name,paper,accent,secondary,highlight,ink,surface:mix(paper,'#FFFFFF',0.68),recess:mix(paper,secondary,0.14)};
 });
 
-export function selectFounderPalette(previousId:string|null|undefined,random:()=>number=Math.random):FounderPalette{
-  const available=founderPalettes.filter(item=>item.id!==previousId);
+const workMapPaletteIds=new Set(['grove','salmon-stamp','editorial-forest','riso-brut','court-press']);
+
+export function selectFounderPalette(previousId:string|null|undefined,random:()=>number=Math.random,pool:FounderPalettePool='project_detail'):FounderPalette{
+  const candidates=pool==='work_map'?founderPalettes.filter(item=>workMapPaletteIds.has(item.id)):founderPalettes;
+  const available=candidates.length>1?candidates.filter(item=>item.id!==previousId):candidates;
   return available[Math.min(available.length-1,Math.max(0,Math.floor(random()*available.length)))]!;
 }
 
@@ -132,14 +136,15 @@ function buildWorkMapBoard(title:string,palette:FounderPalette,view:FounderWorkM
   const contentBottom=Math.max(mainBottom,...[otherLane,historyLane].flatMap(lane=>lane?[lane.y+lane.height]:[]));
   const height=Math.max(900,contentBottom+gapHeight+80);
   const nodes:FounderWhiteboardNode[]=[shape(0,0,width,height,palette.paper,palette.paper,'none')];
-  nodes.push(textNode(margin,26,720,56,title==='工作地图'?'共同工作地图':title,42,palette.ink,'bold'));
-  nodes.push(textNode(margin,84,760,36,'房产业务、内容生产、协作基础设施，放回各自的主线。',21,palette.ink,'regular'));
-  nodes.push(textNode(820,34,312,30,`${palette.name} · ${dateLabel(view.until)}`,17,palette.ink,'regular','right'));
+  const paperText=readableText(palette.paper);
+  nodes.push(textNode(margin,26,720,56,title==='工作地图'?'共同工作地图':title,42,paperText,'bold'));
+  nodes.push(textNode(margin,84,760,36,'房产业务、内容生产、协作基础设施，放回各自的主线。',21,paperText,'regular'));
+  nodes.push(textNode(820,34,312,30,`${palette.name} · ${dateLabel(view.until)}`,17,paperText,'regular','right'));
   for(const lane of [laneA,laneB,laneC,...(otherLane?[otherLane]:[]),...(historyLane?[historyLane]:[])])appendLane(nodes,lane,palette,byName);
-  if(view.coverageGaps.length){const y=contentBottom+gap;nodes.push(shape(margin,y,width-margin*2,gapHeight-24,palette.recess,palette.ink));
-    nodes.push(textNode(margin+22,y+18,280,36,'覆盖缺口 / 待核对',23,palette.ink,'bold'));
+  if(view.coverageGaps.length){const y=contentBottom+gap,gapText=readableText(palette.recess);nodes.push(shape(margin,y,width-margin*2,gapHeight-24,palette.recess,palette.ink));
+    nodes.push(textNode(margin+22,y+18,280,36,'覆盖缺口 / 待核对',23,gapText,'bold'));
     nodes.push(textNode(margin+292,y+18,width-margin*2-318,gapHeight-42,
-      view.coverageGaps.map(item=>`• ${wrapText(item.summary,54,2)}`).join('\n'),19,palette.ink,'regular'));
+      view.coverageGaps.map(item=>`• ${wrapText(item.summary,54,2)}`).join('\n'),19,gapText,'regular'));
   }
   return{palette,width,height,nodes};
 }
@@ -175,7 +180,7 @@ const cardGap=18;
 function appendLane(nodes:FounderWhiteboardNode[],lane:LaneLayout,palette:FounderPalette,byName:ReadonlyMap<string,FounderWorkMapBoardTopic>):void{
   nodes.push(shape(lane.x,lane.y,lane.width,lane.height,palette.recess,palette.ink));
   nodes.push(shape(lane.x,lane.y,lane.width,58,lane.color,palette.ink));
-  nodes.push(textNode(lane.x+18,lane.y+14,lane.width-36,36,lane.label,27,contrast(lane.color),'bold'));
+  nodes.push(textNode(lane.x+18,lane.y+14,lane.width-36,36,lane.label,27,readableText(lane.color),'bold'));
   const positionByName=new Map<string,Placement>();
   for(const placement of lane.placements)positionByName.set(placement.topic.name,placement);
   for(const placement of lane.placements){const parent=placement.topic.parentName?positionByName.get(placement.topic.parentName):undefined;
@@ -183,20 +188,21 @@ function appendLane(nodes:FounderWhiteboardNode[],lane:LaneLayout,palette:Founde
     else if(placement.topic.parentName&&byName.has(placement.topic.parentName)&&placement.depth>1)nodes.push(connector(placement.x-12,placement.y+16,placement.x,placement.y+16,palette.ink));
   }
   for(const placement of lane.placements){const {topic,x,y,width,height}=placement,fill=topic.kind==='project'?palette.surface:topic.kind==='goal'?palette.secondary:palette.highlight;
+    const cardText=readableText(fill);
     nodes.push(shape(x+6,y+6,width,height,palette.ink,palette.ink,'none'));
     nodes.push(shape(x,y,width,height,fill,palette.ink));
     const title=topic.kind==='goal'?`阶段目标 / ${topic.name}`:topic.kind==='task'?`任务 / ${topic.name}`:
       topic.kind==='idea'?`观点 / ${topic.name}`:topic.name;
     const wrappedTitle=wrapText(title,textUnits(width-36,26),2),titleLines=wrappedTitle.split('\n').length;
-    nodes.push(textNode(x+18,y+16,width-36,titleLines*34,wrappedTitle,26,palette.ink,'bold'));
+    nodes.push(textNode(x+18,y+16,width-36,titleLines*34,wrappedTitle,26,cardText,'bold'));
     if(topic.outcome)nodes.push(textNode(x+18,y+22+titleLines*34,width-36,height-86,
-      wrapText(topic.outcome,textUnits(width-36,21),2),21,palette.ink,'regular'));
+      wrapText(topic.outcome,textUnits(width-36,21),2),21,cardText,'regular'));
     const meta=[stageLabel(topic.stage),topic.sourceCount?`${topic.sourceCount} 个来源`:null].filter(Boolean).join(' · ');
-    nodes.push(textNode(x+18,y+height-30,width-36,22,meta,17,palette.ink,'regular'));
+    nodes.push(textNode(x+18,y+height-30,width-36,22,meta,17,cardText,'regular'));
   }
   if(lane.footer){const y=lane.y+lane.height-54;
     nodes.push(shape(lane.x+20,y,lane.width-40,38,palette.secondary,palette.ink));
-    nodes.push(textNode(lane.x+36,y+8,lane.width-72,28,lane.footer,19,palette.ink,'bold'));
+    nodes.push(textNode(lane.x+36,y+8,lane.width-72,28,lane.footer,19,readableText(palette.secondary),'bold'));
   }
 }
 
@@ -246,7 +252,14 @@ function stageLabel(stage:FounderWorkMapBoardTopic['stage']):string{return({acti
 function dateLabel(value:string):string{const date=new Date(value);return Number.isFinite(date.getTime())?date.toISOString().slice(0,10):value}
 function borderWidth(value:string|undefined):number{return value==='bold'?5:value==='medium'?4:value==='narrow'?3:2}
 function xml(value:string):string{return value.replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;')}
-function contrast(hex:string):string{return luminance(hex)>150?'#111111':'#FFFFFF'}
+function readableText(background:string):string{
+  return contrastRatio('#000000',background)>=contrastRatio('#FFFFFF',background)?'#000000':'#FFFFFF';
+}
+function contrastRatio(left:string,right:string):number{const values=[relativeLuminance(left),relativeLuminance(right)].sort((a,b)=>b-a);
+  return(values[0]!+0.05)/(values[1]!+0.05)}
+function relativeLuminance(hex:string):number{const channels=hex.replace('#','').match(/.{2}/g)?.map(value=>parseInt(value,16)/255)
+  .map(value=>value<=0.04045?value/12.92:Math.pow((value+0.055)/1.055,2.4))??[0,0,0];
+  return channels[0]!*0.2126+channels[1]!*0.7152+channels[2]!*0.0722}
 function darkest(colors:string[]):string{return[...colors].sort((a,b)=>luminance(a)-luminance(b))[0]??'#1A1A1A'}
 function luminance(hex:string):number{const rgb=hex.replace('#','').match(/.{2}/g)?.map(v=>parseInt(v,16))??[0,0,0];return rgb[0]!*0.2126+rgb[1]!*0.7152+rgb[2]!*0.0722}
 function mix(a:string,b:string,weight:number):string{const channel=(value:string)=>value.replace('#','').match(/.{2}/g)?.map(v=>parseInt(v,16))??[0,0,0],aa=channel(a),bb=channel(b);

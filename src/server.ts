@@ -136,7 +136,7 @@ const founderRuntime = createFounderStreamRuntime({
   }}}:{}),
   ...(founderWhiteboardGateway?{whiteboardPublisher:{async publish(input:{title:string;chatId:string;
     cards:readonly Record<string,unknown>[];previousPaletteId?:string|null;view?:import('./services/founder-board-view.js').FounderBoardView}){
-    const palette=selectFounderPalette(input.previousPaletteId);
+    const palette=selectFounderPalette(input.previousPaletteId,Math.random,input.view?.kind==='work_map'?'work_map':'project_detail');
     return publishFounderWhiteboard({...input,paletteId:palette.id},founderWhiteboardGateway);
   }}}:{}),
   ...(founderAnalysis ?? {})

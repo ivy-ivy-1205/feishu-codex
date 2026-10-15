@@ -205,24 +205,31 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         failureStage = 'topic_reconciliation';
         const plan = reconcileTopics(input, classified.analysis);
         const exactCanonicalNames = new Map<number, string>();
-        const canonicalByName = new Map(topics.listCanonicalTopics()
-          .filter(topic => topic.stage !== 'closed')
-          .map(topic => [normalizeTopicName(topic.displayName), topic]));
-        const mediaLine=canonicalByName.get(normalizeTopicName('自媒体生产线'));
+        const canonicalByName = new Map<string, ReturnType<TopicRepository['listCanonicalTopics']>>();
+        for(const topic of topics.listCanonicalTopics()){
+          const key=normalizeTopicName(topic.displayName),matches=canonicalByName.get(key)??[];matches.push(topic);canonicalByName.set(key,matches);
+        }
+        const mediaLine=canonicalByName.get(normalizeTopicName('自媒体生产线'))?.find(topic=>topic.stage!=='closed');
+        const ambiguousProposalIndexes=new Set<number>();
         for (const item of plan.topics) {
           if (item.action !== 'create') continue;
-          const exact = canonicalByName.get(normalizeTopicName(item.proposal.displayName));
-          if (!exact) continue;
+          const candidateNames=[item.proposal.displayName,classified.canonicalNames[item.proposal.displayName]].filter((value):value is string=>Boolean(value));
+          const candidates=[...new Map(candidateNames.flatMap(name=>canonicalByName.get(normalizeTopicName(name))??[])
+            .filter(topic=>item.proposal.stage==='closed'?topic.stage==='closed':topic.stage!=='closed').map(topic=>[topic.id,topic])).values()];
+          if (candidates.length>1){ambiguousProposalIndexes.add(item.proposalIndex);continue}
+          if (candidates.length===0) continue;
+          const exact=candidates[0]!;
           item.action = 'join';
           item.topicId = exact.id;
           item.expectedVersion = exact.currentVersion;
           exactCanonicalNames.set(item.proposalIndex, exact.displayName);
         }
+        const plannedTopics=plan.topics.filter(item=>!ambiguousProposalIndexes.has(item.proposalIndex));
         failureStage = 'evidence_preparation';
         // The model can suggest a continuation, but it cannot revoke a founder's
         // accepted correction. Bind its evidence to the protected topic instead
         // of creating a renamed/reactivated duplicate.
-        for (const item of plan.topics) {
+        for (const item of plannedTopics) {
           const target = topics.listCurrentTopics().find(t => t.id === item.proposal.joinDecision.topicId);
           if (target && topicAuthority(options.client, topics, target)) {
             item.action = 'join'; item.topicId = target.id; item.expectedVersion = target.currentVersion;
@@ -230,7 +237,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         }
         const plannedAt = now();
         failureStage = 'new_evidence_persistence';
-        const prepared = plan.topics.map(item => ({ item,
+        const prepared = plannedTopics.map(item => ({ item,
           topicId: item.topicId ?? stableId('topic', `${new Date(plannedAt.getTime()+item.proposalIndex).toISOString()}\n${item.proposal.displayName.trim()}`),
           ids: item.proposal.evidenceExcerpts.map(e => saveFounderEvidence(sources,e.sourceId,e.excerpt,plannedAt)) }));
         const byTopic = new Map<string, typeof prepared>();
