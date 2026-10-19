@@ -117,9 +117,12 @@ describe('founder whiteboard',()=>{
     expect(y('长期无动态 2 项')).toBeGreaterThan(y('C / 公司协作基础设施')!);
     expect(y('长期无动态 2 项')).toBeLessThan(y('已结束 / 历史')!);
     expect(textNodes.some(node=>node.text!.text!.includes('继续、暂停还是结束'))).toBe(true);
-    // History is muted (light header) so the dormant reminder is the one that stands out.
+    // Section headers alternate palette colors by function: history keeps a colored block distinct from the dormant one.
     const header=(label:string)=>result.nodes.find(node=>node.type==='composite_shape'&&node.height===58&&
       textNodes.some(text=>text.text!.text===label&&text.y===(node.y??0)+14))?.style?.fill_color;
+    const grove=founderPalettes.find(palette=>palette.id==='grove')!;
+    expect(header('已结束 / 历史')).toBe(grove.accent);
+    expect(header('长期无动态 2 项')).toBe(grove.highlight);
     expect(header('已结束 / 历史')).not.toBe(header('长期无动态 2 项'));
     // Stalest first, with how long it has been quiet and the last recorded state (what it is waiting on).
     expect(y('AI 选房经验与知识库 · 46 天无动态 · 当前仍未收到 Jimmy 的回复')).toBeLessThan(y('企业微信接入（暂停） · 24 天无动态')!);

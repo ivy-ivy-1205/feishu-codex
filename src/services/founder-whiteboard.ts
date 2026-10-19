@@ -144,7 +144,7 @@ function buildWorkMapBoard(title:string,palette:FounderPalette,view:FounderWorkM
   const otherLane=currentOther.length?layoutLane(currentOther,margin,lowerSectionsY,history.length?halfWidth:contentWidth,
     history.length?1:2,'待核对 / 其他项目',palette.highlight,byName,null):null;
   const historyLane=history.length?layoutHistoryLane(history,otherLane?margin+halfWidth+gap:margin,lowerSectionsY,
-    otherLane?halfWidth:contentWidth,'已结束 / 历史',palette.surface):null;
+    otherLane?halfWidth:contentWidth,'已结束 / 历史',palette.accent):null;
   const gapHeight=view.coverageGaps.length?88+view.coverageGaps.length*34:0;
   const contentBottom=Math.max(mainBottom,...[dormantLane,otherLane,historyLane].flatMap(lane=>lane?[lane.y+lane.height]:[]));
   const height=Math.max(900,contentBottom+gapHeight+80);
