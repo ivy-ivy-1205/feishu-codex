@@ -584,3 +584,66 @@ export const founderPerspectiveObservations = sqliteTable('founder_perspective_o
   evidenceId:text('evidence_id').notNull().references(()=>contextEvidence.id),
   statement:text('statement').notNull(),speechAct:text('speech_act').notNull(),decisionKey:text('decision_key')
 }, table=>[primaryKey({columns:[table.topicId,table.evidenceId]})]);
+
+export const projectSpaceBindings = sqliteTable('project_space_bindings', {
+  id: text('id').primaryKey(),
+  projectKey: text('project_key').notNull().references(() => projects.projectKey),
+  provider: text('provider', { enum: ['chatgpt_space'] }).notNull(),
+  spaceId: text('space_id'),
+  pageId: text('page_id').notNull(),
+  pageUrl: text('page_url').notNull(),
+  managementMode: text('management_mode', { enum: ['space', 'hybrid'] }).notNull(),
+  syncMode: text('sync_mode', { enum: ['manual', 'scheduled', 'event'] }).notNull(),
+  status: text('status', { enum: ['active', 'paused', 'permission_lost'] }).notNull(),
+  lastSeenSequence: integer('last_seen_sequence'),
+  lastPageUpdatedAt: text('last_page_updated_at'),
+  lastSyncedAt: text('last_synced_at'),
+  lastSuccessfulSyncAt: text('last_successful_sync_at'),
+  lastErrorCode: text('last_error_code'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull()
+}, (table) => [
+  check('project_space_bindings_provider_allowed', sql`${table.provider} IN ('chatgpt_space')`),
+  check('project_space_bindings_management_mode_allowed', sql`${table.managementMode} IN ('space', 'hybrid')`),
+  check('project_space_bindings_sync_mode_allowed', sql`${table.syncMode} IN ('manual', 'scheduled', 'event')`),
+  check('project_space_bindings_status_allowed', sql`${table.status} IN ('active', 'paused', 'permission_lost')`),
+  uniqueIndex('project_space_bindings_page_id_unique').on(table.pageId)
+]);
+
+export const founderTopicProjectBindings = sqliteTable('founder_topic_project_bindings', {
+  topicId: text('topic_id').notNull().references(() => contextTopics.id),
+  projectKey: text('project_key').notNull().references(() => projects.projectKey),
+  role: text('role', { enum: ['canonical', 'child', 'related'] }).notNull(),
+  source: text('source', { enum: ['human_confirmed', 'mapping_rule', 'analysis'] }).notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull()
+}, (table) => [
+  check('founder_topic_project_bindings_role_allowed', sql`${table.role} IN ('canonical', 'child', 'related')`),
+  check('founder_topic_project_bindings_source_allowed', sql`${table.source} IN ('human_confirmed', 'mapping_rule', 'analysis')`),
+  primaryKey({ columns: [table.topicId, table.projectKey, table.role] })
+]);
+
+export const spaceSyncRuns = sqliteTable('space_sync_runs', {
+  id: text('id').primaryKey(),
+  bindingId: text('binding_id').notNull().references(() => projectSpaceBindings.id),
+  projectKey: text('project_key').notNull().references(() => projects.projectKey),
+  pageId: text('page_id').notNull(),
+  trigger: text('trigger', { enum: ['manual', 'scheduled', 'event'] }).notNull(),
+  envelopeHash: text('envelope_hash').notNull(),
+  status: text('status', { enum: ['completed'] }).notNull().default('completed'),
+  errorCode: text('error_code'),
+  pageSourceCreated: integer('page_source_created').notNull(),
+  commentSourcesCreated: integer('comment_sources_created').notNull().default(0),
+  coveragePageComplete: integer('coverage_page_complete').notNull(),
+  coverageCommentsComplete: integer('coverage_comments_complete').notNull(),
+  nextCursor: text('next_cursor'),
+  gapCount: integer('gap_count').notNull().default(0),
+  startedAt: text('started_at').notNull(),
+  completedAt: text('completed_at').notNull()
+}, (table) => [
+  check('space_sync_runs_trigger_allowed', sql`${table.trigger} IN ('manual', 'scheduled', 'event')`),
+  check('space_sync_runs_status_allowed', sql`${table.status} IN ('completed')`),
+  check('space_sync_runs_page_source_created_bool', sql`${table.pageSourceCreated} IN (0, 1)`),
+  check('space_sync_runs_coverage_page_complete_bool', sql`${table.coveragePageComplete} IN (0, 1)`),
+  check('space_sync_runs_coverage_comments_complete_bool', sql`${table.coverageCommentsComplete} IN (0, 1)`)
+]);

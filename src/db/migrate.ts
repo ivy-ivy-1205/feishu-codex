@@ -482,6 +482,54 @@ const migrationSql = `
     CHECK(from_record_version_id <> to_record_version_id),
     UNIQUE(from_record_version_id, to_record_version_id, relation_type)
   );
+
+  CREATE TABLE IF NOT EXISTS project_space_bindings (
+    id TEXT PRIMARY KEY,
+    project_key TEXT NOT NULL REFERENCES projects(project_key),
+    provider TEXT NOT NULL CHECK(provider = 'chatgpt_space'),
+    space_id TEXT,
+    page_id TEXT NOT NULL UNIQUE,
+    page_url TEXT NOT NULL,
+    management_mode TEXT NOT NULL CHECK(management_mode IN ('space', 'hybrid')),
+    sync_mode TEXT NOT NULL CHECK(sync_mode IN ('manual', 'scheduled', 'event')),
+    status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'permission_lost')),
+    last_seen_sequence INTEGER,
+    last_page_updated_at TEXT,
+    last_synced_at TEXT,
+    last_successful_sync_at TEXT,
+    last_error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS founder_topic_project_bindings (
+    topic_id TEXT NOT NULL REFERENCES context_topics(id),
+    project_key TEXT NOT NULL REFERENCES projects(project_key),
+    role TEXT NOT NULL CHECK(role IN ('canonical', 'child', 'related')),
+    source TEXT NOT NULL CHECK(source IN ('human_confirmed', 'mapping_rule', 'analysis')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(topic_id, project_key, role)
+  );
+
+  CREATE TABLE IF NOT EXISTS space_sync_runs (
+    id TEXT PRIMARY KEY,
+    binding_id TEXT NOT NULL REFERENCES project_space_bindings(id),
+    project_key TEXT NOT NULL REFERENCES projects(project_key),
+    page_id TEXT NOT NULL,
+    trigger TEXT NOT NULL CHECK(trigger IN ('manual', 'scheduled', 'event')),
+    envelope_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed')),
+    error_code TEXT,
+    page_source_created INTEGER NOT NULL CHECK(page_source_created IN (0, 1)),
+    comment_sources_created INTEGER NOT NULL DEFAULT 0,
+    coverage_page_complete INTEGER NOT NULL CHECK(coverage_page_complete IN (0, 1)),
+    coverage_comments_complete INTEGER NOT NULL CHECK(coverage_comments_complete IN (0, 1)),
+    next_cursor TEXT,
+    gap_count INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL
+  );
 `;
 
 export function migrateDatabase(client: Database.Database): void {
