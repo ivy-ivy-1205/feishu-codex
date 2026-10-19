@@ -75,7 +75,7 @@ describe('founder whiteboard',()=>{
     expect(y('企业微信接入')).toBeLessThan(y('已结束 / 历史')!);
   });
 
-  it('shows closed topics as compact dated rows, merges ideas per line and leaves dormant topics off the board',()=>{
+  it('shows closed topics as compact dated rows, merges ideas per line and moves dormant topics out of their line',()=>{
     const result=buildFounderWhiteboard({title:'工作地图',paletteId:'grove',cards:[],view:{
       kind:'work_map',since:'2026-08-31T00:00:00.000Z',until:'2026-10-19T00:00:00.000Z',coverageGaps:[],topics:[
         {id:'a',name:'AiJia AI Native 房产业务',stage:'active_project',kind:'project',outcome:null},
@@ -89,13 +89,40 @@ describe('founder whiteboard',()=>{
         {id:'old',name:'旧任务',stage:'closed',kind:'task',outcome:null,closedAt:null}
       ]}});
     const texts=result.nodes.flatMap(node=>node.text?.text?[node.text.text]:[]);
-    expect(texts.some(text=>text.includes('AI 选房经验与知识库'))).toBe(false);
+    // Not a card in its line any more; only a row in the 长期无动态 section.
+    expect(texts).not.toContain('AI 选房经验与知识库');
+    expect(texts.some(text=>text.startsWith('AI 选房经验与知识库 · '))).toBe(true);
     expect(texts.find(text=>text.startsWith('观点 2 条'))?.replace(/\n/gu,'')).toBe('观点 2 条：孵化这个 AI 产业落地 · AI 蒸馏学习主题');
     expect(texts.some(text=>text.startsWith('观点 / '))).toBe(false);
     expect(texts.find(text=>text.startsWith('EP00《挺好》 · 10-14 结束 · '))).toBeTruthy();
     expect(texts).toContain('任务 / 旧任务');
     // One compact row per closed item, not a full card with a stage/source footer.
     expect(texts.filter(text=>text==='已结束')).toHaveLength(0);
+  });
+
+  it('highlights long-dormant topics in their own section between current work and closed history',()=>{
+    const result=buildFounderWhiteboard({title:'工作地图',paletteId:'grove',cards:[],view:{
+      kind:'work_map',since:'2026-08-31T00:00:00.000Z',until:'2026-10-19T00:00:00.000Z',coverageGaps:[],topics:[
+        {id:'a',name:'AiJia AI Native 房产业务',stage:'active_project',kind:'project',outcome:null},
+        {id:'sl',name:'Smart Listing',stage:'active_project',kind:'project',outcome:'上线',parentName:'AiJia AI Native 房产业务'},
+        {id:'kb',name:'AI 选房经验与知识库',stage:'active_project',kind:'project',outcome:'当前仍未收到 Jimmy 的回复',
+          parentName:'AiJia AI Native 房产业务',dormant:true,lastActivityAt:'2026-09-02T11:51:51.849Z'},
+        {id:'c',name:'公司协作基础设施',stage:'active_project',kind:'project',outcome:null},
+        {id:'wx',name:'企业微信接入',stage:'paused',kind:'project',outcome:null,parentName:'公司协作基础设施',
+          dormant:true,lastActivityAt:'2026-09-25T00:00:00.000Z'},
+        {id:'ep',name:'EP00《挺好》',stage:'closed',kind:'project',outcome:'已发布',closedAt:'2026-10-14T08:18:40.206Z'}
+      ]}});
+    const textNodes=result.nodes.filter(node=>node.type==='text_shape'&&node.text?.text);
+    const y=(prefix:string)=>textNodes.find(node=>node.text!.text!.startsWith(prefix))?.y;
+    expect(y('长期无动态 2 项')).toBeGreaterThan(y('C / 公司协作基础设施')!);
+    expect(y('长期无动态 2 项')).toBeLessThan(y('已结束 / 历史')!);
+    expect(textNodes.some(node=>node.text!.text!.includes('继续、暂停还是结束'))).toBe(true);
+    // History is muted (light header) so the dormant reminder is the one that stands out.
+    const header=(label:string)=>result.nodes.find(node=>node.type==='composite_shape'&&node.height===58&&
+      textNodes.some(text=>text.text!.text===label&&text.y===(node.y??0)+14))?.style?.fill_color;
+    expect(header('已结束 / 历史')).not.toBe(header('长期无动态 2 项'));
+    // Stalest first, with how long it has been quiet and the last recorded state (what it is waiting on).
+    expect(y('AI 选房经验与知识库 · 46 天无动态 · 当前仍未收到 Jimmy 的回复')).toBeLessThan(y('企业微信接入（暂停） · 24 天无动态')!);
   });
 
   it('renders the exact whiteboard nodes into a bounded PNG preview for the chat card',async()=>{
@@ -166,7 +193,10 @@ describe('founder whiteboard',()=>{
           {id:'site',name:'AiJia AI Native 官网',stage:'active_project',kind:'project',outcome:'官网',parentName:'AiJia AI Native 房产业务'},
           {id:'task',name:'团队更新',stage:'active_project',kind:'task',outcome:'任务卡',parentName:'AiJia AI Native 房产业务'},
           {id:'goal',name:'阶段一',stage:'active_project',kind:'goal',outcome:'目标卡',parentName:'AiJia AI Native 房产业务'},
-          {id:'idea',name:'讨论观点',stage:'idea',kind:'idea',outcome:'观点卡',parentName:'AiJia AI Native 房产业务'}
+          {id:'idea',name:'讨论观点',stage:'idea',kind:'idea',outcome:'观点卡',parentName:'AiJia AI Native 房产业务'},
+          {id:'quiet',name:'沉睡项目',stage:'active_project',kind:'project',outcome:'等待外部回复',parentName:'AiJia AI Native 房产业务',
+            dormant:true,lastActivityAt:'2026-09-01T00:00:00.000Z'},
+          {id:'gone',name:'旧项目',stage:'closed',kind:'project',outcome:'已结束',closedAt:'2026-10-01T00:00:00.000Z'}
         ]
       }});
       result.nodes.forEach((node,index)=>{

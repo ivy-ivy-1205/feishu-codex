@@ -113,7 +113,11 @@ interface LaneLayout {x:number;y:number;width:number;height:number;placements:Pl
   /** Ideas in this line, merged into one row instead of one card each. */
   ideaRow?:CompactRow;
   /** Closed items as one dated row each. */
-  rows?:CompactRow[]}
+  rows?:CompactRow[];
+  /** One-line prompt under the header (used by the dormant section). */
+  note?:string;
+  /** Colored marker on each row, so the dormant reminder stands out from muted history. */
+  rowAccent?:string}
 
 function buildWorkMapBoard(title:string,palette:FounderPalette,view:FounderWorkMapBoardView):BuiltFounderWhiteboard{
   const width=1160,margin=28,top=142,gap=24,contentWidth=width-margin*2,halfWidth=(contentWidth-gap)/2;
@@ -132,20 +136,24 @@ function buildWorkMapBoard(title:string,palette:FounderPalette,view:FounderWorkM
   const lowerY=laneA.y+laneA.height+gap;
   const laneB=layoutLane(b,margin,lowerY,halfWidth,1,'B / 自媒体生产线',palette.secondary,byName,lineNames.B);
   const laneC=layoutLane(c,margin+halfWidth+gap,lowerY,halfWidth,1,'C / 公司协作基础设施',palette.accent,byName,lineNames.C);
-  const mainBottom=Math.max(laneB.y+laneB.height,laneC.y+laneC.height),lowerSectionsY=mainBottom+gap;
+  const mainBottom=Math.max(laneB.y+laneB.height,laneC.y+laneC.height);
+  // A reminder, not history: it sits between current work and closed items so stalled work gets a decision.
+  const dormant=view.topics.filter(topic=>topic.dormant);
+  const dormantLane=dormant.length?layoutDormantLane(dormant,margin,mainBottom+gap,contentWidth,view.until,palette.highlight):null;
+  const lowerSectionsY=(dormantLane?dormantLane.y+dormantLane.height:mainBottom)+gap;
   const otherLane=currentOther.length?layoutLane(currentOther,margin,lowerSectionsY,history.length?halfWidth:contentWidth,
     history.length?1:2,'待核对 / 其他项目',palette.highlight,byName,null):null;
   const historyLane=history.length?layoutHistoryLane(history,otherLane?margin+halfWidth+gap:margin,lowerSectionsY,
-    otherLane?halfWidth:contentWidth,'已结束 / 历史',palette.secondary):null;
+    otherLane?halfWidth:contentWidth,'已结束 / 历史',palette.surface):null;
   const gapHeight=view.coverageGaps.length?88+view.coverageGaps.length*34:0;
-  const contentBottom=Math.max(mainBottom,...[otherLane,historyLane].flatMap(lane=>lane?[lane.y+lane.height]:[]));
+  const contentBottom=Math.max(mainBottom,...[dormantLane,otherLane,historyLane].flatMap(lane=>lane?[lane.y+lane.height]:[]));
   const height=Math.max(900,contentBottom+gapHeight+80);
   const nodes:FounderWhiteboardNode[]=[shape(0,0,width,height,palette.paper,palette.paper,'none')];
   const paperText=readableText(palette.paper);
   nodes.push(textNode(margin,26,720,56,title==='工作地图'?'共同工作地图':title,42,paperText,'bold'));
   nodes.push(textNode(margin,84,760,36,'房产业务、内容生产、协作基础设施，放回各自的主线。',21,paperText,'regular'));
   nodes.push(textNode(820,34,312,30,`${palette.name} · ${dateLabel(view.until)}`,17,paperText,'regular','right'));
-  for(const lane of [laneA,laneB,laneC,...(otherLane?[otherLane]:[]),...(historyLane?[historyLane]:[])])appendLane(nodes,lane,palette,byName);
+  for(const lane of [laneA,laneB,laneC,...(dormantLane?[dormantLane]:[]),...(otherLane?[otherLane]:[]),...(historyLane?[historyLane]:[])])appendLane(nodes,lane,palette,byName);
   if(view.coverageGaps.length){const y=contentBottom+gap,gapText=readableText(palette.recess);nodes.push(shape(margin,y,width-margin*2,gapHeight-24,palette.recess,palette.ink));
     nodes.push(textNode(margin+22,y+18,280,36,'覆盖缺口 / 待核对',23,gapText,'bold'));
     nodes.push(textNode(margin+292,y+18,width-margin*2-318,gapHeight-42,
@@ -187,6 +195,23 @@ function layoutLane(topics:readonly FounderWorkMapBoardTopic[],x:number,y:number
   const ideaRow=ideas.length?{text:ideaText,x:x+padding,y:cardsBottom,width:width-padding*2,height:compactRowHeight+(ideaLines-1)*26}:undefined;
   const contentBottom=ideaRow?ideaRow.y+ideaRow.height+cardGap:Math.max(...heights);
   return{x,y,width,height:Math.max(y+150,contentBottom)-y+2+(footer?64:0),placements,label,color,...(footer?{footer}:{}),...(ideaRow?{ideaRow}:{})};
+}
+
+/** Stalest first: how long it has been quiet and the last recorded state, i.e. what it is waiting on. */
+function layoutDormantLane(topics:readonly FounderWorkMapBoardTopic[],x:number,y:number,width:number,until:string,color:string):LaneLayout{
+  const padding=20,header=58,noteHeight=34,rowWidth=width-padding*2,dayMs=24*60*60*1_000;
+  const activity=(topic:FounderWorkMapBoardTopic)=>topic.lastActivityAt?Date.parse(topic.lastActivityAt):0;
+  let rowY=y+header+padding+noteHeight;
+  const rows=[...topics].sort((a,b)=>activity(a)-activity(b)||a.name.localeCompare(b.name)).map(topic=>{
+    const title=topic.kind==='goal'?`阶段目标 / ${topic.name}`:topic.kind==='task'?`任务 / ${topic.name}`:topic.kind==='idea'?`观点 / ${topic.name}`:topic.name;
+    const quiet=topic.lastActivityAt?`${Math.floor((Date.parse(until)-activity(topic))/dayMs)} 天无动态`:'无动态记录';
+    const text=[`${title}${topic.stage==='paused'?'（暂停）':''}`,quiet,topic.outcome?.trim()||'未记录卡点'].join(' · ');
+    const lines=wrapText(text,fullLineUnits(rowWidth-32,19),2).split('\n').length;
+    const row={text,x:x+padding,y:rowY,width:rowWidth,height:compactRowHeight+(lines-1)*26};
+    rowY+=row.height+compactRowGap;return row;
+  });
+  return{x,y,width,height:rowY-compactRowGap+padding-y+2,placements:[],label:`长期无动态 ${topics.length} 项`,color,rows,
+    note:'超过 30 天没有新动态：还在推进、卡在等谁，还是不做了？请回复确认继续、暂停还是结束。',rowAccent:color};
 }
 
 /** Closed items stay visible, but as one dated line each so history never outweighs current work. */
@@ -233,10 +258,12 @@ function appendLane(nodes:FounderWhiteboardNode[],lane:LaneLayout,palette:Founde
       nodes.push(shape(chipX,chipY,chipWidth,24,palette.accent,palette.ink));
       nodes.push(textNode(chipX+10,chipY+4,chipWidth-20,18,topic.space.label,14,readableText(palette.accent),'regular'));}
   }
+  if(lane.note)nodes.push(textNode(lane.x+20,lane.y+58+14,lane.width-40,26,wrapText(lane.note,fullLineUnits(lane.width-40,19),1),19,readableText(palette.recess),'bold'));
   for(const row of [...(lane.rows??[]),...(lane.ideaRow?[lane.ideaRow]:[])]){
     const lines=Math.max(1,Math.round((row.height-compactRowHeight)/26)+1);
     nodes.push(shape(row.x,row.y,row.width,row.height,palette.surface,palette.ink));
-    nodes.push(textNode(row.x+16,row.y+9,row.width-32,row.height-16,wrapText(row.text,fullLineUnits(row.width-32,19),lines),19,readableText(palette.surface),'regular'));
+    if(lane.rowAccent&&lane.rows?.includes(row))nodes.push(shape(row.x,row.y,10,row.height,lane.rowAccent,palette.ink));
+    nodes.push(textNode(row.x+(lane.rowAccent&&lane.rows?.includes(row)?24:16),row.y+9,row.width-32,row.height-16,wrapText(row.text,fullLineUnits(row.width-32,19),lines),19,readableText(palette.surface),'regular'));
   }
   if(lane.footer){const y=lane.y+lane.height-54;
     nodes.push(shape(lane.x+20,y,lane.width-40,38,palette.secondary,palette.ink));
