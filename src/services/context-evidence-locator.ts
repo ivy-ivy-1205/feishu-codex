@@ -3,6 +3,8 @@ import {
   transcriptEvidenceLocatorSchema,
   type ContextEvidenceLocator,
   type GroupMessageEvidenceLocator,
+  type SpaceCommentEvidenceLocator,
+  type SpacePageBlockEvidenceLocator,
   type TranscriptEvidenceLocator
 } from '../domain/context.js';
 
@@ -57,7 +59,13 @@ export function validateContextEvidenceLocator(
     validateTranscriptEvidenceLocator(source, excerpt, legacyLocator);
     return locator;
   }
-  return validateGroupMessageEvidenceLocator(source, excerpt, locator);
+  if (locator.kind === 'group_message') {
+    return validateGroupMessageEvidenceLocator(source, excerpt, locator);
+  }
+  if (locator.kind === 'space_page_block') {
+    return validateSpacePageBlockEvidenceLocator(source, excerpt, locator);
+  }
+  return validateSpaceCommentEvidenceLocator(source, excerpt, locator);
 }
 
 function validateGroupMessageEvidenceLocator(
@@ -84,6 +92,46 @@ function validateGroupMessageEvidenceLocator(
     (!legacyAttachmentIdentity && storedMessageId !== locator.messageId) || source.externalId !== locator.messageId ||
     storedThreadId !== locator.threadId || source.occurredAt !== locator.occurredAt ||
     !authorMatches || !excerpt.trim() || !source.contentText.includes(excerpt)) {
+    throw new Error('CONTEXT_EVIDENCE_LOCATOR_INVALID');
+  }
+  return locator;
+}
+
+function validateSpacePageBlockEvidenceLocator(
+  source: TranscriptEvidenceSource,
+  excerpt: string,
+  locator: SpacePageBlockEvidenceLocator
+): SpacePageBlockEvidenceLocator {
+  if (locator.sourceVersion !== source.sourceVersion || locator.contentHash !== source.contentHash) {
+    throw new Error('CONTEXT_EVIDENCE_SOURCE_BINDING_INVALID');
+  }
+  const storedBlocks = source.metadata.blocks;
+  if (source.sourceType !== 'space_page_snapshot' || source.metadata.pageId !== locator.pageId ||
+    !Array.isArray(storedBlocks)) {
+    throw new Error('CONTEXT_EVIDENCE_LOCATOR_INVALID');
+  }
+  const block = storedBlocks[locator.blockOrdinal] as Record<string, unknown> | undefined;
+  if (!block || block.id !== locator.blockId || block.hash !== locator.blockHash ||
+    typeof block.markdown !== 'string' || !excerpt.trim() || !block.markdown.includes(excerpt)) {
+    throw new Error('CONTEXT_EVIDENCE_LOCATOR_INVALID');
+  }
+  return locator;
+}
+
+function validateSpaceCommentEvidenceLocator(
+  source: TranscriptEvidenceSource,
+  excerpt: string,
+  locator: SpaceCommentEvidenceLocator
+): SpaceCommentEvidenceLocator {
+  if (locator.sourceVersion !== source.sourceVersion || locator.contentHash !== source.contentHash) {
+    throw new Error('CONTEXT_EVIDENCE_SOURCE_BINDING_INVALID');
+  }
+  const storedTargetBlockId = typeof source.metadata.targetBlockId === 'string' ? source.metadata.targetBlockId : null;
+  const storedAuthorOpenId = typeof source.metadata.authorOpenId === 'string' ? source.metadata.authorOpenId : null;
+  if (source.sourceType !== 'space_page_comment' || source.metadata.pageId !== locator.pageId ||
+    source.metadata.threadId !== locator.threadId || source.metadata.messageId !== locator.messageId ||
+    storedAuthorOpenId !== locator.authorOpenId || storedTargetBlockId !== locator.targetBlockId ||
+    !excerpt.trim() || !source.contentText.includes(excerpt)) {
     throw new Error('CONTEXT_EVIDENCE_LOCATOR_INVALID');
   }
   return locator;

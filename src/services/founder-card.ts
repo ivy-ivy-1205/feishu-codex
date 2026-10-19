@@ -22,6 +22,10 @@ export function founderSourceText(source: FounderCardEvidence): string {
     !Number.isFinite(Date.parse(source.occurredAt)) || !source.excerpt.trim()) throw new Error('valid founder source evidence is required');
   const reference = source.locator.kind === 'group_message'
     ? `群消息 ${founderText(source.locator.messageId, 100)}`
+    : source.locator.kind === 'space_page_block'
+    ? `Space 页面 ${founderText(source.locator.pageId, 100)} · 第 ${source.locator.blockOrdinal + 1} 块`
+    : source.locator.kind === 'space_comment'
+    ? `Space 评论 ${founderText(source.locator.messageId, 100)}`
     : `妙记 ${source.minuteToken && /^obcn[A-Za-z0-9_-]{1,100}$/.test(source.minuteToken) ? source.minuteToken : '（外部编号不可用）'} · 第 ${source.locator.segmentOrdinal + 1} 段`;
   return `来源：${reference} · ${new Date(source.occurredAt).toISOString()}\n原文：${founderText(source.excerpt, founderSourceExcerptLimit)}`;
 }

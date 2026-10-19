@@ -60,9 +60,32 @@ export const groupMessageEvidenceLocatorSchema = z.object({
   occurredAt: z.string().datetime({ offset: true })
 }).strict();
 
+export const spacePageBlockEvidenceLocatorSchema = z.object({
+  kind: z.literal('space_page_block'),
+  sourceVersion: z.number().int().positive(),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  pageId: z.string().trim().min(1),
+  blockId: z.string().trim().min(1),
+  blockHash: z.string().regex(/^[a-f0-9]{64}$/),
+  blockOrdinal: z.number().int().nonnegative()
+}).strict();
+
+export const spaceCommentEvidenceLocatorSchema = z.object({
+  kind: z.literal('space_comment'),
+  sourceVersion: z.number().int().positive(),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  pageId: z.string().trim().min(1),
+  threadId: z.string().trim().min(1),
+  messageId: z.string().trim().min(1),
+  authorOpenId: z.string().trim().min(1).nullable(),
+  targetBlockId: z.string().trim().min(1).nullable()
+}).strict();
+
 const discriminatedContextEvidenceLocatorSchema = z.discriminatedUnion('kind', [
   minuteSegmentEvidenceLocatorSchema,
-  groupMessageEvidenceLocatorSchema
+  groupMessageEvidenceLocatorSchema,
+  spacePageBlockEvidenceLocatorSchema,
+  spaceCommentEvidenceLocatorSchema
 ]);
 
 function withLegacyMinuteKind(locator: unknown): unknown {
@@ -116,6 +139,8 @@ export type ContextProjectRole = z.infer<typeof contextProjectRoleSchema>;
 export type ContextProjectMappingStatus = z.infer<typeof contextProjectMappingStatusSchema>;
 export type MinuteSegmentEvidenceLocator = z.infer<typeof minuteSegmentEvidenceLocatorSchema>;
 export type GroupMessageEvidenceLocator = z.infer<typeof groupMessageEvidenceLocatorSchema>;
+export type SpacePageBlockEvidenceLocator = z.infer<typeof spacePageBlockEvidenceLocatorSchema>;
+export type SpaceCommentEvidenceLocator = z.infer<typeof spaceCommentEvidenceLocatorSchema>;
 export type ContextEvidenceLocator = z.infer<typeof contextEvidenceLocatorSchema>;
 export type TranscriptEvidenceLocator = z.infer<typeof transcriptEvidenceLocatorSchema>;
 export type ContextEvidenceLocatorInput = ContextEvidenceLocator | TranscriptEvidenceLocator;
