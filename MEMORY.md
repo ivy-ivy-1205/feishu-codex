@@ -1,5 +1,17 @@
 # MEMORY.md
 
+- 2026-10-19 工作地图新规则上线（Space 保持关闭）。变更单 `docs/2026-10-19-workmap-activity-rules-change-sheet.md`。
+  - C1 预览工具已经合并（PR #4，`11b7651`，即本次候选 revision）：`current-founder-work-map --preview --board-png <path>` 固定用 Grove 出图，并输出只含名称和日期的 `activitySummary`。
+  - P1 只读诊断通过：生产仍为 `558c39a`，healthy、restart 0；Space 路由 404，没有任何 `SPACE_SYNC_*`；canonical topic 38；active jobs、pending outbox 均为 0；group delivery=false。
+  - 两个发现：根盘 99%，只剩 1.2G，P2 构建前要先经 Ivy 批准清理 Docker（build cache 3.15G、未使用镜像 7.26G 可回收）；10-17 有一条群消息因 `codex_execution_failed` 未分析、没挂到任何条目，可能让某个项目被误判为长期无动态。
+  - Docker 清理（已获 Ivy 批准）：清掉构建缓存，删除 10-14 及以前的旧标签。根盘从 99% 降到 79%。保留当前运行的 `local` 和 10-15 回滚镜像 `f1760204`。
+  - P2 通过，候选镜像 `candidate-11b7651`（`sha256:1ee369d1…`）保留给 P3。
+    - 18 个可见条目：当前 12、长期无动态 1（官网）、已结束 5；新旧版本的条目集合完全一致。
+    - `知识库` 和 `企业微信` 的最近动态都是 10-14 的批量纠正，所以仍算活跃，约 11-13 才会自动转入长期无动态。待 Ivy 决定。
+  - 服务器上传链路很慢，scp 3.6MB 会断线。改为只打包构建所需文件，用 xz 压缩（约 200KB）后经 `ssh 'cat > file'` 流式上传，再核对 SHA-256。
+  - `Fontconfig error: Cannot load default config file` 是生产镜像原本就有的提示，不影响中文渲染。
+  - 生产 DB 在容器内的路径是 `/app/data/bridge.sqlite`（宿主机 `/opt/feishu-codex/data`）。只读核查可以用 `docker exec … node` 加 better-sqlite3 的 `readonly` + `query_only`，不需要宿主机装 sqlite3。
+
 - 2026-10-19 Ivy 确认工作地图白板的取舍规则。
   - 已结束：全部保留，因为大量自媒体事项只在飞书或微信里交流、没进 Space；白板上改成“名称 · MM-DD 结束 · 一句结果”的紧凑行。
   - 未结束的项目：最近 30 天内有动态才上白板。动态 = 关联来源的最新发生时间，含纠正和 Space 评论，加上 Space 页面更新时间；没有任何来源的项目按创建时间算。

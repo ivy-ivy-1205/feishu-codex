@@ -1,6 +1,6 @@
 # 工作地图活跃规则上线变更单（Space 保持关闭）
 
-日期：2026-10-19；状态：Ivy 已批准 C1 与 P1；P2、P3 待 P1 汇报后决定
+日期：2026-10-19；状态：C1、P1、P2 已完成；等待 Ivy 确认名单后再决定 P3
 
 ## 一句话
 
@@ -135,3 +135,71 @@ P1–P3 全部通过后，请 Ivy 在群里发一次 `查看工作地图`，重�
   - 运行登记工具写入三个项目的映射；
   - 填入 Space 账号与 Ivy/James 的对应关系；
   - 真实页面的摘要效果验证。
+
+## 执行结果
+
+### C1（2026-10-19）
+
+- PR #4 已合并为 `11b765125c78830fd28e082230a460b907fec92d`，tree 与测试提交 `4a5c574` 一致。它是本次候选 revision。
+
+### P1（UTC 2026-10-19T11:42Z，只读）
+
+- **生产状态：**
+  - 容器 `feishu-codex-bridge` running/healthy，restart 0，启动于 2026-10-15T09:02Z；
+  - revision 精确为 `558c39a…`，image `sha256:83d27463…`；
+  - health/ready 200。
+- **Space 关闭基线：**
+  - `/internal/space-sync/v1/ingest` 返回 404；
+  - `bridge.env` 中没有任何 `SPACE_SYNC_*`；
+  - 5 张新表都不存在；
+  - Space 来源与 Space 任务均为 0。
+- **开关：**
+  - capture、analysis、manual query、whiteboard、daily reconciliation 与 worker 为 true；
+  - group delivery 为 false；
+  - Codex 摘要模式为 codex。
+- **登录与 Key：** ChatGPT 登录有效；env 文件和容器中均没有 OpenAI/Codex API Key。
+- **数据库：**
+  - `integrity_check=ok`，外键异常 0；
+  - active jobs 0，pending outbox 0；
+  - canonical topic **38**，作为 P2/P3 的 `--expected-canonical-topics`。
+  - 最近一次工作地图投递是 2026-10-15T09:28Z。
+- **发现 1｜磁盘不足，阻塞 P2：**
+  - 根盘 60G，已用 59G（99%），只剩 1.2G。构建一个候选镜像约 1.5G，加上构建层，不够用。
+  - Docker 可回收的空间：build cache 3.15G，未使用镜像 7.26G。后者主要是 9 月以来的 v3–v5、诊断、candidate 和 rollback 标签。
+  - 清理属于删除操作，需要 Ivy 单独批准。建议只保留当前运行的镜像和 10-15 的 rollback 镜像（`f1760204…`）。
+- **发现 2｜10-17 一条群消息分析失败：**
+  - 任务：`analyze_founder_stream_batch`，消息时间 2026-10-17T14:20Z，失败于 `topic_analysis / codex_execution_failed`，已重试 3 次。
+  - 这条消息没有挂到任何条目，所以不计入任何项目的动态。如果它说的是一个快过 30 天的项目，P2 名单可能把这个项目误列为“长期无动态”。
+  - 10-15 之后的其他 14 个分析任务全部成功。
+  - 补救可以用现有 `recover-founder-job-failures` 重新排队，但会调用 Codex 并写库，需要另行批准；也可以等 P2 名单出来后再看是否需要纠正。
+
+### 磁盘清理（Ivy 2026-10-19 批准）
+
+- 执行了 `docker builder prune -af`（清掉 8.126GB 构建缓存），并删除 25 个 `aijia/feishu-codex-bridge` 旧标签。这些标签指向的镜像都在 10-14 及以前构建；`rollback-pre-content-integrity-20261015…` 虽然名字带 10-15，但指向的是 10-14 构建的 `f9e2bb54`，所以也删了。
+- 保留的镜像：当前运行的 `local`（`83d27463`）和 10-15 回滚镜像 `f1760204`（两个标签）。其他项目的镜像一律没动。删除时没有用 `-f`，被容器占用的镜像本来就删不掉。
+- 根盘从 99%（剩 1.2G）降到 79%（剩 13G）。Bridge 全程 healthy，restart 0。
+
+### P2（UTC 2026-10-19T12:18Z）
+
+- **候选上传：** scp 中途断线，残留的半截文件已删除。改为只打包构建所需的文件（`Dockerfile`、lockfile、tsconfig、`src`），用 xz 压缩、ssh 流式上传，SHA-256 `8203a25b17fc1e92c426c933056eb4d8cf4a3bee249d35b2f74c88319bc910ca`，服务器端校验一致。
+- **候选镜像：** 在独立目录 `/opt/feishu-codex/candidates/11b7651` 构建，镜像 `aijia/feishu-codex-bridge:candidate-11b7651`，ID `sha256:1ee369d174bf0add3a1f53cd3260250164f5a2fe159b1b72a5bf772a1666401b`，OCI revision 精确为 `11b765125c78830fd28e082230a460b907fec92d`。
+- **一致性副本：**
+  - 一次性容器以只读方式挂载生产 data 目录，用 SQLite backup API 生成副本。
+  - 副本 `integrity_check=ok`，外键异常 0，SHA-256 `5b55343b8542501053d01cd23f6f425656cf027138932047719af97d02e34197`。
+- **只读预览：**
+  - 副本以只读方式挂载，容器设置 `--network none`、只读根文件系统，不传任何 secret，`until=2026-10-19T12:18:54Z`。
+  - 候选版本和当前生产版本在同一副本上各跑了一次。
+- **门禁（全部通过）：**
+  - 副本 SHA-256 前后一致；
+  - canonical 38；
+  - 两个版本的文字卡片都是 2 页；
+  - 两个版本的可见条目完全相同，都是 18 个，没有丢失；
+  - A/B/C 三个根条目都在；
+  - 每个条目恰好属于一个分区：当前 12、长期无动态 1、已结束 5，已结束的全部保留；
+  - Grove PNG 130,646B，SHA-256 `8e2f75fd465737d540db768eea64b8ee944bf8bec380db0d4999a0b6ad655de8`，中文渲染正常；
+  - 对比度沿用候选测试集里 5 套工作地图配色的门禁。
+- `Fontconfig error: Cannot load default config file` 在当前生产镜像和日志里同样存在：两份镜像的 `/etc/fonts` 结构完全一样，属于既有提示，不影响渲染。
+- **名单：**
+  - 长期无动态只有 `AiJia AI Native 官网`（09-13 之后无动态，已 35 天）。
+  - `AI 选房经验与知识库` 和 `企业微信接入` 的最近动态都是 10-14：当天 Ivy 的批量纠正把纠正证据挂到了这两个条目上，按规则算作动态，所以它们仍留在当前工作里，要到约 11-13 才会自动转入长期无动态。这与 Ivy 原本“把它们移出白板”的预期不一致，需要 Ivy 决定。
+- 隔离副本和派生文件已删除；候选镜像保留给 P3。生产 revision 仍为 `558c39a`，healthy，restart 0。全程没有调用 Codex，没有写生产，也没有发群消息。

@@ -92,7 +92,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     else addSupporting(section,text);
   }
   // Off the board but never lost: numbered so it can still be corrected, and it returns once new activity arrives.
-  const dormantSection = `长期无动态 ${dormantTopics.length} 项（30 天以上无新动态，暂不上白板；有新动态会自动回到白板）`;
+  const dormantSection = `暂停 / 长期无动态 ${dormantTopics.length} 项（暂停或 30 天以上无新动态，暂不上白板；恢复推进或有新动态会自动回到白板）`;
   for (const topic of dormantTopics) {
     if (!stages.includes(topic.stage) || !Number.isInteger(topic.currentVersion) || topic.currentVersion < 1 || !topic.displayName.trim()) {
       throw new Error('valid work-map topic is required');

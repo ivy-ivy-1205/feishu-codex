@@ -186,8 +186,9 @@ function markDormant(topics:readonly FounderWorkMapTopic[],until:string):Founder
   const dormant=(topic:FounderWorkMapTopic,seen:Set<string>):boolean=>{
     if(memo.has(topic.id))return memo.get(topic.id)!;
     if(seen.has(topic.id))return true;seen.add(topic.id);
+    // Paused work joins the reminder section at once: a correction that pauses it is itself recent activity.
     const result=!founderLineRootNames.includes(topic.displayName)&&topic.stage!=='closed'&&
-      !(topic.lastActivityAt&&Date.parse(topic.lastActivityAt)>=threshold)&&
+      (topic.stage==='paused'||!(topic.lastActivityAt&&Date.parse(topic.lastActivityAt)>=threshold))&&
       !(children.get(topic.displayName)??[]).some(child=>child.stage!=='closed'&&!dormant(child,seen));
     memo.set(topic.id,result);return result;
   };

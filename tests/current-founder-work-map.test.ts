@@ -181,8 +181,8 @@ describe('current founder work map publisher',()=>{
     expect(board.get(sl.id)?.dormant).toBeFalsy();
     const lines=result.cards.flatMap(card=>JSON.stringify(card.card)).join('');
     // The fixture's own topics have no activity after mid-September, so they are dormant too.
-    expect(lines).toContain('长期无动态 3 项');
-    const dormantAt=lines.indexOf('长期无动态 3 项');
+    expect(lines).toContain('暂停 / 长期无动态 3 项');
+    const dormantAt=lines.indexOf('暂停 / 长期无动态 3 项');
     expect(dormantAt).toBeGreaterThan(-1);
     expect(lines.indexOf('AI 选房经验与知识库')).toBeGreaterThan(dormantAt);
     expect(lines).toContain('最近动态 2026-09-02');
@@ -203,6 +203,31 @@ describe('current founder work map publisher',()=>{
     expect(board.get(h.child.id)?.dormant).toBeFalsy();
     expect(board.get(closed.id)).toMatchObject({stage:'closed',closedAt:'2026-08-20T00:00:00.000Z'});
     expect(board.get(closed.id)?.dormant).toBeFalsy();
+  });
+
+  it('moves a paused topic into the reminder section even with recent activity, and brings it back once resumed',()=>{
+    const h=fixture();
+    const recent=h.add('om_kb','ou_ivy','知识库：暂停，等 Jimmy 反馈。','2026-10-18T00:00:00Z');
+    const kb=h.topics.createTopic({displayName:'AI 选房经验与知识库',stage:'paused',outcome:'等 Jimmy 反馈',evidenceIds:[recent],
+      createdAt:new Date('2026-10-18T00:00:00Z')});
+    const until='2026-10-19T00:00:00Z';
+    const paused=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until,approvedChatIds:[chatId],expectedCanonicalTopicCount:3});
+    expect(paused.boardView.topics.find(topic=>topic.id===kb.id)).toMatchObject({stage:'paused',dormant:true,lastActivityAt:'2026-10-18T00:00:00Z'});
+    h.topics.appendVersion({topicId:kb.id,expectedVersion:1,displayName:'AI 选房经验与知识库',stage:'active_project',outcome:'Jimmy 已回复',
+      rationale:'resumed',evidenceIds:[recent],changedAt:new Date('2026-10-18T12:00:00Z')});
+    const resumed=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until,approvedChatIds:[chatId],expectedCanonicalTopicCount:3});
+    expect(resumed.boardView.topics.find(topic=>topic.id===kb.id)?.dormant).toBeFalsy();
+  });
+
+  it('keeps a paused parent in its line while a child is still active',()=>{
+    const h=fixture();
+    const recent=h.add('om_child','ou_ivy','子项目本周有进展。','2026-10-15T00:00:00Z');
+    h.topics.appendVersion({topicId:h.parent.id,expectedVersion:1,displayName:h.parent.displayName,stage:'paused',outcome:null,rationale:'test',
+      evidenceIds:[],changedAt:new Date('2026-10-15T00:00:00Z')});
+    h.topics.appendVersion({topicId:h.child.id,expectedVersion:1,displayName:'子项目',stage:'active_project',outcome:null,rationale:'test',
+      evidenceIds:[recent],changedAt:new Date('2026-10-15T00:00:00Z')});
+    const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-10-19T00:00:00Z',approvedChatIds:[chatId],expectedCanonicalTopicCount:2});
+    expect(result.boardView.topics.find(topic=>topic.id===h.parent.id)?.dormant).toBeFalsy();
   });
 
   it('never marks an A/B/C line root dormant',()=>{

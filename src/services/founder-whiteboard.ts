@@ -197,21 +197,21 @@ function layoutLane(topics:readonly FounderWorkMapBoardTopic[],x:number,y:number
   return{x,y,width,height:Math.max(y+150,contentBottom)-y+2+(footer?64:0),placements,label,color,...(footer?{footer}:{}),...(ideaRow?{ideaRow}:{})};
 }
 
-/** Stalest first: how long it has been quiet and the last recorded state, i.e. what it is waiting on. */
+/** Stalest first: paused, or how long it has been quiet, and the last recorded state, i.e. what it is waiting on. */
 function layoutDormantLane(topics:readonly FounderWorkMapBoardTopic[],x:number,y:number,width:number,until:string,color:string):LaneLayout{
   const padding=20,header=58,noteHeight=34,rowWidth=width-padding*2,dayMs=24*60*60*1_000;
   const activity=(topic:FounderWorkMapBoardTopic)=>topic.lastActivityAt?Date.parse(topic.lastActivityAt):0;
   let rowY=y+header+padding+noteHeight;
   const rows=[...topics].sort((a,b)=>activity(a)-activity(b)||a.name.localeCompare(b.name)).map(topic=>{
     const title=topic.kind==='goal'?`阶段目标 / ${topic.name}`:topic.kind==='task'?`任务 / ${topic.name}`:topic.kind==='idea'?`观点 / ${topic.name}`:topic.name;
-    const quiet=topic.lastActivityAt?`${Math.floor((Date.parse(until)-activity(topic))/dayMs)} 天无动态`:'无动态记录';
-    const text=[`${title}${topic.stage==='paused'?'（暂停）':''}`,quiet,topic.outcome?.trim()||'未记录卡点'].join(' · ');
+    const quiet=topic.stage==='paused'?'暂停':topic.lastActivityAt?`${Math.floor((Date.parse(until)-activity(topic))/dayMs)} 天无动态`:'无动态记录';
+    const text=[title,quiet,topic.outcome?.trim()||'未记录卡点'].join(' · ');
     const lines=wrapText(text,fullLineUnits(rowWidth-32,19),2).split('\n').length;
     const row={text,x:x+padding,y:rowY,width:rowWidth,height:compactRowHeight+(lines-1)*26};
     rowY+=row.height+compactRowGap;return row;
   });
-  return{x,y,width,height:rowY-compactRowGap+padding-y+2,placements:[],label:`长期无动态 ${topics.length} 项`,color,rows,
-    note:'超过 30 天没有新动态：还在推进、卡在等谁，还是不做了？请回复确认继续、暂停还是结束。',rowAccent:color};
+  return{x,y,width,height:rowY-compactRowGap+padding-y+2,placements:[],label:`暂停 / 长期无动态 ${topics.length} 项`,color,rows,
+    note:'暂停或超过 30 天没有新动态：还在推进、卡在等谁，还是不做了？请回复确认继续、暂停还是结束。',rowAccent:color};
 }
 
 /** Closed items stay visible, but as one dated line each so history never outweighs current work. */
