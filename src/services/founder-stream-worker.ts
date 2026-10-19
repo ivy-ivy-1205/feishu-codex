@@ -5,6 +5,8 @@ import { ContextSourceRepository, type ContextSourceRecord } from '../repositori
 import { JobRepository, LeaseLostError, type FounderDurableJob, type FounderStreamJob, type FounderStreamSpaceJob } from '../repositories/job-repository.js';
 import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
 import { confirmedSpaceProjectTopic, loadSpaceBatchSources, spaceCommentExcerpt } from './space-batch-processor.js';
+import { buildSpaceDigestInput, type SpaceProjectDigest, type SpaceProjectDigestAnalyzer } from './space-project-digest.js';
+import { SpaceProjectDigestRepository } from '../repositories/space-project-digest-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
 import { AlignmentRepository } from '../repositories/alignment-repository.js';
@@ -52,6 +54,8 @@ export interface FounderStreamOptions {
   now?: () => Date; intervalMs?: number;
   /** Admits space_page_snapshot/space_page_comment batches scoped by projectKey, independent of captureEnabled/approvedChatIds. */
   spaceAnalysisEnabled?: boolean;
+  /** Server-local Codex project-page digest; when absent, the work map shows the digest as not generated. */
+  spaceDigestAnalyzer?: SpaceProjectDigestAnalyzer;
   policy?: Pick<AlignmentNotificationPolicy, 'reconcilePending'>;
   dailyReconciliation?:{bootstrapSince:string;run(input:{since:string;until:string;now:Date}):Promise<unknown>};
   whiteboardPublisher?:{publish(input:{title:string;chatId:string;cards:readonly Record<string,unknown>[];
@@ -76,6 +80,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   const now = options.now ?? (() => new Date());
   const sources = new ContextSourceRepository(options.client), topics = new TopicRepository(options.client);
   const spaceSync = new SpaceSyncRepository(options.client);
+  const spaceDigests = new SpaceProjectDigestRepository(options.client);
   const outbox = new OutboxRepository(options.client);
   const perspectives = new AlignmentRepository(options.client);
   const perspectiveReconciler = new PerspectiveReconciler(perspectives);
@@ -175,6 +180,22 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         if (!target) throw new Error('SPACE_PROJECT_TOPIC_UNCONFIRMED');
         const loaded = loadSpaceBatchSources(sources, spaceSync, job.sourceIds, job.projectKey);
         const plannedAt = now();
+        failureStage = 'space_digest';
+        const digestResults: { page: ContextSourceRecord; result: { ready: SpaceProjectDigest; basis: 'version_diff'|'first_snapshot' } | { failureCode: string } }[] = [];
+        for (const page of loaded.pages) {
+          const versions = sources.listSources().filter(s => s.logicalKey === page.logicalKey);
+          // An older snapshot replayed late is history; only the page as it stands now gets a digest.
+          if (versions.some(v => v.sourceVersion > page.sourceVersion) || spaceDigests.getForPageSource(page.id)?.status === 'ready') continue;
+          if (!options.spaceDigestAnalyzer) { digestResults.push({ page, result: { failureCode: 'analyzer_unavailable' } }); continue; }
+          const digestInput = buildSpaceDigestInput({ projectKey: job.projectKey, projectName: projectDisplayName(options.client, job.projectKey) ?? target.displayName,
+            page, versions, now: plannedAt });
+          try { digestResults.push({ page, result: { ready: await options.spaceDigestAnalyzer.digest(digestInput), basis: digestInput.changeBasis } }); }
+          catch (error) {
+            // Bounded retries, then a visible "摘要未生成" gap instead of a silently missing summary.
+            if (job.attempt < 2) throw error;
+            digestResults.push({ page, result: { failureCode: classifyFounderFailure(error) } });
+          }
+        }
         failureStage = 'new_evidence_persistence';
         const commentEvidenceIds = loaded.comments.flatMap(comment => {
           const excerpt = spaceCommentExcerpt(comment);
@@ -190,6 +211,12 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
             displayName: current.displayName, stage: current.stage, outcome: current.outcome,
             evidenceIds: [...new Set([...current.evidenceIds, ...added])].sort(),
             rationale: JSON.stringify({ origin: 'space_sync', jobKey: job.key, projectKey: job.projectKey }), changedAt: stamp });
+          for (const { page, result } of digestResults) {
+            const base = { projectKey: job.projectKey, pageId: String(page.metadata.pageId), pageSourceId: page.id,
+              pageSourceVersion: page.sourceVersion, pageUpdatedAt: page.occurredAt, generatedAt: stamp };
+            if ('ready' in result) spaceDigests.saveReady({ ...base, changeBasis: result.basis, digest: result.ready });
+            else spaceDigests.saveFailed({ ...base, failureCode: result.failureCode });
+          }
           options.jobRepository.markCompleted(job, stamp);
         }).immediate();
         return 'completed' as const;
@@ -655,6 +682,9 @@ export function buildFounderStreamInput(sources: ContextSourceRepository, topics
   return validateFounderStreamInput({ sources: [...selected.values()], currentTopics });
 }
 
+function projectDisplayName(client: Database.Database, projectKey: string): string | null {
+  return (client.prepare('SELECT display_name FROM projects WHERE project_key = ?').get(projectKey) as { display_name: string } | undefined)?.display_name ?? null;
+}
 function minuteEligible(source:ContextSourceRecord,chatId:string):boolean {
   return source.metadata.founderStreamEligible===true && source.metadata.founderStreamChatId===chatId;
 }

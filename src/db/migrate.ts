@@ -530,6 +530,22 @@ const migrationSql = `
     started_at TEXT NOT NULL,
     completed_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS space_project_digests (
+    id TEXT PRIMARY KEY,
+    project_key TEXT NOT NULL REFERENCES projects(project_key),
+    page_id TEXT NOT NULL,
+    page_source_id TEXT NOT NULL UNIQUE REFERENCES context_sources(id),
+    page_source_version INTEGER NOT NULL,
+    page_updated_at TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('ready', 'failed')),
+    change_basis TEXT CHECK(change_basis IN ('version_diff', 'first_snapshot')),
+    digest_json TEXT,
+    failure_code TEXT,
+    generated_at TEXT NOT NULL,
+    CHECK((status = 'ready' AND digest_json IS NOT NULL AND change_basis IS NOT NULL) OR
+      (status = 'failed' AND failure_code IS NOT NULL))
+  );
 `;
 
 export function migrateDatabase(client: Database.Database): void {

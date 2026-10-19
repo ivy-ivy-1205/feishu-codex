@@ -647,3 +647,21 @@ export const spaceSyncRuns = sqliteTable('space_sync_runs', {
   check('space_sync_runs_coverage_page_complete_bool', sql`${table.coveragePageComplete} IN (0, 1)`),
   check('space_sync_runs_coverage_comments_complete_bool', sql`${table.coverageCommentsComplete} IN (0, 1)`)
 ]);
+
+export const spaceProjectDigests = sqliteTable('space_project_digests', {
+  id: text('id').primaryKey(),
+  projectKey: text('project_key').notNull().references(() => projects.projectKey),
+  pageId: text('page_id').notNull(),
+  pageSourceId: text('page_source_id').notNull().references(() => contextSources.id),
+  pageSourceVersion: integer('page_source_version').notNull(),
+  pageUpdatedAt: text('page_updated_at').notNull(),
+  status: text('status', { enum: ['ready', 'failed'] }).notNull(),
+  changeBasis: text('change_basis', { enum: ['version_diff', 'first_snapshot'] }),
+  digestJson: text('digest_json'),
+  failureCode: text('failure_code'),
+  generatedAt: text('generated_at').notNull()
+}, (table) => [
+  check('space_project_digests_status_allowed', sql`${table.status} IN ('ready', 'failed')`),
+  check('space_project_digests_change_basis_allowed', sql`${table.changeBasis} IN ('version_diff', 'first_snapshot')`),
+  uniqueIndex('space_project_digests_page_source_unique').on(table.pageSourceId)
+]);

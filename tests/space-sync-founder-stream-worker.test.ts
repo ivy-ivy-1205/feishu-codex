@@ -11,6 +11,8 @@ import {
 } from '../src/services/founder-stream-worker.js';
 import { loadSpaceBatchSources } from '../src/services/space-batch-processor.js';
 import { captureGroupMessageSource } from '../src/services/group-message-source-capture.js';
+import { SpaceProjectDigestRepository } from '../src/repositories/space-project-digest-repository.js';
+import type { SpaceProjectDigestInput } from '../src/services/space-project-digest.js';
 
 const start = new Date('2026-10-19T00:00:00.000Z');
 const chat = 'oc_a84d5b6ca478220d0a37964b50776edb';
@@ -249,5 +251,72 @@ describe('founder-stream-worker Space-scoped processing', () => {
     const allSourceIds = rows.flatMap((r) => JSON.parse(r.payload).sourceIds as string[]);
     expect(allSourceIds).toContain(page.id);
     expect(allSourceIds.filter((id) => id === claimed.id)).toHaveLength(1);
+  });
+});
+
+describe('Space project-page digest per page version', () => {
+  function digestHarness(digest: (input: SpaceProjectDigestInput) => Promise<unknown>) {
+    const h = setup();
+    const calls: SpaceProjectDigestInput[] = [];
+    const runtime = createFounderStreamRuntime({
+      client: h.db.client, jobRepository: h.jobs,
+      flags: { captureEnabled: false, analysisEnabled: false, groupDeliveryEnabled: false },
+      approvedChatIds: [], ivyPrivateChatId: 'oc_private', now: () => start, spaceAnalysisEnabled: true,
+      spaceDigestAnalyzer: { async digest(input) { calls.push(input); return await digest(input) as never; } }
+    });
+    return { ...h, runtime, calls, digests: new SpaceProjectDigestRepository(h.db.client) };
+  }
+
+  it('stores a grounded digest for the latest page version without touching the topic', async () => {
+    const h = digestHarness(async (input) => ({ currentFocus: { text: '项目总览', blockId: input.blocks[0]!.id, excerpt: '项目总览' },
+      weekProgress: [], todayProgress: [], nextSteps: [] }));
+    const topic = canonicalTopic(h);
+    const page = spacePageSource(h.sources);
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [page.id], capturedAt: start });
+    await h.runtime.runOnce();
+    expect(h.calls[0]).toMatchObject({ projectName: 'Smart Listing', changeBasis: 'first_snapshot' });
+    expect(h.digests.getLatestForProject('smart_listing')).toMatchObject({ status: 'ready', pageSourceId: page.id,
+      changeBasis: 'first_snapshot', digest: { currentFocus: { excerpt: '项目总览' } } });
+    expect(h.topics.listCurrentTopics()[0]).toMatchObject({ id: topic.id, currentVersion: 1 });
+  });
+
+  it('retries a failing digest, then records a visible failure gap and completes', async () => {
+    const h = digestHarness(async () => { throw Object.assign(new Error('codex down'), { code: 'CODEX_EXECUTION_FAILED' }); });
+    canonicalTopic(h);
+    const page = spacePageSource(h.sources);
+    const queued = h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [page.id], capturedAt: start });
+    await h.runtime.runOnce();
+    expect(jobStatus(h as never, queued.key)).toBe('retry');
+    expect(h.digests.getLatestForProject('smart_listing')).toBeNull();
+    h.db.client.prepare("UPDATE batch_jobs SET payload=json_set(payload,'$.attempt',2), updated_at=? WHERE stable_key=?")
+      .run(start.toISOString(), queued.key);
+    await h.runtime.runOnce();
+    expect(jobStatus(h as never, queued.key)).toBe('completed');
+    expect(h.digests.getLatestForProject('smart_listing')).toMatchObject({ status: 'failed', failureCode: 'codex_execution_failed' });
+  });
+
+  it('records analyzer_unavailable when no digest analyzer is configured', async () => {
+    const h = harness();
+    canonicalTopic(h);
+    const page = spacePageSource(h.sources);
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [page.id], capturedAt: start });
+    await h.runtime.runOnce();
+    expect(new SpaceProjectDigestRepository(h.db.client).getLatestForProject('smart_listing'))
+      .toMatchObject({ status: 'failed', failureCode: 'analyzer_unavailable' });
+  });
+
+  it('skips a superseded page version replayed late', async () => {
+    const h = digestHarness(async () => ({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [] }));
+    canonicalTopic(h);
+    const old = spacePageSource(h.sources, { text: '旧版本' });
+    spacePageSource(h.sources, { text: '新版本', occurredAt: new Date(start.getTime() + 1_000).toISOString() });
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [old.id], capturedAt: start });
+    await h.runtime.runOnce();
+    expect(h.calls).toHaveLength(0);
+    expect(h.digests.getForPageSource(old.id)).toBeNull();
   });
 });
