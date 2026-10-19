@@ -14,6 +14,13 @@ const projectContextChatIds = commaSeparatedIds('oc_', 'chat_id must start with 
   );
 
 const envSchema = z.object({
+  FOUNDER_STREAM_CAPTURE_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  FOUNDER_STREAM_ANALYSIS_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  FOUNDER_STREAM_GROUP_DELIVERY_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  FOUNDER_STREAM_MANUAL_QUERY_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  FOUNDER_STREAM_WHITEBOARD_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
+  FOUNDER_STREAM_RECONCILIATION_BOOTSTRAP_SINCE: z.iso.datetime({ offset: true }).optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().trim().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -36,6 +43,8 @@ const envSchema = z.object({
   FEISHU_OAUTH_STALE_EVENT_HOURS: z.coerce.number().positive().default(24),
   WEBHOOK_DEBOUNCE_SECONDS: z.coerce.number().int().positive().default(300),
   CODEX_COMMAND: z.string().trim().min(1).default('codex'),
+  CODEX_MODEL: z.enum(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']).default('gpt-5.6-sol'),
+  CODEX_REASONING_EFFORT: z.enum(['none', 'low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
   CODEX_WORKDIR: z.string().trim().min(1),
   CODEX_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(120),
   CODEX_SUMMARIZER_MODE: z.enum(['fake', 'codex']).default('fake'),
@@ -44,8 +53,46 @@ const envSchema = z.object({
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
   PROJECT_CONTEXT_SYNC_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
   PROJECT_CONTEXT_CHAT_IDS: projectContextChatIds.default([]),
-  PROJECT_CONTEXT_SYNC_SINCE_DAYS: z.coerce.number().int().positive().default(30)
+  PROJECT_CONTEXT_SYNC_SINCE_DAYS: z.coerce.number().int().positive().optional(),
+  CONTEXT_CANDIDATES_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  CONTEXT_REVIEW_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  CONTEXT_SOURCE_MAX_BYTES: z.coerce.number().int().positive().default(2_000_000),
+  CONTEXT_SOURCE_MAX_SEGMENTS: z.coerce.number().int().positive().default(10_000),
+  CONTEXT_EXTRACTOR_MAX_BYTES: z.coerce.number().int().positive().default(500_000),
+  CONTEXT_EXTRACTOR_MAX_SEGMENTS: z.coerce.number().int().positive().default(2_000),
+  SPACE_SYNC_INGEST_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  SPACE_SYNC_ANALYSIS_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  SPACE_SYNC_WORKMAP_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  SPACE_SYNC_HMAC_SECRET_FILE: z.string().trim().min(1).optional(),
+  SPACE_SYNC_SIGNATURE_WINDOW_SECONDS: z.coerce.number().int().positive().default(300),
+  // Ivy 2026-10-19: Space pages are published periodically by hand, so warn only after a day without a sync.
+  SPACE_SYNC_STALE_AFTER_MINUTES: z.coerce.number().int().positive().default(24 * 60),
+  SPACE_SYNC_MAX_BLOCKS: z.coerce.number().int().positive().default(500),
+  SPACE_SYNC_MAX_COMMENTS: z.coerce.number().int().positive().default(2_000),
+  SPACE_SYNC_MAX_BODY_BYTES: z.coerce.number().int().positive().default(2_000_000)
 }).superRefine((config, context) => {
+  if (config.FOUNDER_STREAM_ANALYSIS_ENABLED && !config.FOUNDER_STREAM_CAPTURE_ENABLED) {
+    context.addIssue({ code: 'custom', message: 'Founder analysis requires capture' });
+  }
+  if (config.FOUNDER_STREAM_GROUP_DELIVERY_ENABLED && (!config.FOUNDER_STREAM_CAPTURE_ENABLED || !config.FOUNDER_STREAM_ANALYSIS_ENABLED)) {
+    context.addIssue({ code: 'custom', message: 'Founder delivery requires capture and analysis' });
+  }
+  if (config.FOUNDER_STREAM_MANUAL_QUERY_ENABLED && (!config.FOUNDER_STREAM_CAPTURE_ENABLED || !config.FOUNDER_STREAM_ANALYSIS_ENABLED)) {
+    context.addIssue({ code: 'custom', message: 'Founder manual query requires capture and analysis' });
+  }
+  if (config.FOUNDER_STREAM_WHITEBOARD_ENABLED && !config.FOUNDER_STREAM_MANUAL_QUERY_ENABLED) {
+    context.addIssue({ code: 'custom', message: 'Founder whiteboard requires manual query' });
+  }
+  if (config.FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED && !config.FOUNDER_STREAM_CAPTURE_ENABLED) {
+    context.addIssue({ code: 'custom', message: 'Founder daily reconciliation requires capture' });
+  }
+  if (config.FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED && !config.PROJECT_CONTEXT_CHAT_IDS.includes(approvedProjectContextChatId)) {
+    context.addIssue({ code:'custom',message:'Founder daily reconciliation requires the approved project context chat' });
+  }
+  if (config.FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED && !config.FOUNDER_STREAM_RECONCILIATION_BOOTSTRAP_SINCE) {
+    context.addIssue({ code:'custom', path:['FOUNDER_STREAM_RECONCILIATION_BOOTSTRAP_SINCE'],
+      message:'Founder daily reconciliation requires a bootstrap cursor' });
+  }
   if (
     config.NODE_ENV !== 'test' &&
     /fixture|placeholder|change[-_ ]?me|replace[-_ ]?me/iu.test(
@@ -65,6 +112,13 @@ const envSchema = z.object({
       message: 'worker lease must be longer than the downstream timeout'
     });
   }
+  if (config.FOUNDER_STREAM_ANALYSIS_ENABLED && config.WORKER_LEASE_SECONDS <= config.CODEX_TIMEOUT_SECONDS * 2) {
+    context.addIssue({
+      code: 'custom',
+      path: ['WORKER_LEASE_SECONDS'],
+      message: 'founder analysis lease must outlive two sequential Codex calls'
+    });
+  }
   if (config.FEISHU_OAUTH_ENABLED && !config.FEISHU_OAUTH_REDIRECT_URI) {
     context.addIssue({
       code: 'custom',
@@ -79,11 +133,40 @@ const envSchema = z.object({
       message: 'Feishu OAuth token key file is required when OAuth is enabled'
     });
   }
+  if (config.CONTEXT_REVIEW_ENABLED && !config.CONTEXT_CANDIDATES_ENABLED) {
+    context.addIssue({
+      code: 'custom',
+      path: ['CONTEXT_REVIEW_ENABLED'],
+      message: 'Context review requires Context candidates to be enabled'
+    });
+  }
+  if (config.CONTEXT_EXTRACTOR_MAX_BYTES > config.CONTEXT_SOURCE_MAX_BYTES) {
+    context.addIssue({ code: 'custom', path: ['CONTEXT_EXTRACTOR_MAX_BYTES'],
+      message: 'Context extractor byte limit cannot exceed the stored source byte limit' });
+  }
+  if (config.CONTEXT_EXTRACTOR_MAX_SEGMENTS > config.CONTEXT_SOURCE_MAX_SEGMENTS) {
+    context.addIssue({ code: 'custom', path: ['CONTEXT_EXTRACTOR_MAX_SEGMENTS'],
+      message: 'Context extractor segment limit cannot exceed the stored source segment limit' });
+  }
+  if (config.SPACE_SYNC_INGEST_ENABLED && !config.SPACE_SYNC_HMAC_SECRET_FILE) {
+    context.addIssue({ code: 'custom', path: ['SPACE_SYNC_HMAC_SECRET_FILE'],
+      message: 'Space sync ingest requires an HMAC secret file' });
+  }
+  if (config.SPACE_SYNC_ANALYSIS_ENABLED && !config.SPACE_SYNC_INGEST_ENABLED) {
+    context.addIssue({ code: 'custom', path: ['SPACE_SYNC_ANALYSIS_ENABLED'],
+      message: 'Space sync analysis requires ingest to be enabled' });
+  }
+  if (config.SPACE_SYNC_WORKMAP_ENABLED && !config.SPACE_SYNC_ANALYSIS_ENABLED) {
+    context.addIssue({ code: 'custom', path: ['SPACE_SYNC_WORKMAP_ENABLED'],
+      message: 'Space sync work map projection requires analysis to be enabled' });
+  }
 });
 
 type DatabaseKind = 'postgresql' | 'sqlite';
 
 export interface AppConfig {
+  founderStream: { captureEnabled: boolean; analysisEnabled: boolean; groupDeliveryEnabled: boolean; manualQueryEnabled: boolean;
+    dailyReconciliationEnabled: boolean; reconciliationBootstrapSince: string | null; whiteboardEnabled:boolean };
   environment: 'development' | 'test' | 'production';
   host: string;
   port: number;
@@ -111,6 +194,8 @@ export interface AppConfig {
   };
   codex: {
     command: string;
+    model: 'gpt-5.6-sol' | 'gpt-5.6-terra' | 'gpt-5.6-luna';
+    reasoningEffort: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
     workdir: string;
     timeoutSeconds: number;
     summarizerMode: 'fake' | 'codex';
@@ -123,7 +208,26 @@ export interface AppConfig {
   projectContext: {
     syncEnabled: boolean;
     approvedChatIds: string[];
-    syncSinceDays: number;
+    syncSinceDays: number | null;
+  };
+  context: {
+    candidatesEnabled: boolean;
+    reviewEnabled: boolean;
+    sourceMaxBytes: number;
+    sourceMaxSegments: number;
+    extractorMaxBytes: number;
+    extractorMaxSegments: number;
+  };
+  spaceSync: {
+    ingestEnabled: boolean;
+    analysisEnabled: boolean;
+    workmapEnabled: boolean;
+    hmacSecretFile: string | null;
+    signatureWindowSeconds: number;
+    staleAfterMinutes: number;
+    maxBlocks: number;
+    maxComments: number;
+    maxBodyBytes: number;
   };
 }
 
@@ -149,6 +253,12 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
 
   return {
     environment: parsed.NODE_ENV,
+    founderStream: { captureEnabled: parsed.FOUNDER_STREAM_CAPTURE_ENABLED, analysisEnabled: parsed.FOUNDER_STREAM_ANALYSIS_ENABLED,
+      groupDeliveryEnabled: parsed.FOUNDER_STREAM_GROUP_DELIVERY_ENABLED,
+      manualQueryEnabled: parsed.FOUNDER_STREAM_MANUAL_QUERY_ENABLED,
+      whiteboardEnabled: parsed.FOUNDER_STREAM_WHITEBOARD_ENABLED,
+      dailyReconciliationEnabled: parsed.FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED,
+      reconciliationBootstrapSince: parsed.FOUNDER_STREAM_RECONCILIATION_BOOTSTRAP_SINCE ?? null },
     host: parsed.HOST,
     port: parsed.PORT,
     database: {
@@ -175,6 +285,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     },
     codex: {
       command: parsed.CODEX_COMMAND,
+      model: parsed.CODEX_MODEL,
+      reasoningEffort: parsed.CODEX_REASONING_EFFORT,
       workdir: parsed.CODEX_WORKDIR,
       timeoutSeconds: parsed.CODEX_TIMEOUT_SECONDS,
       summarizerMode: parsed.CODEX_SUMMARIZER_MODE
@@ -187,7 +299,26 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     projectContext: {
       syncEnabled: parsed.PROJECT_CONTEXT_SYNC_ENABLED,
       approvedChatIds: parsed.PROJECT_CONTEXT_CHAT_IDS,
-      syncSinceDays: parsed.PROJECT_CONTEXT_SYNC_SINCE_DAYS
+      syncSinceDays: parsed.PROJECT_CONTEXT_SYNC_SINCE_DAYS ?? null
+    },
+    context: {
+      candidatesEnabled: parsed.CONTEXT_CANDIDATES_ENABLED,
+      reviewEnabled: parsed.CONTEXT_REVIEW_ENABLED,
+      sourceMaxBytes: parsed.CONTEXT_SOURCE_MAX_BYTES,
+      sourceMaxSegments: parsed.CONTEXT_SOURCE_MAX_SEGMENTS,
+      extractorMaxBytes: parsed.CONTEXT_EXTRACTOR_MAX_BYTES,
+      extractorMaxSegments: parsed.CONTEXT_EXTRACTOR_MAX_SEGMENTS
+    },
+    spaceSync: {
+      ingestEnabled: parsed.SPACE_SYNC_INGEST_ENABLED,
+      analysisEnabled: parsed.SPACE_SYNC_ANALYSIS_ENABLED,
+      workmapEnabled: parsed.SPACE_SYNC_WORKMAP_ENABLED,
+      hmacSecretFile: parsed.SPACE_SYNC_HMAC_SECRET_FILE ?? null,
+      signatureWindowSeconds: parsed.SPACE_SYNC_SIGNATURE_WINDOW_SECONDS,
+      staleAfterMinutes: parsed.SPACE_SYNC_STALE_AFTER_MINUTES,
+      maxBlocks: parsed.SPACE_SYNC_MAX_BLOCKS,
+      maxComments: parsed.SPACE_SYNC_MAX_COMMENTS,
+      maxBodyBytes: parsed.SPACE_SYNC_MAX_BODY_BYTES
     }
   };
 }

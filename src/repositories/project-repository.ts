@@ -42,15 +42,61 @@ export interface ProjectDiagnostics {
 export class ProjectRepository {
   constructor(readonly client: Database.Database) {}
 
+  listProjects(): ProjectDefinition[] {
+    const rows = this.client.prepare(`
+      SELECT project_key, display_name, aliases, local_path_hint, repo_url,
+        default_branch, status, origin, stage
+      FROM projects
+      ORDER BY project_key ASC
+    `).all() as ProjectRow[];
+
+    return rows.map(toProjectDefinition);
+  }
+
+  getProject(projectKey: string): ProjectDefinition | null {
+    const row = this.client.prepare(`
+      SELECT project_key, display_name, aliases, local_path_hint, repo_url,
+        default_branch, status, origin, stage
+      FROM projects
+      WHERE project_key = ?
+    `).get(projectKey) as ProjectRow | undefined;
+
+    return row ? toProjectDefinition(row) : null;
+  }
+
   listActiveProjects(): ProjectDefinition[] {
     const rows = this.client.prepare(`
-      SELECT project_key, display_name, aliases, local_path_hint, repo_url, default_branch, status
+      SELECT project_key, display_name, aliases, local_path_hint, repo_url,
+        default_branch, status, origin, stage
       FROM projects
       WHERE status = 'active'
       ORDER BY project_key ASC
     `).all() as ProjectRow[];
 
     return rows.map(toProjectDefinition);
+  }
+
+  listDiscoveryEligibleProjects(): ProjectDefinition[] {
+    const rows = this.client.prepare(`
+      SELECT project_key, display_name, aliases, local_path_hint, repo_url,
+        default_branch, status, origin, stage
+      FROM projects
+      WHERE origin != 'legacy_seed' AND stage NOT IN ('closed')
+      ORDER BY project_key ASC
+    `).all() as ProjectRow[];
+
+    return rows.map(toProjectDefinition);
+  }
+
+  listMappingRules(): ProjectMappingRule[] {
+    const rows = this.client.prepare(`
+      SELECT id, pattern, pattern_kind, project_key, subproject_key,
+        confidence_hint, priority, source, active
+      FROM project_mapping_rules
+      ORDER BY priority DESC, id ASC
+    `).all() as ProjectRuleRow[];
+
+    return rows.map(toProjectMappingRule);
   }
 
   listActiveRules(): ProjectMappingRule[] {
@@ -240,6 +286,8 @@ interface ProjectRow {
   repo_url: string | null;
   default_branch: string | null;
   status: string;
+  origin: string;
+  stage: string;
 }
 
 interface ProjectRuleRow {
@@ -262,7 +310,9 @@ function toProjectDefinition(row: ProjectRow): ProjectDefinition {
     localPathHint: row.local_path_hint,
     repoUrl: row.repo_url,
     defaultBranch: row.default_branch,
-    status: row.status
+    status: row.status,
+    origin: row.origin,
+    stage: row.stage
   });
 }
 

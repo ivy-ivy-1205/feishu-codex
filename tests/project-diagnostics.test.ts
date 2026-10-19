@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { buildApp, type AppDependencies } from '../src/app.js';
 import { ProjectRepository } from '../src/repositories/project-repository.js';
 import { createTestMeetingRepository } from './helpers/test-db.js';
+import { seedLegacyProjectRegistryFixture } from './helpers/project-registry-fixtures.js';
 
 describe('/diag/projects', () => {
   it('returns registry counts and open conflicts without secrets', async () => {
     const database = createTestMeetingRepository();
+    seedLegacyProjectRegistryFixture(database.client);
     const app = buildApp(testDependenciesWithSeededProjects(new ProjectRepository(database.client)));
 
     const response = await app.inject({ method: 'GET', url: '/diag/projects' });

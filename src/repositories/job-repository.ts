@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
+import { canonicalJson, sha256 } from '../services/canonical-json.js';
 
-export interface DurableJob {
+export interface ProcessMinuteJob {
   kind: 'process_minute';
   key: string;
   minuteId: string;
@@ -8,6 +9,49 @@ export interface DurableJob {
   attemptsByCode: RetryAttemptsByCode;
   leaseExpiresAt?: string;
 }
+
+export interface ExtractContextCandidatesJob {
+  kind: 'extract_context_candidates';
+  key: string;
+  sourceId: string;
+  extractionKey: string;
+  attempt: number;
+  leaseExpiresAt?: string;
+}
+
+export interface FounderStreamJob {
+  kind: 'capture_group_message' | 'analyze_founder_stream_batch';
+  key: string;
+  chatId: string;
+  sourceIds: string[];
+  threadId: string | null;
+  windowKey: string;
+  attempt: number;
+  failureStage?: string;
+  failureCode?: string;
+  leaseExpiresAt?: string;
+}
+export interface FounderAttachmentJob {
+  kind: 'capture_founder_attachment'; key: string; chatId: string; messageId: string; fileKey: string;
+  fileName: string; threadId: string | null; occurredAt: string; authorOpenId: string | null;
+  attempt: number; failureStage?: string; failureCode?: string; leaseExpiresAt?: string;
+}
+/** Scoped by projectKey (project_space_bindings), never by chatId — see founder-stream-worker.ts eligibility split. */
+export interface FounderStreamSpaceJob {
+  kind: 'analyze_founder_stream_space_batch';
+  key: string;
+  projectKey: string;
+  sourceIds: string[];
+  since: string;
+  until: string;
+  windowKey: string;
+  attempt: number;
+  failureStage?: string;
+  failureCode?: string;
+  leaseExpiresAt?: string;
+}
+export type FounderDurableJob = FounderStreamJob | FounderAttachmentJob | FounderStreamSpaceJob;
+export type DurableJob = ProcessMinuteJob | ExtractContextCandidatesJob | FounderDurableJob;
 
 export type RetryErrorCode = 'MINUTE_NOT_READY' | 'RATE_LIMITED';
 
@@ -21,10 +65,18 @@ export interface ProcessMinuteJobPayload {
   subscriberOpenIds: string[];
   attemptsByCode: RetryAttemptsByCode;
   failureReason?: string;
+  contextFailureCode?: string;
 }
 
 export interface EnqueueProcessMinuteOptions {
   subscriberOpenIds?: string[];
+}
+
+export interface ExtractContextCandidatesJobPayload {
+  sourceId: string;
+  extractionKey: string;
+  attempt: number;
+  failureReason?: string;
 }
 
 const zeroRetryAttempts = (): RetryAttemptsByCode => ({
@@ -59,8 +111,8 @@ export class JobRepository {
   enqueueProcessMinute(
     minuteId: string,
     options: EnqueueProcessMinuteOptions = {}
-  ): { created: boolean; job: DurableJob } {
-    const job: DurableJob = {
+  ): { created: boolean; job: ProcessMinuteJob } {
+    const job: ProcessMinuteJob = {
       kind: 'process_minute',
       key: `minute:${minuteId}`,
       minuteId,
@@ -85,6 +137,26 @@ export class JobRepository {
     return { created: result.changes === 1, job };
   }
 
+  enqueueContextExtraction(input: {
+    sourceId: string;
+    extractorVersion: string;
+    promptVersion: string;
+  }): { created: boolean; job: ExtractContextCandidatesJob } {
+    const extractionKey = `${input.extractorVersion}:${input.promptVersion}`;
+    const key = `context-extract:${input.sourceId}:${input.extractorVersion}:${input.promptVersion}`;
+    const job: ExtractContextCandidatesJob = {
+      kind: 'extract_context_candidates', key, sourceId: input.sourceId,
+      extractionKey, attempt: 0
+    };
+    const now = new Date().toISOString();
+    const result = this.client.prepare(`
+      INSERT INTO batch_jobs (id, type, stable_key, payload, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'queued', ?, ?)
+      ON CONFLICT(stable_key) DO NOTHING
+    `).run(key, job.kind, key, serializeContextJobPayload(job), now, now);
+    return { created: result.changes === 1, job };
+  }
+
   list(): DurableJob[] {
     const rows = this.client.prepare(`
       SELECT type, stable_key, payload
@@ -93,35 +165,130 @@ export class JobRepository {
     `).all() as JobRow[];
 
     return rows.flatMap((row) => {
-      const payload = normalizeProcessMinuteJobPayload(row.payload);
-      return payload ? [{
-        kind: row.type,
-        key: row.stable_key,
-        minuteId: payload.minuteId,
-        subscriberOpenIds: payload.subscriberOpenIds,
-        attemptsByCode: payload.attemptsByCode
-      }] : [];
+      const job = normalizeJobRow(row);
+      return job ? [job] : [];
     });
   }
 
-  leaseNextProcessMinute(availableAt: Date): DurableJob | null {
+  enqueueGroupCapture(input: { messageId: string; chatId: string; sourceIds: string[]; threadId: string | null; capturedAt: Date }): void {
+    const key = `capture_group_message:${input.messageId}`;
+    const payload = { chatId: input.chatId, sourceIds: input.sourceIds, threadId: input.threadId,
+      windowKey: '', attempt: 0 };
+    this.client.transaction(() => {
+      const result = this.client.prepare(`INSERT INTO batch_jobs (id,type,stable_key,payload,status,created_at,updated_at)
+        VALUES (?, 'capture_group_message', ?, ?, 'queued', ?, ?) ON CONFLICT(stable_key) DO NOTHING`)
+        .run(key, key, JSON.stringify(payload), input.capturedAt.toISOString(), input.capturedAt.toISOString());
+      if (result.changes === 1) {
+        // Arrival intent, not eventual worker processing time, establishes the quiet period.
+        // This updates only pending deadlines, never an active worker's lease or model payload.
+        this.client.prepare(`UPDATE batch_jobs SET updated_at = MAX(updated_at, ?)
+          WHERE type='analyze_founder_stream_batch' AND status IN ('queued','retry') AND json_valid(payload)
+            AND json_extract(payload,'$.chatId')=? AND json_extract(payload,'$.threadId') IS ?
+            AND json_extract(payload,'$.windowKey') LIKE 'live:%'`)
+          .run(new Date(input.capturedAt.getTime() + 300_000).toISOString(), input.chatId, input.threadId);
+      }
+    }).immediate();
+  }
+
+  enqueueFounderAttachment(input: { messageId:string; chatId:string; fileKey:string; fileName:string; threadId:string|null;
+    occurredAt:string; authorOpenId:string|null; capturedAt:Date }): void {
+    const key=`capture_founder_attachment:${input.messageId}`;
+    const payload={chatId:input.chatId,messageId:input.messageId,fileKey:input.fileKey,fileName:input.fileName,
+      threadId:input.threadId,occurredAt:input.occurredAt,authorOpenId:input.authorOpenId,attempt:0};
+    this.client.prepare(`INSERT INTO batch_jobs (id,type,stable_key,payload,status,created_at,updated_at)
+      VALUES (?, 'capture_founder_attachment', ?, ?, 'queued', ?, ?) ON CONFLICT(stable_key) DO NOTHING`)
+      .run(key,key,JSON.stringify(payload),input.capturedAt.toISOString(),input.capturedAt.toISOString());
+  }
+
+  debounceFounderStream(input: { chatId: string; sourceIds: string[]; threadId: string | null; now: Date }): string {
+    return this.client.transaction(() => {
+      const rows = this.client.prepare(`SELECT stable_key,payload FROM batch_jobs WHERE type='analyze_founder_stream_batch'
+        AND status='queued' ORDER BY created_at, stable_key`).all() as { stable_key: string; payload: string }[];
+      const existing = rows.find(row => { const value = JSON.parse(row.payload); return value.chatId === input.chatId &&
+        value.threadId === input.threadId && String(value.windowKey).startsWith('live:'); });
+      const previous = existing ? JSON.parse(existing.payload) : null;
+      const sourceIds = [...new Set([...(previous?.sourceIds ?? []), ...input.sourceIds])].sort();
+      const windowKey = previous?.windowKey ?? `live:${sha256(input.threadId ?? 'root').slice(0,16)}:${sha256(canonicalJson(input.sourceIds.slice().sort())).slice(0,16)}`;
+      const key = `analyze_founder_stream_batch:${input.chatId}:${windowKey}`;
+      const payload = JSON.stringify({ chatId: input.chatId, sourceIds, threadId: input.threadId, windowKey, attempt: 0 });
+      const due = new Date(input.now.getTime() + 300_000).toISOString();
+      this.client.prepare(`INSERT INTO batch_jobs (id,type,stable_key,payload,status,created_at,updated_at)
+        VALUES (?, 'analyze_founder_stream_batch', ?, ?, 'queued', ?, ?)
+        ON CONFLICT(stable_key) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at WHERE batch_jobs.status='queued'`)
+        .run(key,key,payload,input.now.toISOString(),due);
+      return key;
+    }).immediate();
+  }
+
+  /** Queued for the founder-stream consumer only; existing workers do not lease this kind. */
+  enqueueFounderStreamBatch(input: {
+    chatId: string; since: string; until: string; sourceIds: readonly string[]; capturedAt: Date;
+    recoveryThreadId?: string | null;
+  }): { created: boolean; key: string } {
+    const sourceIds = [...new Set(input.sourceIds)].sort();
+    if (sourceIds.length === 0) throw new Error('founder stream batch requires sources');
+    const windowKey = `${input.recoveryThreadId === undefined ? 'history' : 'live:recovery'}:${sha256(canonicalJson(sourceIds))}`;
+    const payload = { chatId: input.chatId, since: input.since, until: input.until, sourceIds, windowKey, threadId: input.recoveryThreadId ?? null, attempt: 0 };
+    const key = `analyze_founder_stream_batch:${input.chatId}:${windowKey}`;
+    const timestamp = input.capturedAt.toISOString();
+    const result = this.client.prepare(`
+      INSERT INTO batch_jobs (id, type, stable_key, payload, status, created_at, updated_at)
+      VALUES (?, 'analyze_founder_stream_batch', ?, ?, 'queued', ?, ?)
+      ON CONFLICT(stable_key) DO NOTHING
+    `).run(key, key, JSON.stringify(payload), timestamp, timestamp);
+    return { created: result.changes === 1, key };
+  }
+
+  /** Queued for the founder-stream consumer only; scoped by projectKey instead of chatId. */
+  enqueueSpaceStreamBatch(input: {
+    projectKey: string; since: string; until: string; sourceIds: readonly string[]; capturedAt: Date;
+  }): { created: boolean; key: string } {
+    const sourceIds = [...new Set(input.sourceIds)].sort();
+    if (sourceIds.length === 0) throw new Error('space stream batch requires sources');
+    const windowKey = `space:${sha256(canonicalJson(sourceIds))}`;
+    const payload = { projectKey: input.projectKey, since: input.since, until: input.until, sourceIds, windowKey, attempt: 0 };
+    const key = `analyze_founder_stream_space_batch:${input.projectKey}:${windowKey}`;
+    const timestamp = input.capturedAt.toISOString();
+    const result = this.client.prepare(`
+      INSERT INTO batch_jobs (id, type, stable_key, payload, status, created_at, updated_at)
+      VALUES (?, 'analyze_founder_stream_space_batch', ?, ?, 'queued', ?, ?)
+      ON CONFLICT(stable_key) DO NOTHING
+    `).run(key, key, JSON.stringify(payload), timestamp, timestamp);
+    return { created: result.changes === 1, key };
+  }
+
+  leaseNextProcessMinute(availableAt: Date): ProcessMinuteJob | null {
+    const job = this.leaseNextSupportedJob(availableAt, ['process_minute']);
+    return job?.kind === 'process_minute' ? job : null;
+  }
+
+  leaseNextSupportedJob(
+    availableAt: Date,
+    supportedKinds: readonly DurableJob['kind'][] = ['process_minute', 'extract_context_candidates']
+  ): DurableJob | null {
+    const kinds = [...new Set(supportedKinds)];
+    if (kinds.length === 0) return null;
+    if (kinds.some((kind) => !['process_minute', 'extract_context_candidates', 'capture_group_message', 'capture_founder_attachment', 'analyze_founder_stream_batch', 'analyze_founder_stream_space_batch'].includes(kind))) {
+      throw new Error('unsupported durable job kind');
+    }
     const leaseUntil = new Date(availableAt.getTime() + this.leaseDurationMs);
     return this.client.transaction(() => {
+      const placeholders = kinds.map(() => '?').join(', ');
       const row = this.client.prepare(`
         SELECT type, stable_key, payload
         FROM batch_jobs
-        WHERE type = 'process_minute'
+        WHERE type IN (${placeholders})
           AND status IN ('queued', 'retry', 'processing')
           AND updated_at <= ?
-        ORDER BY created_at ASC
+        ORDER BY CASE WHEN type IN ('capture_group_message','capture_founder_attachment') THEN 0 ELSE 1 END, created_at ASC
         LIMIT 1
-      `).get(availableAt.toISOString()) as JobRow | undefined;
+      `).get(...kinds, availableAt.toISOString()) as JobRow | undefined;
       if (!row) {
         return null;
       }
 
-      const payload = normalizeProcessMinuteJobPayload(row.payload);
-      if (!payload) {
+      const job = normalizeJobRow(row);
+      if (!job) {
         this.client.prepare(`
           UPDATE batch_jobs
           SET status = 'failed', payload = ?
@@ -142,11 +309,7 @@ export class JobRepository {
       }
 
       return {
-        kind: row.type,
-        key: row.stable_key,
-        minuteId: payload.minuteId,
-        subscriberOpenIds: payload.subscriberOpenIds,
-        attemptsByCode: payload.attemptsByCode,
+        ...job,
         leaseExpiresAt: leaseUntil.toISOString()
       };
     })();
@@ -184,7 +347,7 @@ export class JobRepository {
   }
 
   markRetry(
-    job: DurableJob,
+    job: ProcessMinuteJob,
     retryCode: RetryErrorCode,
     availableAt: Date,
     attemptedAt: Date
@@ -209,7 +372,7 @@ export class JobRepository {
   }
 
   markFailed(
-    job: DurableJob,
+    job: ProcessMinuteJob,
     failureReason: string,
     failedAt: Date,
     retryCode?: RetryErrorCode
@@ -234,10 +397,52 @@ export class JobRepository {
     );
     assertLeaseMutation(result.changes, job.key);
   }
+
+  recordContextFailure(job: ProcessMinuteJob, failureCode: string, recordedAt: Date): void {
+    const leaseExpiresAt = requireLease(job);
+    const result = this.client.prepare(`
+      UPDATE batch_jobs SET payload = ?
+      WHERE stable_key = ? AND status = 'processing' AND updated_at = ? AND updated_at > ?
+    `).run(serializeJobPayload(job, job.attemptsByCode, undefined, failureCode),
+      job.key, leaseExpiresAt, recordedAt.toISOString());
+    assertLeaseMutation(result.changes, job.key);
+  }
+
+  markContextRetry(job: ExtractContextCandidatesJob, availableAt: Date, attemptedAt: Date): void {
+    const leaseExpiresAt = requireLease(job);
+    const nextAttempt = Math.min(job.attempt + 1, Number.MAX_SAFE_INTEGER);
+    const result = this.client.prepare(`
+      UPDATE batch_jobs SET status = 'retry', payload = ?, updated_at = ?
+      WHERE stable_key = ? AND status = 'processing' AND updated_at = ? AND updated_at > ?
+    `).run(serializeContextJobPayload(job, nextAttempt), availableAt.toISOString(),
+      job.key, leaseExpiresAt, attemptedAt.toISOString());
+    assertLeaseMutation(result.changes, job.key);
+  }
+
+  markContextFailed(job: ExtractContextCandidatesJob, failureReason: string, failedAt: Date): void {
+    const leaseExpiresAt = requireLease(job);
+    const result = this.client.prepare(`
+      UPDATE batch_jobs SET status = 'failed', payload = ?, updated_at = ?
+      WHERE stable_key = ? AND status = 'processing' AND updated_at = ? AND updated_at > ?
+    `).run(serializeContextJobPayload(job, job.attempt, failureReason), failedAt.toISOString(),
+      job.key, leaseExpiresAt, failedAt.toISOString());
+    assertLeaseMutation(result.changes, job.key);
+  }
+
+  retryFounderStream(job: FounderDurableJob, now: Date, failure?: { stage: string; code: string }): void {
+    const { kind: _kind, key: _key, leaseExpiresAt: _lease, ...payload } = job;
+    const attempt = job.attempt + 1;
+    const result = this.client.prepare(`UPDATE batch_jobs SET status=?,payload=?,updated_at=?
+      WHERE stable_key=? AND status='processing' AND updated_at=? AND updated_at>?`)
+      .run(attempt >= 3 ? 'failed' : 'retry', JSON.stringify({ ...payload, attempt, failureReason: 'FOUNDER_STREAM_PROCESSING_FAILED',
+          ...(failure ? { failureStage: failure.stage, failureCode: failure.code } : {}) }),
+        new Date(now.getTime() + 30_000).toISOString(), job.key, requireLease(job), now.toISOString());
+    assertLeaseMutation(result.changes, job.key);
+  }
 }
 
 interface JobRow {
-  type: DurableJob['kind'];
+  type: string;
   stable_key: string;
   payload: string;
 }
@@ -288,22 +493,104 @@ export function normalizeProcessMinuteJobPayload(
     attemptsByCode,
     ...(typeof parsed.failureReason === 'string'
       ? { failureReason: parsed.failureReason }
+      : {}),
+    ...(typeof parsed.contextFailureCode === 'string'
+      ? { contextFailureCode: parsed.contextFailureCode }
       : {})
   };
 }
 
 function serializeJobPayload(
-  job: Pick<DurableJob, 'minuteId' | 'attemptsByCode'> & Partial<Pick<DurableJob, 'subscriberOpenIds'>>,
+  job: Pick<ProcessMinuteJob, 'minuteId' | 'attemptsByCode'> & Partial<Pick<ProcessMinuteJob, 'subscriberOpenIds'>>,
   attemptsByCode: RetryAttemptsByCode = job.attemptsByCode,
-  failureReason?: string
+  failureReason?: string,
+  contextFailureCode?: string
 ): string {
   const subscriberOpenIds = normalizeOpenIds(job.subscriberOpenIds);
   return JSON.stringify({
     minuteId: job.minuteId,
     ...(subscriberOpenIds.length > 0 ? { subscriberOpenIds } : {}),
     attemptsByCode,
-    ...(failureReason ? { failureReason } : {})
+    ...(failureReason ? { failureReason } : {}),
+    ...(contextFailureCode ? { contextFailureCode } : {})
   });
+}
+
+export function normalizeContextJobPayload(payload: string): ExtractContextCandidatesJobPayload | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(payload); } catch { return null; }
+  if (!isRecord(parsed) || typeof parsed.sourceId !== 'string' || !parsed.sourceId.trim() ||
+    typeof parsed.extractionKey !== 'string' || !parsed.extractionKey.trim() ||
+    !isRetryAttempt(parsed.attempt)) return null;
+  return { sourceId: parsed.sourceId.trim(), extractionKey: parsed.extractionKey.trim(),
+    attempt: parsed.attempt, ...(typeof parsed.failureReason === 'string' ? { failureReason: parsed.failureReason } : {}) };
+}
+
+function serializeContextJobPayload(
+  job: Pick<ExtractContextCandidatesJob, 'sourceId' | 'extractionKey' | 'attempt'>,
+  attempt = job.attempt,
+  failureReason?: string
+): string {
+  return JSON.stringify({ sourceId: job.sourceId, extractionKey: job.extractionKey, attempt,
+    ...(failureReason ? { failureReason } : {}) });
+}
+
+function normalizeJobRow(row: JobRow): DurableJob | null {
+  if(row.type==='capture_founder_attachment'){
+    try{
+      const payload=JSON.parse(row.payload),allowed=['chatId','messageId','fileKey','fileName','threadId','occurredAt','authorOpenId','attempt','failureReason','failureStage','failureCode'];
+      if(!isRecord(payload)||Object.keys(payload).some(k=>!allowed.includes(k))||typeof payload.chatId!=='string'||!payload.chatId.trim()||
+        typeof payload.messageId!=='string'||!payload.messageId.trim()||typeof payload.fileKey!=='string'||!payload.fileKey.trim()||
+        typeof payload.fileName!=='string'||!payload.fileName.trim()||typeof payload.occurredAt!=='string'||!Number.isFinite(Date.parse(payload.occurredAt))||
+        (payload.attempt!==undefined&&!isRetryAttempt(payload.attempt)))return null;
+      return{kind:'capture_founder_attachment',key:row.stable_key,chatId:payload.chatId,messageId:payload.messageId,fileKey:payload.fileKey,
+        fileName:payload.fileName,threadId:typeof payload.threadId==='string'?payload.threadId:null,occurredAt:payload.occurredAt,
+        authorOpenId:typeof payload.authorOpenId==='string'?payload.authorOpenId:null,attempt:payload.attempt??0,
+        ...(typeof payload.failureStage==='string'?{failureStage:payload.failureStage}:{}),
+        ...(typeof payload.failureCode==='string'?{failureCode:payload.failureCode}:{})};
+    }catch{return null}
+  }
+  if (row.type === 'capture_group_message' || row.type === 'analyze_founder_stream_batch') {
+    try {
+      const payload = JSON.parse(row.payload);
+      const allowed = ['chatId','sourceIds','threadId','windowKey','attempt','failureReason','failureStage','failureCode','since','until'];
+      if (!isRecord(payload) || Object.keys(payload).some(k => !allowed.includes(k)) || typeof payload.chatId !== 'string' ||
+        !payload.chatId.trim() || !isStringArray(payload.sourceIds) || !payload.sourceIds.length ||
+        payload.sourceIds.some(id => !id.startsWith('ctxsrc_')) || (payload.attempt !== undefined && !isRetryAttempt(payload.attempt))) return null;
+      return { kind: row.type, key: row.stable_key, chatId: payload.chatId, sourceIds: payload.sourceIds,
+        threadId: typeof payload.threadId === 'string' ? payload.threadId : null,
+        windowKey: typeof payload.windowKey === 'string' ? payload.windowKey : row.stable_key, attempt: payload.attempt ?? 0,
+        ...(typeof payload.failureStage==='string'?{failureStage:payload.failureStage}:{}),
+        ...(typeof payload.failureCode==='string'?{failureCode:payload.failureCode}:{}) } as FounderStreamJob;
+    } catch { return null; }
+  }
+  if (row.type === 'analyze_founder_stream_space_batch') {
+    try {
+      const payload = JSON.parse(row.payload);
+      const allowed = ['projectKey','sourceIds','windowKey','attempt','failureReason','failureStage','failureCode','since','until'];
+      if (!isRecord(payload) || Object.keys(payload).some(k => !allowed.includes(k)) || typeof payload.projectKey !== 'string' ||
+        !payload.projectKey.trim() || !isStringArray(payload.sourceIds) || !payload.sourceIds.length ||
+        payload.sourceIds.some(id => !id.startsWith('ctxsrc_')) || typeof payload.since !== 'string' || typeof payload.until !== 'string' ||
+        (payload.attempt !== undefined && !isRetryAttempt(payload.attempt))) return null;
+      return { kind: 'analyze_founder_stream_space_batch', key: row.stable_key, projectKey: payload.projectKey,
+        sourceIds: payload.sourceIds, since: payload.since, until: payload.until,
+        windowKey: typeof payload.windowKey === 'string' ? payload.windowKey : row.stable_key, attempt: payload.attempt ?? 0,
+        ...(typeof payload.failureStage==='string'?{failureStage:payload.failureStage}:{}),
+        ...(typeof payload.failureCode==='string'?{failureCode:payload.failureCode}:{}) } as FounderStreamSpaceJob;
+    } catch { return null; }
+  }
+  if (row.type === 'process_minute') {
+    const payload = normalizeProcessMinuteJobPayload(row.payload);
+    return payload ? { kind: 'process_minute', key: row.stable_key,
+      minuteId: payload.minuteId, subscriberOpenIds: payload.subscriberOpenIds,
+      attemptsByCode: payload.attemptsByCode } : null;
+  }
+  if (row.type === 'extract_context_candidates') {
+    const payload = normalizeContextJobPayload(row.payload);
+    return payload ? { kind: 'extract_context_candidates', key: row.stable_key,
+      sourceId: payload.sourceId, extractionKey: payload.extractionKey, attempt: payload.attempt } : null;
+  }
+  return null;
 }
 
 function incrementRetryAttempt(

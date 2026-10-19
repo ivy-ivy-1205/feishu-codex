@@ -8,6 +8,7 @@ export interface DurableJobConsumerDependencies {
   intervalMs?: number;
   now?: () => Date;
   onError?: (error: unknown) => void;
+  afterTick?: () => Promise<void>;
 }
 
 export class DurableJobConsumer {
@@ -55,6 +56,7 @@ export class DurableJobConsumer {
       if (job) {
         await this.dependencies.process(job);
       }
+      await this.dependencies.afterTick?.();
     } catch (error) {
       this.dependencies.onError?.(error);
     } finally {

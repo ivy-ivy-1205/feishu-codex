@@ -1,0 +1,20 @@
+{
+  "expected": { "topics": 31, "perspectives": 21, "relations": 25 },
+  "groups": [
+    {
+      "canonical": {
+        "id": "topic_106cf9757e6cae55cbca67fa5e677cd7",
+        "version": 2,
+        "name": "AiJia Founder Alignment Room / AiJia 合伙人对齐室",
+        "stage": "active_project",
+        "outcome": "让 Ivy 与 James 对同一场景、目标、方向和完成标准保持高度统一，及时暴露理解偏差并减少返工和额外沟通。"
+      },
+      "duplicates": [
+        { "id": "topic_2a5ff198f40e93dbf62bf35df7e69484", "version": 1 },
+        { "id": "topic_28ad87447631a797a9562f069a4f711c", "version": 1 }
+      ]
+    }
+  ],
+  "partOf": [],
+  "newTopics": []
+}

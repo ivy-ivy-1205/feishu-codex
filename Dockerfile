@@ -17,7 +17,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates git \
+  && apt-get install -y --no-install-recommends ca-certificates git fonts-noto-cjk \
   && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 RUN npm install -g @openai/codex@0.144.6

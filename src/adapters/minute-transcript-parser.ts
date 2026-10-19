@@ -1,5 +1,13 @@
 import type { Readable } from 'node:stream';
 import { TranscriptSegment, type TranscriptSegment as TranscriptSegmentRecord } from '../domain/meeting.js';
+import { matchFeishuSingleSpeakerSrtExport } from './minute-transcript-srt.js';
+
+export type MinuteTranscriptSpeakerBoundaryMode =
+  | 'verified_single_speaker_srt';
+
+export interface MinuteTranscriptParseOptions {
+  speakerBoundaryMode?: MinuteTranscriptSpeakerBoundaryMode;
+}
 
 export class MinuteTranscriptParseError extends Error {
   readonly code = 'MINUTE_TRANSCRIPT_INVALID';
@@ -11,19 +19,48 @@ export class MinuteTranscriptParseError extends Error {
 }
 
 export async function parseMinuteTranscriptStream(
-  stream: Readable
+  stream: Readable,
+  options: MinuteTranscriptParseOptions = {}
 ): Promise<TranscriptSegmentRecord[]> {
   const raw = await readUtf8(stream);
+  return parseMinuteTranscriptText(raw, options);
+}
+
+export function parseMinuteTranscriptText(
+  raw: string,
+  options: MinuteTranscriptParseOptions = {}
+): TranscriptSegmentRecord[] {
   let payload: unknown;
   try {
     payload = JSON.parse(raw);
   } catch {
+    if (options.speakerBoundaryMode === 'verified_single_speaker_srt') {
+      return parseVerifiedSingleSpeakerSrt(raw);
+    }
     return parsePlainTextTranscript(raw);
   }
 
   const segments = extractSegments(payload);
   try {
     return segments.map(normalizeSegment);
+  } catch {
+    throw new MinuteTranscriptParseError();
+  }
+}
+
+function parseVerifiedSingleSpeakerSrt(raw: string): TranscriptSegmentRecord[] {
+  const matched = matchFeishuSingleSpeakerSrtExport(raw);
+  if (!matched) {
+    throw new MinuteTranscriptParseError();
+  }
+  try {
+    return matched.segments.map((segment) => TranscriptSegment.parse({
+      speakerName: '说话人 1',
+      timingKind:'media_offset',
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      text: segment.text
+    }));
   } catch {
     throw new MinuteTranscriptParseError();
   }
@@ -48,10 +85,13 @@ function parsePlainTextTranscript(raw: string): TranscriptSegmentRecord[] {
   }
 
   const speakerNames = extractPlainTextSpeakerNames(lines);
-  if (speakerNames.length === 0) {
+  const hasNumberedSpeakerHeadings = lines.some(
+    (line) => numberedSpeakerName(line) !== null
+  );
+  if (speakerNames.length === 0 && !hasNumberedSpeakerHeadings) {
     speakerNames.push(...inferPlainTextSpeakerNames(lines));
   }
-  if (speakerNames.length === 0) {
+  if (speakerNames.length === 0 && !hasNumberedSpeakerHeadings) {
     throw new MinuteTranscriptParseError();
   }
   const speakerSet = new Set(speakerNames.map(normalizeSpeakerKey));
@@ -69,6 +109,15 @@ function parsePlainTextTranscript(raw: string): TranscriptSegmentRecord[] {
     }
     if (skipSpeakerListLine) {
       skipSpeakerListLine = false;
+      continue;
+    }
+
+    const numberedSpeaker = numberedSpeakerName(line);
+    if (numberedSpeaker !== null) {
+      if (current !== null && current.textLines.length > 0) {
+        segments.push(current);
+      }
+      current = { speakerName: numberedSpeaker, textLines: [] };
       continue;
     }
 
@@ -92,6 +141,7 @@ function parsePlainTextTranscript(raw: string): TranscriptSegmentRecord[] {
   try {
     return segments.map((segment, index) => TranscriptSegment.parse({
       speakerName: segment.speakerName,
+      timingKind:'ordinal',
       startMs: index,
       endMs: index + 1,
       text: segment.textLines.join('\n')
@@ -138,7 +188,11 @@ function inferPlainTextSpeakerNames(lines: string[]): string[] {
 }
 
 function isPlainTextSpeakerCandidate(line: string): boolean {
-  if (isPlainTextHeaderLine(line) || isSpeakerMarkerLine(line)) {
+  if (
+    isPlainTextHeaderLine(line) ||
+    isSpeakerMarkerLine(line) ||
+    numberedSpeakerName(line) !== null
+  ) {
     return false;
   }
   if (line.length === 0 || line.length > 40) {
@@ -156,6 +210,11 @@ function isPlainTextHeaderLine(line: string): boolean {
 
 function isSpeakerMarkerLine(line: string): boolean {
   return /^发言人(?:\(\d+\)|（\d+）)?[:：]?$/u.test(line);
+}
+
+function numberedSpeakerName(line: string): string | null {
+  const match = /^说话人[ \t]+([1-9]\d*)$/u.exec(line);
+  return match?.[1] ? `说话人 ${match[1]}` : null;
 }
 
 function matchSpeakerName(
@@ -196,6 +255,7 @@ function normalizeSegment(input: unknown): TranscriptSegmentRecord {
   }
   return TranscriptSegment.parse({
     speakerName: pickString(input, ['speakerName', 'speaker_name', 'speaker']),
+    timingKind:'media_offset',
     startMs: pickNumber(input, ['startMs', 'start_ms', 'start_time']),
     endMs: pickNumber(input, ['endMs', 'end_ms', 'end_time']),
     text: pickString(input, ['text', 'content'])

@@ -2,9 +2,11 @@ import fastify, {
   type FastifyInstance,
   type FastifyServerOptions
 } from 'fastify';
+import type Database from 'better-sqlite3';
 import type { ReplyDecision } from './domain/authorization.js';
 import {
-  registerFeishuEventRoutes
+  registerFeishuEventRoutes,
+  type FounderFeedbackRouteDependencies
 } from './routes/feishu-events.js';
 import {
   registerFeishuOAuthRoutes
@@ -17,6 +19,16 @@ import type { FeishuOAuthService } from './services/feishu-oauth.js';
 import type { IngestionResult } from './services/minute-ingestion.js';
 import type { ProjectRepository } from './repositories/project-repository.js';
 import { registerProjectDiagnosticsRoute } from './routes/project-diagnostics.js';
+import { registerContextDiagnosticsRoute } from './routes/context-diagnostics.js';
+import { registerContextReviewActionRoutes } from './routes/context-review-actions.js';
+import type { OutboxRepository } from './repositories/outbox-repository.js';
+import type { ContextRecordRepository } from './repositories/context-record-repository.js';
+import type { FounderStreamRoute } from './services/founder-stream-worker.js';
+import { registerFounderStreamDiagnosticsRoute } from './routes/founder-stream-diagnostics.js';
+import {
+  registerSpaceSyncIngestRoutes,
+  type SpaceSyncIngestRouteDependencies
+} from './routes/space-sync.js';
 
 type LoggerOption = FastifyServerOptions['logger'];
 
@@ -26,9 +38,22 @@ export interface AppDependencies {
   encryptKey: string;
   ingestMinute(event: unknown): IngestionResult;
   routeReply(input: unknown): ReplyDecision;
+  founderFeedback?: FounderFeedbackRouteDependencies;
+  founderStream?: FounderStreamRoute;
+  founderStreamDiagnostics?: { client: Database.Database };
   sendTextMessage?(input: { chatId: string; text: string }): Promise<{ messageId: string }>;
   oauth?: FeishuOAuthService;
   projectRepository?: ProjectRepository;
+  context?: {
+    client: Database.Database;
+    review?: {
+      ivyPrivateChatId: string;
+      approverOpenIds: readonly string[];
+      outboxRepository: OutboxRepository;
+      recordRepository: ContextRecordRepository;
+    };
+  };
+  spaceSyncIngest?: SpaceSyncIngestRouteDependencies;
   logger?: LoggerOption;
 }
 
@@ -43,6 +68,8 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
     encryptKey: dependencies.encryptKey,
     ingestMinute: dependencies.ingestMinute,
     routeReply: dependencies.routeReply,
+    founderFeedback: dependencies.founderFeedback,
+    founderStream: dependencies.founderStream,
     sendTextMessage: dependencies.sendTextMessage,
     recordOAuthRevocation: dependencies.oauth
       ? (openId) => dependencies.oauth!.recordRevocation(openId)
@@ -51,11 +78,25 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
       ? (event) => dependencies.oauth!.recordMinuteEvent(event)
       : undefined
   });
+  registerContextReviewActionRoutes(app, {
+    verificationToken: dependencies.verificationToken,
+    encryptKey: dependencies.encryptKey,
+    ...(dependencies.context?.review ? { review: dependencies.context.review } : {})
+  });
   if (dependencies.oauth) {
     registerFeishuOAuthRoutes(app, { oauth: dependencies.oauth });
   }
   if (dependencies.projectRepository) {
     registerProjectDiagnosticsRoute(app, dependencies.projectRepository);
+  }
+  if (dependencies.context) {
+    registerContextDiagnosticsRoute(app, dependencies.context.client);
+  }
+  if (dependencies.founderStreamDiagnostics) {
+    registerFounderStreamDiagnosticsRoute(app, dependencies.founderStreamDiagnostics.client);
+  }
+  if (dependencies.spaceSyncIngest) {
+    registerSpaceSyncIngestRoutes(app, dependencies.spaceSyncIngest);
   }
 
   return app;

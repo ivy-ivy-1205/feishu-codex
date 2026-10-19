@@ -8,17 +8,24 @@ import {
 import {
   JobRepository,
   LeaseLostError,
-  type DurableJob,
+  type ProcessMinuteJob,
   type RetryErrorCode
 } from '../repositories/job-repository.js';
 import { MeetingRepository } from '../repositories/meeting-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
 import { ProjectRepository } from '../repositories/project-repository.js';
+import { ContextSourceRepository } from '../repositories/context-source-repository.js';
+import {
+  captureMinuteTranscriptSource,
+  ContextCaptureError,
+  type ContextCaptureFailureCode
+} from './context-source-capture.js';
 import { mapTodoToProject } from './project-mapper.js';
 import {
   MeetingSummaryRenderError,
   renderMeetingSummary
 } from './summary-renderer.js';
+import { MinuteTranscriptParseError } from '../adapters/minute-transcript-parser.js';
 
 const maximumRetryDelayMs = 60_000;
 const retryBudgets = {
@@ -27,6 +34,7 @@ const retryBudgets = {
 } as const satisfies Record<RetryErrorCode, number>;
 
 export interface MeetingWorkerDependencies {
+  founder?: { minuteCaptureChatId?: string; captureMinute(context: import('../ports/feishu.js').MinuteContext): void | Promise<void> };
   reader: FeishuMinutesReader;
   summarizer: MeetingSummarizer;
   meetingRepository: MeetingRepository;
@@ -34,10 +42,20 @@ export interface MeetingWorkerDependencies {
   outboxRepository: OutboxRepository;
   targetChatId: string;
   now?: () => Date;
+  context?: {
+    enabled: false;
+  } | {
+    enabled: true;
+    sourceRepository: ContextSourceRepository;
+    extractorVersion: string;
+    promptVersion: string;
+    sourceMaxBytes: number;
+    sourceMaxSegments: number;
+  };
 }
 
 export async function processMinuteJob(
-  job: DurableJob,
+  job: ProcessMinuteJob,
   dependencies: MeetingWorkerDependencies
 ): Promise<'completed' | 'retry' | 'lost_lease'> {
   assertSharedClient(dependencies);
@@ -47,6 +65,35 @@ export async function processMinuteJob(
     const context = MinuteContext.parse(await dependencies.reader.getMinute(job.minuteId, {
       subscriberOpenIds: job.subscriberOpenIds ?? []
     }));
+    if (dependencies.context?.enabled) {
+      const contextDependencies = dependencies.context;
+      const captureAt = now();
+      let stage: 'source' | 'enqueue' = 'source';
+      try {
+        const captured = captureMinuteTranscriptSource(context, captureAt, {
+          maxBytes: contextDependencies.sourceMaxBytes,
+          maxSegments: contextDependencies.sourceMaxSegments
+        }, dependencies.founder?.minuteCaptureChatId);
+        dependencies.meetingRepository.client.transaction(() => {
+          if (!dependencies.jobRepository.ownsLease(job, captureAt)) {
+            throw new LeaseLostError(job.key);
+          }
+          const saved = contextDependencies.sourceRepository.saveSource(captured.source);
+          stage = 'enqueue';
+          dependencies.jobRepository.enqueueContextExtraction({
+            sourceId: saved.source.id,
+            extractorVersion: contextDependencies.extractorVersion,
+            promptVersion: contextDependencies.promptVersion
+          });
+        })();
+      } catch (error) {
+        if (error instanceof LeaseLostError || isSharedDatabaseFailure(error)) throw error;
+        const failureCode: ContextCaptureFailureCode = error instanceof ContextCaptureError
+          ? error.code
+          : stage === 'source' ? 'CONTEXT_SOURCE_CAPTURE_FAILED' : 'CONTEXT_JOB_ENQUEUE_FAILED';
+        dependencies.jobRepository.recordContextFailure(job, failureCode, captureAt);
+      }
+    }
     const draft = parseMeetingSummaryDraft(
       await dependencies.summarizer.summarize(context)
     );
@@ -169,11 +216,25 @@ export async function processMinuteJob(
       return 'lost_lease';
     }
 
+    // Independent downstream handoff: a founder-stream failure must never roll
+    // back or fail the already committed personalized summary and Todo outbox.
+    try { await dependencies.founder?.captureMinute(context); }
+    catch { /* The founder runtime retries persisted source handoffs separately. */ }
+
     dependencies.jobRepository.markCompleted(job, operationNow);
     return 'completed';
   } catch (error) {
     if (error instanceof LeaseLostError) {
       return 'lost_lease';
+    }
+
+    if (error instanceof MinuteTranscriptParseError) {
+      return markPermanentFailure(
+        dependencies.jobRepository,
+        job,
+        error.code,
+        now()
+      );
     }
 
     const retriableCode = retriableErrorCode(error);
@@ -247,6 +308,13 @@ export async function processMinuteJob(
   }
 }
 
+function isSharedDatabaseFailure(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('code' in error) || typeof error.code !== 'string') {
+    return false;
+  }
+  return /^(SQLITE_(READONLY|IOERR|FULL|CANTOPEN|CORRUPT|NOTADB|BUSY|LOCKED))/.test(error.code);
+}
+
 function retryDelayMs(attempt: number): number {
   return Math.min(1_000 * 2 ** attempt, maximumRetryDelayMs);
 }
@@ -262,7 +330,7 @@ function retriableErrorCode(error: unknown): RetryErrorCode | null {
 
 function markPermanentFailure(
   jobRepository: JobRepository,
-  job: DurableJob,
+  job: ProcessMinuteJob,
   reason: string,
   failedAt: Date
 ): 'completed' | 'lost_lease' {
@@ -284,5 +352,8 @@ function assertSharedClient(dependencies: MeetingWorkerDependencies): void {
     dependencies.outboxRepository.client !== client
   ) {
     throw new Error('meeting worker repositories must use the same SQLite client');
+  }
+  if (dependencies.context?.enabled && dependencies.context.sourceRepository.client !== client) {
+    throw new Error('context source repository must use the meeting worker SQLite client');
   }
 }

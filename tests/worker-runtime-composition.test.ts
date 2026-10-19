@@ -8,8 +8,21 @@ import { MeetingRepository } from '../src/repositories/meeting-repository.js';
 import { OutboxRepository } from '../src/repositories/outbox-repository.js';
 import type { FeishuMinutesReader } from '../src/ports/feishu.js';
 import type { MeetingSummarizer } from '../src/ports/summarizer.js';
+import { createFounderStreamRuntime } from '../src/services/founder-stream-worker.js';
 
 describe('createWorkerRuntime', () => {
+  it('uses one consumer to dispatch founder capture without running the meeting summarizer', async () => {
+    const database=createSqliteDatabase(':memory:');migrateDatabase(database.client);
+    const jobs=new JobRepository(database.client);const now=new Date('2026-09-21T00:00:00Z');
+    jobs.enqueueGroupCapture({messageId:'om_1',chatId:'oc_a84d5b6ca478220d0a37964b50776edb',sourceIds:['ctxsrc_fixture'],threadId:null,capturedAt:now});
+    const founder=createFounderStreamRuntime({client:database.client,jobRepository:jobs,flags:{captureEnabled:true,analysisEnabled:false,groupDeliveryEnabled:false},
+      approvedChatIds:['oc_a84d5b6ca478220d0a37964b50776edb'],ivyPrivateChatId:'oc_private',now:()=>now});
+    const runtime=createWorkerRuntime({enabled:true,jobRepository:jobs,meetingRepository:new MeetingRepository(database.client),outboxRepository:new OutboxRepository(database.client),
+      targetChatId:'oc_private',reader:fakeReader(),summarizer:fakeSummarizer(),delivery:new FeishuMessageDeliveryAdapter({getMinuteBasicInfo:async()=>({}),exportMinuteTranscript:async()=>[],sendTextMessage:async()=>{throw new Error('unexpected')}}),
+      now:()=>now,founder});
+    await runtime.runOnce();expect(database.client.prepare('SELECT status FROM batch_jobs').get()).toEqual({status:'completed'});
+    database.close();
+  });
   it('keeps the production worker disabled by default', async () => {
     let leased = false;
     const runtime = createWorkerRuntime({

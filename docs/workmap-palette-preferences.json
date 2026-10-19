@@ -1,0 +1,57 @@
+{
+  "confirmedOn": "2026-10-15",
+  "confirmedBy": "Ivy",
+  "pools": {
+    "workMap": {
+      "paletteIds": [
+        "grove",
+        "salmon-stamp",
+        "editorial-forest",
+        "riso-brut",
+        "court-press"
+      ],
+      "rotation": "uniform-random",
+      "avoidConsecutiveRepeat": true,
+      "stableWithinResult": true
+    },
+    "projectDetail": {
+      "uses": [
+        "project_progress",
+        "project_consensus",
+        "project_disagreement"
+      ],
+      "paletteIds": [
+        "grove",
+        "jade-lens",
+        "macchiato",
+        "papier-bleu",
+        "reading-room",
+        "salmon-stamp",
+        "apricot-arc",
+        "checker-bloom",
+        "coral",
+        "cut-bloom",
+        "editorial-forest",
+        "linen-cut",
+        "pin-and-paper",
+        "riptide-cobalt",
+        "soft-editorial",
+        "violet-marker",
+        "block-frame",
+        "confetti-wedge",
+        "court-press",
+        "grove-block",
+        "mint-brut",
+        "riso-brut",
+        "specimen-bold",
+        "stencil-tablet",
+        "avocado-press"
+      ],
+      "rotation": "uniform-random",
+      "avoidConsecutiveRepeat": true,
+      "stableWithinResult": true
+    }
+  },
+  "explicitStatusLabels": true,
+  "scope": "Approved product preference; production integration pending P1-P3 approval"
+}

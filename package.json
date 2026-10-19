@@ -12,6 +12,17 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "founder-stream:backfill": "node --import tsx src/cli/backfill-founder-stream.ts",
+    "founder-stream:preview": "node --import tsx src/cli/preview-founder-work-map.ts",
+    "founder-baseline": "node --import tsx src/cli/apply-founder-baseline.ts",
+    "founder-work-map:current": "node --import tsx src/cli/current-founder-work-map.ts",
+    "founder-alignment:current": "node --import tsx src/cli/current-founder-alignment.ts",
+    "founder-whiteboard:preflight": "node --import tsx src/cli/preflight-founder-whiteboard.ts",
+    "founder-correction:recover": "node --import tsx src/cli/recover-founder-batch-correction.ts",
+    "founder-jobs:recover": "node --import tsx src/cli/recover-founder-job-failures.ts",
+    "context-source-retention:migrate": "node --import tsx src/cli/migrate-context-source-retention.ts",
+    "context-source:retention": "node --import tsx src/cli/context-source-retention.ts",
+    "space-sync:import": "node --import tsx src/cli/import-space-sync.ts",
     "dev": "node --env-file=.env --import tsx src/server.ts"
   },
   "dependencies": {
@@ -19,7 +30,9 @@
     "better-sqlite3": "^12.2.0",
     "drizzle-orm": "^0.44.0",
     "fastify": "^5.0.0",
+    "jszip": "^3.10.2",
     "pino": "^9.0.0",
+    "sharp": "^0.35.5",
     "zod": "^4.0.0"
   },
   "devDependencies": {

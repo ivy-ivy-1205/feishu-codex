@@ -1,0 +1,206 @@
+import {describe,expect,it} from 'vitest';
+import {createSqliteDatabase} from '../src/db/client.js';
+import {migrateDatabase} from '../src/db/migrate.js';
+import {TopicRepository} from '../src/repositories/topic-repository.js';
+import {applyFounderBaseline} from '../src/services/founder-baseline.js';
+import {founderBaselineManifestSchema} from '../src/services/founder-baseline.js';
+import {readFileSync} from 'node:fs';
+import {buildCurrentFounderWorkMap} from '../src/services/current-founder-work-map.js';
+
+describe('applyFounderBaseline',()=>{
+  it('locks the reviewed production manifest to the expected six-project projection',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync('deploy/founder-baseline-v2.manifest.json','utf8')));
+    expect(manifest.groups).toHaveLength(5);
+    expect(manifest.groups.flatMap(group=>group.duplicates)).toHaveLength(22);
+    expect(manifest.partOf).toHaveLength(3);
+    expect(manifest.newTopics).toEqual([expect.objectContaining({name:'EP00《挺好》',stage:'closed'})]);
+  });
+  it('locks the September 24 exact-name repair to two alignment-room duplicates only',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync(
+      'deploy/founder-baseline-v2-increment-20260924.manifest.json','utf8')));
+    expect(manifest.expected).toEqual({topics:31,perspectives:21,relations:25});
+    expect(manifest.groups).toEqual([expect.objectContaining({
+      canonical:expect.objectContaining({id:'topic_106cf9757e6cae55cbca67fa5e677cd7',version:2,
+        name:'AiJia Founder Alignment Room / AiJia 合伙人对齐室'}),
+      duplicates:[
+        {id:'topic_2a5ff198f40e93dbf62bf35df7e69484',version:1},
+        {id:'topic_28ad87447631a797a9562f069a4f711c',version:1}
+      ]
+    })]);
+    expect(manifest.partOf).toEqual([]);
+    expect(manifest.newTopics).toEqual([]);
+  });
+  it('locks the reviewed V3 corrections to the sales goal, B line and L008 hierarchy',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync(
+      'deploy/founder-work-map-v3-20260924.manifest.json','utf8')));
+    expect(manifest.expected).toEqual({topics:31,perspectives:21,relations:27});
+    expect(manifest.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_4d3df2c0792480acf4913b2fea8e42de',version:4,
+        outcome:expect.stringContaining('全程、全量、清晰录音')})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_ecedcaad5562d2e3c4da11ffe7644897',version:2,
+        name:'Amy / Smart Listing L008｜27 Cecil Street 样板'})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_b444894dc07610a23c731278cdd958f1',version:1,
+        name:'EP00《挺好》',stage:'closed',outcome:expect.stringContaining('已经发布')})})
+    ]));
+    expect(manifest.newTopics).toEqual(expect.arrayContaining([
+      expect.objectContaining({key:'media_line',name:'自媒体生产线',stage:'active_project'}),
+      expect.objectContaining({key:'mortgage_40',name:'40 年超长期房贷',stage:'active_project',
+        outcome:expect.stringMatching(/可发布状态.*尚未发布/u),
+        sourceIds:['ctxsrc_21d5148d3f1b42b9019a15a3a62c3fac']})
+    ]));
+    expect(manifest.newPartOf).toHaveLength(2);
+  });
+  it('locks V4 to the two reviewed false-positive merges without rewriting canonical topics',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync(
+      'deploy/founder-work-map-v4-20260925.manifest.json','utf8')));
+    expect(manifest.expected).toEqual({topics:35,perspectives:25,relations:30});
+    expect(manifest.groups).toEqual([
+      expect.objectContaining({updateCanonical:false,canonical:expect.objectContaining({id:'topic_0622155dc9cfbc4ae20c295b04312e99'}),duplicates:[{id:'topic_4cffb20d7cead310bddb2236475c028d',version:1}]}),
+      expect.objectContaining({updateCanonical:false,canonical:expect.objectContaining({id:'topic_03f66a09b3b00d736bf0cab9b4a9e722'}),duplicates:[{id:'topic_a8b0301b2e1362d40b6e6ad741b1a06b',version:1}]})
+    ]);
+    expect(manifest.partOf).toEqual([]);expect(manifest.newTopics).toEqual([]);
+  });
+  it('locks V5 to the A/B-line hierarchy, separate website entry and three sales-data dimensions',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync(
+      'deploy/founder-work-map-v5-20260925.manifest.json','utf8')));
+    expect(manifest.expected).toEqual({topics:35,perspectives:25,relations:32});
+    expect(manifest.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_0622155dc9cfbc4ae20c295b04312e99',version:2,
+        outcome:expect.stringMatching(/官网.*Smart Listing.*Amy/u)})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_5606ca3835bf19372aff6ff4e39bb75d',version:2,
+        name:'Smart Listing',outcome:expect.stringMatching(/官网.*共用/u)})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_4d3df2c0792480acf4913b2fea8e42de',version:5,
+        outcome:expect.stringMatching(/Open Home.*CRM.*Training/u)})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_ecedcaad5562d2e3c4da11ffe7644897',version:3,
+        name:'Smart Listing L008｜27 Cecil Street 样板'})})
+    ]));
+    expect(manifest.newTopics).toEqual([expect.objectContaining({key:'aijia_website',name:'AiJia AI Native 官网',stage:'active_project',
+      outcome:expect.stringMatching(/Smart Listing.*Amy/u),sourceIds:expect.arrayContaining([
+        'ctxsrc_8886aef5e82dcf97df835d80ea3a5afa','ctxsrc_d81a025f0c185b0be5faad8d2a51459a'
+      ])})]);
+    expect(manifest.newPartOf).toEqual([{childKey:'aijia_website',parentId:'topic_0622155dc9cfbc4ae20c295b04312e99'}]);
+  });
+  it('locks V6 to the reviewed task, phase goal, WeCom child project and restored Smart Listing direction',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync(
+      'deploy/founder-work-map-v6-20260926.manifest.json','utf8')));
+    expect(manifest.expected).toEqual({topics:40,perspectives:34,relations:33});
+    expect(manifest.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_5606ca3835bf19372aff6ff4e39bb75d',version:13,
+        displayKind:'project',outcome:expect.stringContaining('单套房源智能入口')})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_106cf9757e6cae55cbca67fa5e677cd7',version:5}),
+        duplicates:[{id:'topic_0d7fa02af118a4f395755ddcb46c5975',version:8}]}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_0cb5c43fe097f5e0c2edbd96c346faeb',displayKind:'task'})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_61714f83345431c413c004d990c82c82',name:'企业微信接入',stage:'exploring'})}),
+      expect.objectContaining({canonical:expect.objectContaining({id:'topic_8f14af085d21b2bd6c6fefcac627ceff',displayKind:'goal'})})
+    ]));
+    expect(manifest.partOf).toHaveLength(3);
+  });
+  it('locks V7 to the C-line root with Feishu and WeCom as sibling projects',()=>{
+    const manifest=founderBaselineManifestSchema.parse(JSON.parse(readFileSync(
+      'deploy/founder-work-map-v7-20260926.manifest.json','utf8')));
+    expect(manifest.expected).toEqual({topics:40,perspectives:34,relations:37});
+    expect(manifest.groups).toEqual([expect.objectContaining({canonical:expect.objectContaining({
+      id:'topic_106cf9757e6cae55cbca67fa5e677cd7',version:6,name:'飞书合伙人对齐'
+    })})]);
+    expect(manifest.removePartOf).toEqual([{childId:'topic_61714f83345431c413c004d990c82c82',parentId:'topic_106cf9757e6cae55cbca67fa5e677cd7'}]);
+    expect(manifest.newTopics).toEqual([expect.objectContaining({key:'company_collaboration_infrastructure',name:'公司协作基础设施'})]);
+    expect(manifest.newPartOf).toHaveLength(2);
+  });
+  it('can add reviewed same_as relations without appending unchanged canonical versions',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
+    const at=new Date('2026-09-25T00:00:00Z');
+    const canonical=topics.createTopic({displayName:'A 线',stage:'active_project',outcome:'方向',createdAt:at});
+    const duplicate=topics.createTopic({displayName:'错误条目',stage:'exploring',createdAt:new Date(at.getTime()+1)});
+    const manifest={expected:{topics:2,perspectives:0,relations:0},groups:[{updateCanonical:false,
+      canonical:{id:canonical.id,version:1,name:'A 线',stage:'active_project' as const,outcome:'方向'},duplicates:[{id:duplicate.id,version:1}]}],partOf:[],newTopics:[]};
+    expect(applyFounderBaseline(db.client,manifest,at,true)).toMatchObject({canonicalUpdates:0,sameAs:1,applied:true});
+    expect(topics.listCurrentTopics().find(topic=>topic.id===canonical.id)?.currentVersion).toBe(1);
+  });
+  it('moves a reviewed child between parents atomically',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
+    const at=new Date('2026-09-26T00:00:00Z');
+    const oldParent=topics.createTopic({displayName:'飞书合伙人对齐',stage:'active_project',createdAt:at});
+    const child=topics.createTopic({displayName:'企业微信接入',stage:'exploring',createdAt:new Date(at.getTime()+1)});
+    topics.addRelation({fromTopicId:child.id,toTopicId:oldParent.id,relationType:'part_of',rationale:'old',createdAt:at});
+    const manifest={expected:{topics:2,perspectives:0,relations:1},groups:[{updateCanonical:false,
+      canonical:{id:oldParent.id,version:1,name:'飞书合伙人对齐',stage:'active_project' as const,outcome:null},duplicates:[]}],
+      partOf:[],removePartOf:[{childId:child.id,parentId:oldParent.id}],newTopics:[
+        {key:'c_line',name:'公司协作基础设施',stage:'active_project' as const,outcome:'协作底座。',sourceIds:[]}
+      ],newPartOf:[{childId:oldParent.id,parentKey:'c_line'},{childId:child.id,parentKey:'c_line'}]};
+    expect(applyFounderBaseline(db.client,manifest,at,false)).toMatchObject({partOf:2,removedPartOf:1,newTopics:1,applied:false});
+    expect(topics.listRelations()).toHaveLength(1);
+    expect(applyFounderBaseline(db.client,manifest,at,true)).toMatchObject({partOf:2,removedPartOf:1,newTopics:1,applied:true});
+    const cLine=topics.listCurrentTopics().find(topic=>topic.displayName==='公司协作基础设施')!;
+    expect(topics.listRelations()).toEqual(expect.arrayContaining([
+      expect.objectContaining({fromTopicId:oldParent.id,toTopicId:cLine.id,relationType:'part_of'}),
+      expect.objectContaining({fromTopicId:child.id,toTopicId:cLine.id,relationType:'part_of'})
+    ]));
+    expect(topics.listRelations()).not.toContainEqual(expect.objectContaining({fromTopicId:child.id,toTopicId:oldParent.id,relationType:'part_of'}));
+  });
+  it('rejects a relation-only manifest when canonical content has drifted',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
+    const at=new Date('2026-09-25T00:00:00Z');
+    const canonical=topics.createTopic({displayName:'A 线',stage:'active_project',outcome:'已变化方向',createdAt:at});
+    const duplicate=topics.createTopic({displayName:'错误条目',stage:'exploring',createdAt:new Date(at.getTime()+1)});
+    const manifest={expected:{topics:2,perspectives:0,relations:0},groups:[{updateCanonical:false,
+      canonical:{id:canonical.id,version:1,name:'A 线',stage:'active_project' as const,outcome:'原方向'},duplicates:[{id:duplicate.id,version:1}]}],partOf:[],newTopics:[]};
+    expect(()=>applyFounderBaseline(db.client,manifest,at,false)).toThrow(/FOUNDER_BASELINE_CANONICAL_MISMATCH/);
+  });
+  it('previews without writes and atomically appends canonical versions and relations',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
+    const at=new Date('2026-09-24T00:00:00Z');
+    const parent=topics.createTopic({displayName:'AI service',stage:'project_candidate',createdAt:at});
+    const duplicate=topics.createTopic({displayName:'AI business',stage:'active_project',createdAt:new Date(at.getTime()+1)});
+    const child=topics.createTopic({displayName:'smart',stage:'project_candidate',createdAt:new Date(at.getTime()+2)});
+    const manifest={expected:{topics:3,perspectives:0,relations:0},groups:[
+      {canonical:{id:parent.id,version:1,name:'AiJia AI Native 房产业务',stage:'active_project' as const,outcome:null},duplicates:[{id:duplicate.id,version:1}]},
+      {canonical:{id:child.id,version:1,name:'Amy / Smart Listing',stage:'active_project' as const,outcome:null},duplicates:[]}
+    ],partOf:[{childId:child.id,parentId:parent.id}],newTopics:[]};
+    expect(applyFounderBaseline(db.client,manifest,at,false)).toMatchObject({canonicalUpdates:2,sameAs:1,partOf:1,newTopics:0,applied:false});
+    expect(topics.listRelations()).toHaveLength(0);
+    expect(applyFounderBaseline(db.client,manifest,at,true)).toMatchObject({canonicalUpdates:2,sameAs:1,partOf:1,newTopics:0,applied:true});
+    expect(topics.listCanonicalTopics().map(value=>value.displayName)).toEqual(['AiJia AI Native 房产业务','Amy / Smart Listing']);
+  });
+  it('atomically creates keyed topics and resolves new parent relationships',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
+    const at=new Date('2026-09-24T01:00:00Z');
+    const existing=topics.createTopic({displayName:'EP00',stage:'closed',createdAt:at});
+    const manifest={expected:{topics:1,perspectives:0,relations:0},groups:[
+      {canonical:{id:existing.id,version:1,name:'EP00《挺好》',stage:'closed' as const,outcome:null},duplicates:[]}
+    ],partOf:[],newTopics:[
+      {key:'media_line',name:'自媒体生产线',stage:'active_project' as const,outcome:'统一承接自媒体内容生产。',sourceIds:[]},
+      {key:'mortgage_40',name:'40 年房贷口播稿',stage:'closed' as const,outcome:'口播稿已完成。',sourceIds:[]}
+    ],newPartOf:[
+      {childId:existing.id,parentKey:'media_line'},
+      {childKey:'mortgage_40',parentKey:'media_line'}
+    ]};
+    expect(applyFounderBaseline(db.client,manifest,at,false)).toMatchObject({partOf:2,newTopics:2,applied:false});
+    expect(topics.listCurrentTopics()).toHaveLength(1);
+    expect(applyFounderBaseline(db.client,manifest,at,true)).toMatchObject({partOf:2,newTopics:2,applied:true});
+    const byName=new Map(topics.listCurrentTopics().map(topic=>[topic.displayName,topic]));
+    const media=byName.get('自媒体生产线')!,mortgage=byName.get('40 年房贷口播稿')!;
+    expect(topics.listRelations()).toEqual(expect.arrayContaining([
+      expect.objectContaining({fromTopicId:existing.id,toTopicId:media.id,relationType:'part_of'}),
+      expect.objectContaining({fromTopicId:mortgage.id,toTopicId:media.id,relationType:'part_of'})
+    ]));
+  });
+  it('persists reviewed task and goal kinds so the work map nests them without project numbers',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);const topics=new TopicRepository(db.client);
+    const at=new Date('2026-09-26T00:00:00Z');
+    const room=topics.createTopic({displayName:'AiJia Founder Alignment Room / AiJia 合伙人对齐室',stage:'active_project',createdAt:at});
+    const task=topics.createTopic({displayName:'给静姐和 Kenny 哥 update',stage:'active_project',createdAt:new Date(at.getTime()+1)});
+    const goal=topics.createTopic({displayName:'飞书第一阶段目标',stage:'active_project',createdAt:new Date(at.getTime()+2)});
+    const manifest={expected:{topics:3,perspectives:0,relations:0},groups:[
+      {canonical:{id:room.id,version:1,name:room.displayName,stage:'active_project' as const,outcome:null,displayKind:'project' as const},duplicates:[]},
+      {canonical:{id:task.id,version:1,name:task.displayName,stage:'active_project' as const,outcome:null,displayKind:'task' as const},duplicates:[]},
+      {canonical:{id:goal.id,version:1,name:goal.displayName,stage:'active_project' as const,outcome:null,displayKind:'goal' as const},duplicates:[]}
+    ],partOf:[{childId:task.id,parentId:room.id},{childId:goal.id,parentId:room.id}],newTopics:[]};
+    applyFounderBaseline(db.client,manifest,at,true);
+    const result=buildCurrentFounderWorkMap({client:db.client,chatId:'oc_a84d5b6ca478220d0a37964b50776edb',
+      approvedChatIds:['oc_a84d5b6ca478220d0a37964b50776edb'],since:'2026-08-31T00:00:00.000Z',until:'2026-09-26T00:00:00.000Z',expectedCanonicalTopicCount:3});
+    const body=JSON.stringify(result.cards.map(card=>card.card));
+    expect(body).toContain('任务｜给静姐和 Kenny 哥 update');
+    expect(body).toContain('阶段目标｜飞书第一阶段目标');
+    expect(result.cards.flatMap(card=>card.itemRefs).map(ref=>ref.id)).toEqual([room.id]);
+  });
+});

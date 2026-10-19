@@ -5,6 +5,7 @@ import { createMeetingSummarizer } from '../src/composition/meeting-summarizer.j
 import { ProjectRepository } from '../src/repositories/project-repository.js';
 import { ProjectRepositoryContextProvider } from '../src/services/project-context.js';
 import { createTestMeetingRepository } from './helpers/test-db.js';
+import { seedLegacyProjectRegistryFixture } from './helpers/project-registry-fixtures.js';
 
 const baseConfig = {
   codex: {
@@ -18,6 +19,7 @@ const baseConfig = {
 describe('createMeetingSummarizer', () => {
   it('builds project cards from active registry projects and their newest persisted snapshot', async () => {
     const database = createTestMeetingRepository();
+    seedLegacyProjectRegistryFixture(database.client);
     database.client.prepare(`
       INSERT INTO project_context_snapshots (
         id, project_key, source_kind, source_ref, content, digest, captured_at
@@ -45,6 +47,7 @@ describe('createMeetingSummarizer', () => {
 
   it('caps persisted snapshot text before it can become prompt context', async () => {
     const database = createTestMeetingRepository();
+    seedLegacyProjectRegistryFixture(database.client);
     database.client.prepare(`
       INSERT INTO project_context_snapshots (
         id, project_key, source_kind, source_ref, content, digest, captured_at
@@ -108,6 +111,7 @@ describe('createMeetingSummarizer', () => {
 
   it('builds the Codex CLI execution stack with configured command, workdir, timeout, and env', async () => {
     const database = createTestMeetingRepository();
+    seedLegacyProjectRegistryFixture(database.client);
     const stack = createMeetingSummarizer({
       config: {
         ...baseConfig,

@@ -5,13 +5,8 @@ import {
   type MeetingSummarizer,
   type MeetingSummaryDraft
 } from '../ports/summarizer.js';
-
-export interface CodexJsonExecutor {
-  executeJson(input: {
-    prompt: string;
-    outputSchema: Record<string, unknown>;
-  }): Promise<unknown>;
-}
+import type { CodexJsonExecutor } from '../ports/json-executor.js';
+export type { CodexJsonExecutor } from '../ports/json-executor.js';
 
 export interface CodexMeetingSummarizerOptions {
   codex: CodexJsonExecutor;

@@ -67,4 +67,13 @@ describe('DurableJobConsumer', () => {
     finishProcessing();
     await first;
   });
+
+  it('runs an independent after-tick drain even when there is no job', async () => {
+    let drains = 0;
+    const consumer = new DurableJobConsumer({ leaseNext: () => null,
+      process: async () => 'completed', afterTick: async () => { drains += 1; } });
+    await consumer.runOnce();
+    await consumer.runOnce();
+    expect(drains).toBe(2);
+  });
 });

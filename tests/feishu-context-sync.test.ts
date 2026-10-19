@@ -2,6 +2,47 @@ import { describe, expect, it } from 'vitest';
 import { syncFeishuProjectContext } from '../src/services/feishu-context-sync.js';
 
 describe('syncFeishuProjectContext', () => {
+  it.each(['root', 'thread'] as const)('never marks an invalid %s pagination state as exhausted', async (kind) => {
+    const snapshots: Array<{ sourceKind: string; content: string }> = [];
+    const invalidPage = {
+      messages: [], nextCursor: null, paginationStatus: 'invalid' as const,
+      gaps: [{ code: 'PAGINATION_STATE_INVALID' as const, sourceRef: `feishu:${kind}:current`, reason: 'missing explicit termination state' }]
+    };
+    const report = await syncFeishuProjectContext({
+      chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', approvedChatIds: ['oc_a84d5b6ca478220d0a37964b50776edb'],
+      since: new Date('2026-08-31T00:00:00.000Z'), now: () => new Date('2026-09-20T00:00:00.000Z'),
+      feishu: {
+        async listMessages() { return kind === 'root' ? invalidPage : { messages: [{
+          messageId: 'root', messageType: 'text', text: 'readable root', createdAt: '2026-09-01T00:00:00.000Z', threadId: 'thread1'
+        }], nextCursor: null, paginationStatus: 'exhausted' }; },
+        async listThreadMessages() { return invalidPage; },
+        async listReferencedFiles() { return []; }
+      }, saveSnapshot: async (snapshot) => { snapshots.push(snapshot); }
+    });
+    expect(report.coverageStatus).toBe('partial');
+    expect(report.sourceCoverage.termination).toBe('incomplete');
+    expect(report.sourceCoverage.pages.at(-1)).toMatchObject({ kind, status: 'pagination_invalid', requestCursor: null, nextCursor: null });
+    expect(snapshots.find((snapshot) => snapshot.sourceKind === 'feishu_sync_coverage')?.content).toContain('"termination":"incomplete"');
+    expect(snapshots.find((snapshot) => snapshot.sourceKind === 'feishu_sync_gap')?.content).toContain('PAGINATION_STATE_INVALID');
+  });
+
+  it('stores approved voice transcript text and records missing file reference metadata', async () => {
+    const snapshots: string[] = [];
+    const report = await syncFeishuProjectContext({
+      chatId: 'oc_a84d5b6ca478220d0a37964b50776edb', approvedChatIds: ['oc_a84d5b6ca478220d0a37964b50776edb'],
+      since: new Date('2026-08-31T00:00:00.000Z'), now: () => new Date('2026-09-20T00:00:00.000Z'),
+      feishu: {
+        async listMessages() { return { messages: [
+          { messageId: 'voice', messageType: 'voice', text: 'approved transcript', createdAt: '2026-09-01T00:00:00.000Z' },
+          { messageId: 'file', messageType: 'file', text: null, createdAt: '2026-09-01T00:00:00.000Z' }
+        ], nextCursor: null }; },
+        async listReferencedFiles() { return []; }
+      }, saveSnapshot: async (snapshot) => { snapshots.push(snapshot.content); }
+    });
+    expect(snapshots).toContain('approved transcript');
+    expect(report.gaps.map((gap) => gap.code)).toContain('FILE_REFERENCE_UNAVAILABLE');
+  });
+
   it('stores text and document snippets from the approved group and skips video/audio', async () => {
     const snapshots: Array<{ sourceKind: string; sourceRef: string; content: string }> = [];
 

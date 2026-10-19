@@ -17,6 +17,61 @@ const baseEnv = {
 };
 
 describe('loadConfig', () => {
+  it('pins the approved Codex model and reasoning effort by default', () => {
+    expect(loadConfig(baseEnv).codex).toMatchObject({
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'medium'
+    });
+    expect(loadConfig({ ...baseEnv, CODEX_MODEL: 'gpt-5.6-terra', CODEX_REASONING_EFFORT: 'low' }).codex)
+      .toMatchObject({ model: 'gpt-5.6-terra', reasoningEffort: 'low' });
+    expect(() => loadConfig({ ...baseEnv, CODEX_MODEL: 'account-default' })).toThrow();
+    expect(() => loadConfig({ ...baseEnv, CODEX_REASONING_EFFORT: 'automatic' })).toThrow();
+  });
+
+  it('defaults founder stream off and enforces ordered flag dependencies', () => {
+    expect(loadConfig(baseEnv).founderStream).toEqual({ captureEnabled: false, analysisEnabled: false,
+      groupDeliveryEnabled: false, manualQueryEnabled: false, dailyReconciliationEnabled: false,
+      reconciliationBootstrapSince: null, whiteboardEnabled: false });
+    expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_ANALYSIS_ENABLED: 'true' })).toThrow(/capture/i);
+    expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true', FOUNDER_STREAM_GROUP_DELIVERY_ENABLED: 'true' })).toThrow(/analysis/i);
+    expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true' }).founderStream.captureEnabled).toBe(true);
+    expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_MANUAL_QUERY_ENABLED: 'true' })).toThrow(/manual query.*analysis/i);
+    expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true',FOUNDER_STREAM_ANALYSIS_ENABLED:'true',
+      FOUNDER_STREAM_MANUAL_QUERY_ENABLED: 'true',WORKER_LEASE_SECONDS:'241' }).founderStream.manualQueryEnabled).toBe(true);
+    expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_WHITEBOARD_ENABLED: 'true' }))
+      .toThrow(/whiteboard.*manual query/i);
+    expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED: 'true',FOUNDER_STREAM_ANALYSIS_ENABLED:'true',
+      FOUNDER_STREAM_MANUAL_QUERY_ENABLED: 'true',FOUNDER_STREAM_WHITEBOARD_ENABLED:'true',WORKER_LEASE_SECONDS:'241' })
+      .founderStream.whiteboardEnabled).toBe(true);
+    expect(()=>loadConfig({...baseEnv,FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED:'true'})).toThrow(/daily reconciliation.*capture/i);
+    expect(()=>loadConfig({...baseEnv,FOUNDER_STREAM_CAPTURE_ENABLED:'true',FOUNDER_STREAM_ANALYSIS_ENABLED:'true',
+      FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED:'true',PROJECT_CONTEXT_CHAT_IDS:'oc_a84d5b6ca478220d0a37964b50776edb',
+      WORKER_LEASE_SECONDS:'241'})).toThrow(/bootstrap/i);
+    expect(loadConfig({...baseEnv,FOUNDER_STREAM_CAPTURE_ENABLED:'true',FOUNDER_STREAM_ANALYSIS_ENABLED:'true',
+      FOUNDER_STREAM_DAILY_RECONCILIATION_ENABLED:'true',PROJECT_CONTEXT_CHAT_IDS:'oc_a84d5b6ca478220d0a37964b50776edb',
+      FOUNDER_STREAM_RECONCILIATION_BOOTSTRAP_SINCE:'2026-09-22T15:20:18.120Z',WORKER_LEASE_SECONDS:'241'})
+      .founderStream).toMatchObject({dailyReconciliationEnabled:true,
+        reconciliationBootstrapSince:'2026-09-22T15:20:18.120Z'});
+  });
+  it('keeps Context extraction and review independently disabled by default', () => {
+    expect(loadConfig(baseEnv).context).toEqual({
+      candidatesEnabled: false,
+      reviewEnabled: false,
+      sourceMaxBytes: 2_000_000,
+      sourceMaxSegments: 10_000,
+      extractorMaxBytes: 500_000,
+      extractorMaxSegments: 2_000
+    });
+    expect(loadConfig({ ...baseEnv, CONTEXT_CANDIDATES_ENABLED: 'true', CONTEXT_REVIEW_ENABLED: 'true' }).context)
+      .toMatchObject({ candidatesEnabled: true, reviewEnabled: true });
+    expect(() => loadConfig({ ...baseEnv, CONTEXT_CANDIDATES_ENABLED: '1' })).toThrow();
+    expect(() => loadConfig({ ...baseEnv,
+      CONTEXT_SOURCE_MAX_BYTES: '100', CONTEXT_EXTRACTOR_MAX_BYTES: '101'
+    })).toThrow(/extractor/i);
+    expect(() => loadConfig({ ...baseEnv,
+      CONTEXT_SOURCE_MAX_SEGMENTS: '10', CONTEXT_EXTRACTOR_MAX_SEGMENTS: '11'
+    })).toThrow(/extractor/i);
+  });
   it('keeps the private chat ID separate from Ivy user identity', () => {
     const config = loadConfig(baseEnv);
     expect(config.feishu.ivyPrivateChatId).toMatch(/^oc_/);
@@ -59,6 +114,15 @@ describe('loadConfig', () => {
     })).toThrow(/lease.*downstream timeout/i);
   });
 
+  it('requires a two-call lease budget when founder semantic analysis is enabled', () => {
+    expect(() => loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED:'true',
+      FOUNDER_STREAM_ANALYSIS_ENABLED:'true', WORKER_LEASE_SECONDS:'240', CODEX_TIMEOUT_SECONDS:'120' }))
+      .toThrow(/two.*Codex/i);
+    expect(loadConfig({ ...baseEnv, FOUNDER_STREAM_CAPTURE_ENABLED:'true',
+      FOUNDER_STREAM_ANALYSIS_ENABLED:'true', WORKER_LEASE_SECONDS:'241', CODEX_TIMEOUT_SECONDS:'120' })
+      .founderStream.analysisEnabled).toBe(true);
+  });
+
   it('keeps the Codex summarizer disabled unless explicitly configured', () => {
     expect(loadConfig(baseEnv).codex.summarizerMode).toBe('fake');
     expect(loadConfig({
@@ -86,7 +150,7 @@ describe('loadConfig', () => {
     expect(loadConfig(baseEnv).projectContext).toMatchObject({
       syncEnabled: false,
       approvedChatIds: [],
-      syncSinceDays: 30
+      syncSinceDays: null
     });
     expect(loadConfig({
       ...baseEnv,
@@ -129,5 +193,28 @@ describe('loadConfig', () => {
       redirectUri: 'https://feishu-codex.aijia.ai/oauth/feishu/callback',
       tokenKeyFile: '/opt/feishu-codex/secrets/feishu-oauth-token-key'
     });
+  });
+
+  it('defaults Space sync off with safe limits and enforces ordered flag/secret dependencies', () => {
+    expect(loadConfig(baseEnv).spaceSync).toEqual({
+      ingestEnabled: false, analysisEnabled: false, workmapEnabled: false,
+      hmacSecretFile: null, signatureWindowSeconds: 300, staleAfterMinutes: 1440,
+      maxBlocks: 500, maxComments: 2_000, maxBodyBytes: 2_000_000
+    });
+    expect(() => loadConfig({ ...baseEnv, SPACE_SYNC_INGEST_ENABLED: 'true' }))
+      .toThrow(/HMAC secret file/i);
+    expect(loadConfig({
+      ...baseEnv, SPACE_SYNC_INGEST_ENABLED: 'true',
+      SPACE_SYNC_HMAC_SECRET_FILE: '/opt/feishu-codex/secrets/space-sync-hmac-secret'
+    }).spaceSync).toMatchObject({ ingestEnabled: true, hmacSecretFile: '/opt/feishu-codex/secrets/space-sync-hmac-secret' });
+    expect(() => loadConfig({ ...baseEnv, SPACE_SYNC_ANALYSIS_ENABLED: 'true' }))
+      .toThrow(/analysis requires ingest/i);
+    expect(() => loadConfig({ ...baseEnv, SPACE_SYNC_WORKMAP_ENABLED: 'true' }))
+      .toThrow(/work map.*analysis/i);
+    expect(loadConfig({
+      ...baseEnv, SPACE_SYNC_INGEST_ENABLED: 'true', SPACE_SYNC_ANALYSIS_ENABLED: 'true',
+      SPACE_SYNC_WORKMAP_ENABLED: 'true',
+      SPACE_SYNC_HMAC_SECRET_FILE: '/opt/feishu-codex/secrets/space-sync-hmac-secret'
+    }).spaceSync).toMatchObject({ ingestEnabled: true, analysisEnabled: true, workmapEnabled: true });
   });
 });

@@ -71,6 +71,10 @@ describe('CodexCliAdapter', () => {
     });
     expect(calls[1]?.args).toEqual([
       'exec',
+      '--model',
+      'gpt-5.6-sol',
+      '--config',
+      'model_reasoning_effort="medium"',
       '--sandbox',
       'read-only',
       '--ephemeral',
@@ -80,6 +84,31 @@ describe('CodexCliAdapter', () => {
       expect.stringMatching(/meeting-summary-schema-.+\.json$/)
     ]);
     expect(calls[1]?.env).toEqual({ PATH: '/usr/bin' });
+  });
+
+  it('uses an explicitly configured model and reasoning effort instead of the account default', async () => {
+    const calls: Parameters<CodexProcessRunner['run']>[0][] = [];
+    const adapter = new CodexCliAdapter({
+      command: 'codex',
+      workdir: '/tmp/aijia-codex-readonly',
+      timeoutMs: 30_000,
+      model: 'gpt-5.6-terra',
+      reasoningEffort: 'low',
+      runner: {
+        async run(input) {
+          calls.push(input);
+          return input.args.join(' ') === 'login status'
+            ? { exitCode: 0, stdout: 'Logged in with ChatGPT', stderr: '' }
+            : { exitCode: 0, stdout: '{}', stderr: '' };
+        }
+      }
+    });
+
+    await adapter.executeJson({ prompt: 'Classify.', outputSchema: { type: 'object' } });
+
+    expect(calls[1]?.args.slice(0, 5)).toEqual([
+      'exec', '--model', 'gpt-5.6-terra', '--config', 'model_reasoning_effort="low"'
+    ]);
   });
 
   it('fails closed without running exec when Codex auth is unavailable', async () => {

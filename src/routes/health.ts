@@ -20,6 +20,28 @@ export interface ServiceReadinessDependencies {
   isCodexAuthAvailable?: () => boolean | Promise<boolean>;
 }
 
+export function createPipelineReadiness(input: {
+  checkDatabase(): unknown | Promise<unknown>;
+  meetingEnabled: boolean;
+  founderFlags: { captureEnabled: boolean; analysisEnabled: boolean; groupDeliveryEnabled: boolean };
+  meetingConsumerAvailable(): boolean | Promise<boolean>;
+  founderConsumerAvailable(): boolean | Promise<boolean>;
+  meetingCodexRequired: boolean;
+  isCodexAuthAvailable(): boolean | Promise<boolean>;
+}): ReadinessCheck {
+  const founderOnly = !input.meetingEnabled && input.founderFlags.captureEnabled;
+  return createServiceReadiness({
+    checkDatabase: input.checkDatabase,
+    // Founder capture consumes stored events; it does not require the Minutes reader.
+    isFeishuReaderAvailable: () => input.meetingEnabled || founderOnly,
+    isFeishuDeliveryAvailable: () => input.meetingEnabled || founderOnly,
+    isWorkerConsumptionAvailable: () => input.meetingEnabled ? input.meetingConsumerAvailable()
+      : founderOnly ? input.founderConsumerAvailable() : false,
+    isCodexAuthAvailable: () => founderOnly && !input.founderFlags.analysisEnabled ? true
+      : (input.meetingCodexRequired || input.founderFlags.analysisEnabled) ? input.isCodexAuthAvailable() : false
+  });
+}
+
 export function createServiceReadiness(
   dependencies: ServiceReadinessDependencies
 ): ReadinessCheck {

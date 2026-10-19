@@ -8,6 +8,7 @@ import { ProjectRepository } from '../src/repositories/project-repository.js';
 import { createTestMeetingRepository } from './helpers/test-db.js';
 import { mapTodoToProject } from '../src/services/project-mapper.js';
 import { routeReply, type ReplyRouterDependencies } from '../src/services/reply-router.js';
+import { seedLegacyProjectRegistryFixture } from './helpers/project-registry-fixtures.js';
 
 const ivyPrivateChatId = 'oc_d851c3e986007dc0f97ab582bcb2e7c8';
 const ivyOpenId = 'ou_ivy';
@@ -398,6 +399,7 @@ describe('requiresHighRiskConfirmation', () => {
 
 function createHarness(options: { approverOpenIds?: string[] } = {}) {
   const meetingRepository = createTestMeetingRepository();
+  seedLegacyProjectRegistryFixture(meetingRepository.client);
   seedMeeting(meetingRepository, {
     minuteId: 'min_a',
     eventId: 'evt_a',

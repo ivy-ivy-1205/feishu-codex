@@ -1,0 +1,67 @@
+{
+  "expected": { "topics": 31, "perspectives": 21, "relations": 27 },
+  "groups": [
+    {
+      "canonical": {
+        "id": "topic_4d3df2c0792480acf4913b2fea8e42de",
+        "version": 4,
+        "name": "房产销售过程数据沉淀",
+        "stage": "active_project",
+        "outcome": "目标是区分说话人，并对每次 Open Home、Open Inspection 及房产销售过程实现全程、全量、清晰录音，同时结合 CRM 客户记录与销售回填完成数据沉淀；当前仍在探索可靠、低干扰的实现方案。"
+      },
+      "duplicates": []
+    },
+    {
+      "canonical": {
+        "id": "topic_ecedcaad5562d2e3c4da11ffe7644897",
+        "version": 2,
+        "name": "Amy / Smart Listing L008｜27 Cecil Street 样板",
+        "stage": "active_project",
+        "outcome": "作为 Amy / Smart Listing 的 L008 样板，使用 27 Cecil Street 验证空间浏览、Amy 陪看与真实房源资料协作。"
+      },
+      "duplicates": []
+    },
+    {
+      "canonical": {
+        "id": "topic_b444894dc07610a23c731278cdd958f1",
+        "version": 1,
+        "name": "EP00《挺好》",
+        "stage": "closed",
+        "outcome": "EP00《挺好》已经发布，本内容项目已关闭。"
+      },
+      "duplicates": []
+    }
+  ],
+  "partOf": [
+    {
+      "childId": "topic_ecedcaad5562d2e3c4da11ffe7644897",
+      "parentId": "topic_5606ca3835bf19372aff6ff4e39bb75d"
+    }
+  ],
+  "newTopics": [
+    {
+      "key": "media_line",
+      "name": "自媒体生产线",
+      "stage": "active_project",
+      "outcome": "统一承接自媒体口播稿、视频及相关素材；单个内容按子项目管理。",
+      "sourceIds": []
+    },
+    {
+      "key": "mortgage_40",
+      "name": "40 年超长期房贷",
+      "stage": "active_project",
+      "outcome": "相关内容已经完成并达到可发布状态，但尚未发布；下一步是完成发布。",
+      "sourceIds": ["ctxsrc_21d5148d3f1b42b9019a15a3a62c3fac"]
+    }
+  ],
+  "newPartOf": [
+    {
+      "childId": "topic_b444894dc07610a23c731278cdd958f1",
+      "parentKey": "media_line"
+    },
+    {
+      "childKey": "mortgage_40",
+      "parentKey": "media_line"
+    }
+  ]
+}
