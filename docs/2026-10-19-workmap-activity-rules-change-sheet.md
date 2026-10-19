@@ -1,6 +1,6 @@
 # 工作地图活跃规则上线变更单（Space 保持关闭）
 
-日期：2026-10-19；状态：Ivy 已批准 C1 与 P1；P2、P3 待 P1 汇报后决定
+日期：2026-10-19；状态：C1、P1 已完成；P2 被磁盘空间阻塞，等待 Ivy 决定清理与 P2
 
 ## 一句话
 
@@ -135,3 +135,40 @@ P1–P3 全部通过后，请 Ivy 在群里发一次 `查看工作地图`，重�
   - 运行登记工具写入三个项目的映射；
   - 填入 Space 账号与 Ivy/James 的对应关系；
   - 真实页面的摘要效果验证。
+
+## 执行结果
+
+### C1（2026-10-19）
+
+- PR #4 已合并为 `11b765125c78830fd28e082230a460b907fec92d`，tree 与测试提交 `4a5c574` 一致。它是本次候选 revision。
+
+### P1（UTC 2026-10-19T11:42Z，只读）
+
+- **生产状态：**
+  - 容器 `feishu-codex-bridge` running/healthy，restart 0，启动于 2026-10-15T09:02Z；
+  - revision 精确为 `558c39a…`，image `sha256:83d27463…`；
+  - health/ready 200。
+- **Space 关闭基线：**
+  - `/internal/space-sync/v1/ingest` 返回 404；
+  - `bridge.env` 中没有任何 `SPACE_SYNC_*`；
+  - 5 张新表都不存在；
+  - Space 来源与 Space 任务均为 0。
+- **开关：**
+  - capture、analysis、manual query、whiteboard、daily reconciliation 与 worker 为 true；
+  - group delivery 为 false；
+  - Codex 摘要模式为 codex。
+- **登录与 Key：** ChatGPT 登录有效；env 文件和容器中均没有 OpenAI/Codex API Key。
+- **数据库：**
+  - `integrity_check=ok`，外键异常 0；
+  - active jobs 0，pending outbox 0；
+  - canonical topic **38**，作为 P2/P3 的 `--expected-canonical-topics`。
+  - 最近一次工作地图投递是 2026-10-15T09:28Z。
+- **发现 1｜磁盘不足，阻塞 P2：**
+  - 根盘 60G，已用 59G（99%），只剩 1.2G。构建一个候选镜像约 1.5G，加上构建层，不够用。
+  - Docker 可回收的空间：build cache 3.15G，未使用镜像 7.26G。后者主要是 9 月以来的 v3–v5、诊断、candidate 和 rollback 标签。
+  - 清理属于删除操作，需要 Ivy 单独批准。建议只保留当前运行的镜像和 10-15 的 rollback 镜像（`f1760204…`）。
+- **发现 2｜10-17 一条群消息分析失败：**
+  - 任务：`analyze_founder_stream_batch`，消息时间 2026-10-17T14:20Z，失败于 `topic_analysis / codex_execution_failed`，已重试 3 次。
+  - 这条消息没有挂到任何条目，所以不计入任何项目的动态。如果它说的是一个快过 30 天的项目，P2 名单可能把这个项目误列为“长期无动态”。
+  - 10-15 之后的其他 14 个分析任务全部成功。
+  - 补救可以用现有 `recover-founder-job-failures` 重新排队，但会调用 Codex 并写库，需要另行批准；也可以等 P2 名单出来后再看是否需要纠正。
