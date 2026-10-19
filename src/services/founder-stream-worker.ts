@@ -4,6 +4,7 @@ import type { AppConfig } from '../config.js';
 import { ContextSourceRepository, type ContextSourceRecord } from '../repositories/context-source-repository.js';
 import { JobRepository, LeaseLostError, type FounderDurableJob, type FounderStreamJob, type FounderStreamSpaceJob } from '../repositories/job-repository.js';
 import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
+import { FounderTopicProjectBindingRepository } from '../repositories/founder-topic-project-binding-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
 import { AlignmentRepository } from '../repositories/alignment-repository.js';
@@ -75,6 +76,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   const now = options.now ?? (() => new Date());
   const sources = new ContextSourceRepository(options.client), topics = new TopicRepository(options.client);
   const spaceSync = new SpaceSyncRepository(options.client);
+  const topicProjectBindings = new FounderTopicProjectBindingRepository(options.client);
   const outbox = new OutboxRepository(options.client);
   const perspectives = new AlignmentRepository(options.client);
   const perspectiveReconciler = new PerspectiveReconciler(perspectives);
@@ -177,11 +179,20 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         failureStage = 'topic_reconciliation';
         const plan = reconcileTopics(input, classified.analysis);
         failureStage = 'evidence_preparation';
+        // A Page bound to a project continues that project's existing canonical topic via
+        // new evidence; it never spawns a second "Space project card" — handoff doc §8.2.
+        // This overrides the model's own joinDecision, including a bare "new" proposal.
+        const canonicalBinding = topicProjectBindings.getCanonicalBindingForProject(job.projectKey);
+        const canonicalTarget = canonicalBinding ? topics.listCurrentTopics().find(t => t.id === canonicalBinding.topicId) : undefined;
+        if (canonicalTarget) for (const item of plan.topics) {
+          item.action = 'join'; item.topicId = canonicalTarget.id; item.expectedVersion = canonicalTarget.currentVersion;
+        }
         // Space content follows the same human-correction authority as the Feishu
         // path (topicAuthority), so a human-protected topic cannot be overwritten
         // by a Space-sourced proposal either — see handoff doc §7.2 source ranking.
         for (const item of plan.topics) {
-          const target = topics.listCurrentTopics().find(t => t.id === item.proposal.joinDecision.topicId);
+          const targetId = item.topicId ?? item.proposal.joinDecision.topicId;
+          const target = targetId ? topics.listCurrentTopics().find(t => t.id === targetId) : undefined;
           if (target && topicAuthority(options.client, topics, target)) {
             item.action = 'join'; item.topicId = target.id; item.expectedVersion = target.currentVersion;
           }
@@ -196,7 +207,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         failureStage = 'persistence';
         options.client.transaction(() => {
           const stamp = now(); if (!options.jobRepository.ownsLease(job, stamp)) throw new LeaseLostError(job.key);
-          for (const [,rows] of [...byTopic.entries()].sort(([a],[b])=>a.localeCompare(b))) {
+          for (const [topicId,rows] of [...byTopic.entries()].sort(([a],[b])=>a.localeCompare(b))) {
             const {item}=rows[0]!;
             const old = item.topicId ? topics.listCurrentTopics().find(t => t.id === item.topicId) : undefined;
             const evidenceIds = [...new Set([...(old?.evidenceIds ?? []), ...rows.flatMap(row=>row.ids)])].sort();
@@ -209,6 +220,11 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
               evidenceIds, rationale, changedAt: stamp });
             else topics.createTopic({ displayName: item.proposal.displayName, stage: item.proposal.stage, outcome: item.proposal.outcome,
               evidenceIds, rationale, createdAt: new Date(plannedAt.getTime() + item.proposalIndex) });
+            // Tentatively register the first Space-created/joined topic as this project's
+            // canonical binding, so the next batch converges on it even before a human
+            // confirms it; never overwrites an existing human_confirmed binding.
+            if (!canonicalBinding) topicProjectBindings.proposeFromAnalysis({ topicId, projectKey: job.projectKey,
+              role: 'canonical', at: stamp });
           }
           options.jobRepository.markCompleted(job, stamp);
         }).immediate();

@@ -5,6 +5,7 @@ import { JobRepository } from '../src/repositories/job-repository.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
 import { TopicRepository } from '../src/repositories/topic-repository.js';
 import { SpaceSyncRepository } from '../src/repositories/space-sync-repository.js';
+import { FounderTopicProjectBindingRepository } from '../src/repositories/founder-topic-project-binding-repository.js';
 import {
   buildFounderStreamInput, buildFounderStreamSpaceInput, createFounderStreamRuntime, saveFounderEvidence
 } from '../src/services/founder-stream-worker.js';
@@ -218,5 +219,78 @@ describe('founder-stream-worker Space-scoped processing', () => {
     const allSourceIds = rows.flatMap((r) => JSON.parse(r.payload).sourceIds as string[]);
     expect(allSourceIds).toContain(unclaimed.id);
     expect(allSourceIds.filter((id) => id === claimed.id)).toHaveLength(1);
+  });
+});
+
+describe('Space evidence merges into the project-bound canonical topic (never a second card)', () => {
+  it('registers the first Space-created topic as an analysis-sourced canonical binding for its project', async () => {
+    const h = harness();
+    const page = spacePageSource(h.sources);
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [page.id], capturedAt: start });
+    await h.runtime.runOnce();
+    const topicId = h.topics.listCurrentTopics()[0]!.id;
+    const bindings = new FounderTopicProjectBindingRepository(h.db.client);
+    expect(bindings.getCanonicalBindingForProject('smart_listing')).toMatchObject({ topicId, role: 'canonical', source: 'analysis' });
+  });
+
+  it('forces every later Space batch to join the registered canonical topic, even when the model proposes "new"', async () => {
+    const h = harness();
+    const first = spacePageSource(h.sources, { text: 'Smart Listing 项目总览 V1' });
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [first.id], capturedAt: start });
+    await h.runtime.runOnce();
+    const originalId = h.topics.listCurrentTopics()[0]!.id;
+    expect(h.topics.listCurrentTopics()).toHaveLength(1);
+
+    // A second, unrelated-looking Space page in the SAME project — the model has no
+    // continuation signal at all (empty currentTopics context), so on its own it would
+    // propose a brand-new topic. The canonical binding must still force a join.
+    const second = h.sources.saveSource({
+      sourceSystem: 'chatgpt_space', sourceType: 'space_page_snapshot', externalId: 'page_1',
+      logicalKey: 'chatgpt_space:page:page_1', occurredAt: new Date(start.getTime() + 1_000).toISOString(),
+      authors: [], locatorUri: 'https://chatgpt.com/space/page_1', contentFormat: 'text/markdown',
+      contentText: '完全不同的内容段落', metadata: { pageId: 'page_1', blocks: [{ id: 'block_2', hash: 'b'.repeat(64), markdown: '完全不同的内容段落' }] },
+      availabilityStatus: 'available', capturedAt: start
+    }).source;
+    const runtime = createFounderStreamRuntime({
+      client: h.db.client, jobRepository: h.jobs,
+      flags: { captureEnabled: false, analysisEnabled: false, groupDeliveryEnabled: false },
+      approvedChatIds: [], ivyPrivateChatId: 'oc_private', now: () => new Date(start.getTime() + 2_000), spaceAnalysisEnabled: true,
+      analyzer: { async analyze(input) { return { topics: [{
+        displayName: '完全不同的内容段落', stage: 'idea', outcome: null, currentAction: null, confidence: 'high',
+        sourceIds: [input.sources[0]!.id], evidenceExcerpts: [{ sourceId: input.sources[0]!.id, excerpt: input.sources[0]!.contentText }],
+        joinDecision: { kind: 'new', topicId: null, confidence: 'high', sharedTerms: [] }, splitSuggestions: []
+      }] }; } }
+    });
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(),
+      until: new Date(start.getTime() + 2_000).toISOString(), sourceIds: [second.id], capturedAt: new Date(start.getTime() + 2_000) });
+    await runtime.runOnce();
+
+    expect(h.topics.listCurrentTopics()).toHaveLength(1);
+    expect(h.topics.listCurrentTopics()[0]!.id).toBe(originalId);
+    expect(h.topics.listCurrentTopics()[0]!.currentVersion).toBe(2);
+  });
+
+  it('updates a pre-existing, human-confirmed canonical topic instead of creating a Space-only duplicate', async () => {
+    const h = harness();
+    const feishuSource = h.sources.saveSource(captureGroupMessageSource({ chatId: chat, messageId: 'om_preexisting', threadId: null,
+      rootId: null, author: { openId: 'ou_ivy', displayName: null }, messageType: 'text', senderType: 'user',
+      text: 'Smart Listing', occurredAt: start.toISOString() }, start).source).source;
+    const evidenceId = saveFounderEvidence(h.sources, feishuSource.id, feishuSource.contentText, start);
+    const preexisting = h.topics.createTopic({ displayName: 'Smart Listing', stage: 'active_project', outcome: '飞书确认的目标',
+      evidenceIds: [evidenceId], createdAt: start });
+    new FounderTopicProjectBindingRepository(h.db.client).recordHumanConfirmed({ topicId: preexisting.id,
+      projectKey: 'smart_listing', role: 'canonical', at: start });
+
+    const page = spacePageSource(h.sources, { occurredAt: new Date(start.getTime() + 1_000).toISOString() });
+    h.setNow(new Date(start.getTime() + 2_000));
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: h.now().toISOString(),
+      sourceIds: [page.id], capturedAt: h.now() });
+    await h.runtime.runOnce();
+
+    expect(h.topics.listCurrentTopics()).toHaveLength(1);
+    expect(h.topics.listCurrentTopics()[0]!.id).toBe(preexisting.id);
+    expect(h.topics.listCurrentTopics()[0]!.currentVersion).toBe(2);
   });
 });
