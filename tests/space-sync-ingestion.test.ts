@@ -255,4 +255,16 @@ describe('ingestSpaceSyncEnvelope', () => {
       .toEqual({ n: 0 });
     expect(contextSourceRepository.listSources().some((s) => s.sourceType === 'space_page_snapshot')).toBe(true);
   });
+
+  it('records the latest thread state per envelope so a resolution is visible without a new comment version', () => {
+    const { database, spaceSyncRepository, contextSourceRepository, now } = setup();
+    const deps = { client: database.client, spaceSyncRepository, contextSourceRepository, limits: { maxBlocks: 100, maxComments: 100 }, now };
+    ingestSpaceSyncEnvelope(envelope(), deps);
+    expect(spaceSyncRepository.getCommentThreadState('page_1', 'thread_1')).toBe('open');
+    const resolved = envelope({ syncId: 'sync_2', capturedAt: '2026-10-19T01:00:00.000Z' });
+    resolved.comments[0] = { ...resolved.comments[0]!, threadState: 'resolved', resolvedAt: '2026-10-19T00:30:00.000Z' };
+    ingestSpaceSyncEnvelope(resolved, deps);
+    expect(spaceSyncRepository.getCommentThreadState('page_1', 'thread_1')).toBe('resolved');
+    expect(contextSourceRepository.listSources().filter((s) => s.sourceType === 'space_page_comment')).toHaveLength(1);
+  });
 });

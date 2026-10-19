@@ -160,6 +160,10 @@ export function ingestSpaceSyncEnvelope(
       });
     }
 
+    dependencies.spaceSyncRepository.recordCommentThreadStates({ pageId: envelope.page.pageId,
+      observedAt: new Date(envelope.capturedAt), threads: [...new Map(envelope.comments.map((comment) => [comment.threadId,
+        { threadId: comment.threadId, threadState: comment.threadState, resolvedAt: comment.resolvedAt }])).values()] });
+
     dependencies.spaceSyncRepository.recordSuccessfulSync({
       bindingId: binding.id,
       pageSequence: envelope.page.sequence,

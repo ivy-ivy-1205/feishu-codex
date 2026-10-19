@@ -150,6 +150,24 @@ export class SpaceSyncRepository {
     return row ? toRunRecord(row) : null;
   }
 
+  /** Latest-observation-wins thread state; an older envelope replayed late never reopens or re-resolves a thread. */
+  recordCommentThreadStates(input: { pageId: string; observedAt: Date;
+    threads: readonly { threadId: string; threadState: 'open' | 'resolved'; resolvedAt: string | null }[] }): void {
+    const upsert = this.client.prepare(`
+      INSERT INTO space_comment_threads (page_id, thread_id, thread_state, resolved_at, observed_at) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(page_id, thread_id) DO UPDATE SET thread_state = excluded.thread_state, resolved_at = excluded.resolved_at,
+        observed_at = excluded.observed_at
+      WHERE excluded.observed_at >= space_comment_threads.observed_at
+    `);
+    for (const thread of input.threads)
+      upsert.run(input.pageId, thread.threadId, thread.threadState, thread.resolvedAt, input.observedAt.toISOString());
+  }
+
+  getCommentThreadState(pageId: string, threadId: string): 'open' | 'resolved' | null {
+    return (this.client.prepare('SELECT thread_state FROM space_comment_threads WHERE page_id = ? AND thread_id = ?')
+      .get(pageId, threadId) as { thread_state: 'open' | 'resolved' } | undefined)?.thread_state ?? null;
+  }
+
   getLatestRunForBinding(bindingId: string): SpaceSyncRunRecord | null {
     const row = this.client.prepare(`
       SELECT * FROM space_sync_runs WHERE binding_id = ? ORDER BY completed_at DESC, id DESC LIMIT 1

@@ -412,3 +412,22 @@ describe('Space digest grounding is enforced by the worker, not only by the Code
       .toMatchObject({ status: 'failed', failureCode: 'space_digest_invalid' });
   });
 });
+
+describe('Space thread resolution after capture', () => {
+  it('skips perspective analysis for a comment whose thread was resolved by a later sync', async () => {
+    const h = setup();
+    const inputs: unknown[] = [];
+    const runtime = createFounderStreamRuntime({ client: h.db.client, jobRepository: h.jobs,
+      flags: { captureEnabled: false, analysisEnabled: false, groupDeliveryEnabled: false },
+      approvedChatIds: [], ivyPrivateChatId: 'oc_private', now: () => start, spaceAnalysisEnabled: true,
+      perspectiveAnalyzer: { async analyze(input) { inputs.push(input); return { observations: [], alignmentProposals: [] }; } } });
+    canonicalTopic(h);
+    const comment = spaceCommentSource(h.sources, { text: '已经过时的讨论' });
+    h.spaceSync.recordCommentThreadStates({ pageId: 'page_1', observedAt: start,
+      threads: [{ threadId: 'thread_1', threadState: 'resolved', resolvedAt: start.toISOString() }] });
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [comment.id], capturedAt: start });
+    await runtime.runOnce();
+    expect(inputs).toHaveLength(0);
+  });
+});

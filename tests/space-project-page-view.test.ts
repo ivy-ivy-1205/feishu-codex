@@ -110,4 +110,29 @@ describe('Space project-page block', () => {
     const h = setup();
     expect(renderSpaceProjectPageLines(loadSpaceProjectPageView(h.db.client, h.topic.id, at, 30)!)).toContain('项目页摘要：生成中');
   });
+
+  it('expires "今日" the next day and "本周" the next week instead of freezing them at generation time', () => {
+    const h = setup();
+    h.digests.saveReady({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h.page.id, pageSourceVersion: 1,
+      pageUpdatedAt: h.page.occurredAt, generatedAt: at, changeBasis: 'version_diff', digest });
+    // 2026-10-22 is the next local day, same week.
+    const nextDay = renderSpaceProjectPageLines(loadSpaceProjectPageView(h.db.client, h.topic.id, new Date('2026-10-22T02:00:00.000Z'), 1440)!);
+    expect(nextDay).toContain('本周进展：27 Cecil Street 页面上线；补齐户型图');
+    expect(nextDay.some((line) => line.startsWith('今日'))).toBe(false);
+    // 2026-10-27 is the following week.
+    const nextWeek = renderSpaceProjectPageLines(loadSpaceProjectPageView(h.db.client, h.topic.id, new Date('2026-10-27T02:00:00.000Z'), 100_000)!);
+    expect(nextWeek).toContain('本周页面无更新；上次更新的进展（2026-10-21T02:00:00.000Z）：27 Cecil Street 页面上线；补齐户型图');
+    expect(nextWeek.some((line) => line.startsWith('本周进展'))).toBe(false);
+  });
+
+  it('counts a thread as resolved once a later sync observed it resolved, even though the comment body never changed', () => {
+    const h = setup();
+    h.comment('m1', 'u_ivy', 'open');
+    const spaceSync = new SpaceSyncRepository(h.db.client);
+    spaceSync.recordCommentThreadStates({ pageId: 'page_1', observedAt: new Date(at.getTime() + 1_000),
+      threads: [{ threadId: 't', threadState: 'resolved', resolvedAt: at.toISOString() }] });
+    // An older envelope replayed late cannot reopen it.
+    spaceSync.recordCommentThreadStates({ pageId: 'page_1', observedAt: at, threads: [{ threadId: 't', threadState: 'open', resolvedAt: null }] });
+    expect(loadSpaceProjectPageView(h.db.client, h.topic.id, at, 30)!.comments).toMatchObject({ open: 0, resolved: 1 });
+  });
 });

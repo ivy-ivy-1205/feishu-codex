@@ -56,6 +56,8 @@ export interface FounderStreamOptions {
   spaceAnalysisEnabled?: boolean;
   /** Server-local Codex project-page digest; when absent, the work map shows the digest as not generated. */
   spaceDigestAnalyzer?: SpaceProjectDigestAnalyzer;
+  /** SPACE_SYNC_STALE_AFTER_MINUTES; the manual-query default (24h) applies when omitted. */
+  spaceStaleAfterMinutes?: number;
   policy?: Pick<AlignmentNotificationPolicy, 'reconcilePending'>;
   dailyReconciliation?:{bootstrapSince:string;run(input:{since:string;until:string;now:Date}):Promise<unknown>};
   whiteboardPublisher?:{publish(input:{title:string;chatId:string;cards:readonly Record<string,unknown>[];
@@ -106,7 +108,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         const openId=event.sender.sender_id.open_id??'';
         if(event.sender.sender_type!=='user'||!isConfiguredFounder(options.client,openId))return{status:'rejected',reason:'founder_identity_required'};
         const messages=buildFounderManualQueryMessages({client:options.client,query:manualQuery,queryMessageId:message.message_id,
-          chatId,approvedChatIds:options.approvedChatIds,now:stamp});
+          chatId,approvedChatIds:options.approvedChatIds,now:stamp,
+          ...(options.spaceStaleAfterMinutes?{spaceStaleAfterMinutes:options.spaceStaleAfterMinutes}:{})});
         enqueueFounderManualQuery(options.client,messages,stamp);
         options.client.prepare('INSERT INTO founder_stream_events(event_id,message_id,chat_id,disposition,received_at) VALUES(?,?,?,?,?)')
           .run(header.event_id,message.message_id,chatId,'feedback',stamp.toISOString());
@@ -183,7 +186,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         failureStage = 'space_digest';
         const digestResults: { page: ContextSourceRecord; result: { ready: SpaceProjectDigest; basis: 'version_diff'|'first_snapshot' } | { failureCode: string } }[] = [];
         for (const page of loaded.pages) {
-          const versions = sources.listSources().filter(s => s.logicalKey === page.logicalKey);
+          const versions = sources.listSourceVersions(page.logicalKey);
           // An older snapshot replayed late is history; only the page as it stands now gets a digest.
           if (versions.some(v => v.sourceVersion > page.sourceVersion) || spaceDigests.getForPageSource(page.id)?.status === 'ready') continue;
           if (!options.spaceDigestAnalyzer) { digestResults.push({ page, result: { failureCode: 'analyzer_unavailable' } }); continue; }
@@ -207,7 +210,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         // Comments may show consensus or divergence; the shared reconciler still needs
         // explicit, attributed statements from both founders, and silence is never agreement.
         failureStage = 'founder_attribution';
-        const liveEvidence = loaded.comments.filter(comment => !isResolvedSpaceComment(comment)).flatMap(comment => {
+        const liveEvidence = loaded.comments.filter(comment => !isResolvedSpaceComment(spaceSync, comment)).flatMap(comment => {
           const excerpt = spaceCommentExcerpt(comment);
           if (!excerpt) return [];
           const id = commentEvidenceIds.find(evidenceId => sources.getEvidence(evidenceId)?.sourceId === comment.id)!;
@@ -544,11 +547,16 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         if (!projectKeyByPageId.has(pageId)) projectKeyByPageId.set(pageId, spaceSync.getBindingByPageId(pageId)?.projectKey ?? null);
         return projectKeyByPageId.get(pageId)!;
       };
+      const mappedByProject = new Map<string, boolean>();
+      const mapped = (projectKey: string) => {
+        if (!mappedByProject.has(projectKey)) mappedByProject.set(projectKey, Boolean(confirmedSpaceProjectTopic(options.client, topics, projectKey)));
+        return mappedByProject.get(projectKey)!;
+      };
       const byProject = new Map<string, ContextSourceRecord[]>();
       for (const source of spaceSources) {
         const projectKey = projectKeyFor(source.metadata.pageId as string);
         // Unmapped projects stay unclaimed, so registering the mapping later picks them up.
-        if (!projectKey || !confirmedSpaceProjectTopic(options.client, topics, projectKey)) continue;
+        if (!projectKey || !mapped(projectKey)) continue;
         byProject.set(projectKey, [...(byProject.get(projectKey) ?? []), source]);
       }
       for (const [projectKey, projectSources] of byProject) {

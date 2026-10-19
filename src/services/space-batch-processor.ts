@@ -47,6 +47,9 @@ export function spaceCommentExcerpt(comment: ContextSourceRecord): string | null
   return body ? body.slice(0, commentExcerptLimit).trim() : null;
 }
 
-export function isResolvedSpaceComment(comment: ContextSourceRecord): boolean {
-  return comment.metadata.threadState === 'resolved';
+/** The thread's latest observed state wins over the state captured with this (immutable) comment version. */
+export function isResolvedSpaceComment(spaceSync: SpaceSyncRepository, comment: ContextSourceRecord): boolean {
+  const pageId = comment.metadata.pageId, threadId = comment.metadata.threadId;
+  const current = typeof pageId === 'string' && typeof threadId === 'string' ? spaceSync.getCommentThreadState(pageId, threadId) : null;
+  return (current ?? comment.metadata.threadState) === 'resolved';
 }

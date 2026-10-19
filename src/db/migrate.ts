@@ -531,6 +531,15 @@ const migrationSql = `
     completed_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS space_comment_threads (
+    page_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    thread_state TEXT NOT NULL CHECK(thread_state IN ('open', 'resolved')),
+    resolved_at TEXT,
+    observed_at TEXT NOT NULL,
+    PRIMARY KEY(page_id, thread_id)
+  );
+
   CREATE TABLE IF NOT EXISTS space_project_digests (
     id TEXT PRIMARY KEY,
     project_key TEXT NOT NULL REFERENCES projects(project_key),

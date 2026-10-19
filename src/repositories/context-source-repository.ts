@@ -222,6 +222,19 @@ export class ContextSourceRepository {
     return row ? toSourceRecord(row) : null;
   }
 
+  /** Every stored version of one logical source, oldest first. */
+  listSourceVersions(logicalKey: string): ContextSourceRecord[] {
+    return (this.client.prepare('SELECT * FROM context_sources WHERE logical_key = ? ORDER BY source_version')
+      .all(logicalKey.trim()) as SourceRow[]).map(toSourceRecord);
+  }
+
+  /** Space page snapshots and comments of one page, ordered like listSources (later rows are newer versions). */
+  listSpacePageSources(pageId: string): ContextSourceRecord[] {
+    return (this.client.prepare(`SELECT * FROM context_sources
+      WHERE source_type IN ('space_page_snapshot', 'space_page_comment') AND json_extract(metadata_json, '$.pageId') = ?
+      ORDER BY logical_key, source_version`).all(pageId) as SourceRow[]).map(toSourceRecord);
+  }
+
   listSources(): ContextSourceRecord[] {
     return (this.client.prepare('SELECT * FROM context_sources ORDER BY logical_key, source_version').all() as SourceRow[])
       .map(toSourceRecord);

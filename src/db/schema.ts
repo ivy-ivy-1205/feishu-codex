@@ -665,3 +665,15 @@ export const spaceProjectDigests = sqliteTable('space_project_digests', {
   check('space_project_digests_change_basis_allowed', sql`${table.changeBasis} IN ('version_diff', 'first_snapshot')`),
   uniqueIndex('space_project_digests_page_source_unique').on(table.pageSourceId)
 ]);
+
+/** Current open/resolved state per thread; comment bodies stay immutable sources, so a resolution is tracked here. */
+export const spaceCommentThreads = sqliteTable('space_comment_threads', {
+  pageId: text('page_id').notNull(),
+  threadId: text('thread_id').notNull(),
+  threadState: text('thread_state', { enum: ['open', 'resolved'] }).notNull(),
+  resolvedAt: text('resolved_at'),
+  observedAt: text('observed_at').notNull()
+}, (table) => [
+  check('space_comment_threads_state_allowed', sql`${table.threadState} IN ('open', 'resolved')`),
+  primaryKey({ columns: [table.pageId, table.threadId] })
+]);

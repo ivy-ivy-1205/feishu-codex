@@ -6,12 +6,15 @@ import { SpaceProjectDigestRepository, type SpaceProjectDigestRecord } from '../
 import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
 import { founderText } from './founder-card.js';
 import { computeSpaceFreshness, type SpaceFreshnessSummary } from './space-sync-freshness.js';
+import { isResolvedSpaceComment } from './space-batch-processor.js';
+import { spaceWindowStarts } from './space-page-diff.js';
 
 export interface SpaceProjectPageView {
   freshness: SpaceFreshnessSummary;
   /** Newest stored page snapshot time (the page's own update time), not the sync time. */
   pageUpdatedAt: string | null;
-  digest: Pick<SpaceProjectDigestRecord, 'status' | 'changeBasis' | 'digest' | 'failureCode'> | null;
+  digest: (Pick<SpaceProjectDigestRecord, 'status' | 'changeBasis' | 'digest' | 'failureCode' | 'generatedAt'> &
+    { generatedToday: boolean; generatedThisWeek: boolean }) | null;
   comments: { open: number; resolved: number; ivy: number; james: number; other: number; divergenceCandidates: number };
 }
 
@@ -32,16 +35,13 @@ export function loadSpaceProjectPageView(client: Database.Database, topicId: str
   if (!binding) return null;
   const freshness = computeSpaceFreshness({ binding, latestRun: spaceSync.getLatestRunForBinding(binding.id), now, staleAfterMinutes });
   const latestByKey = new Map<string, ReturnType<ContextSourceRepository['listSources']>[number]>();
-  for (const source of new ContextSourceRepository(client).listSources()) {
-    if (source.metadata.pageId !== binding.pageId || !['space_page_snapshot', 'space_page_comment'].includes(source.sourceType)) continue;
-    latestByKey.set(source.logicalKey, source);
-  }
+  for (const source of new ContextSourceRepository(client).listSpacePageSources(binding.pageId)) latestByKey.set(source.logicalKey, source);
   const latest = [...latestByKey.values()];
   const page = latest.find((source) => source.sourceType === 'space_page_snapshot');
   const comments = { open: 0, resolved: 0, ivy: 0, james: 0, other: 0, divergenceCandidates: 0 };
   const founderOf = client.prepare("SELECT founder FROM founder_identities WHERE source_system = 'chatgpt_space' AND external_author_id = ?");
   for (const comment of latest.filter((source) => source.sourceType === 'space_page_comment')) {
-    if (comment.metadata.threadState === 'resolved') { comments.resolved += 1; continue; }
+    if (isResolvedSpaceComment(spaceSync, comment)) { comments.resolved += 1; continue; }
     comments.open += 1;
     const author = typeof comment.metadata.authorOpenId === 'string' ? comment.metadata.authorOpenId : '';
     const founder = (founderOf.get(author) as { founder: 'ivy' | 'james' } | undefined)?.founder;
@@ -57,8 +57,12 @@ export function loadSpaceProjectPageView(client: Database.Database, topicId: str
   const record = new SpaceProjectDigestRepository(client).getLatestForProject(canonical.projectKey);
   const digest = record && (!page || record.pageSourceId === page.id) ? record : record ? { ...record, status: 'failed' as const,
     digest: null, changeBasis: null, failureCode: 'pending_latest_version' } : null;
+  // "今日/本周" were computed when the digest was generated; they expire with the founder calendar, not with the page.
+  const windows = spaceWindowStarts(now);
   return { freshness, pageUpdatedAt: page?.occurredAt ?? null,
-    digest: digest ? { status: digest.status, changeBasis: digest.changeBasis, digest: digest.digest, failureCode: digest.failureCode } : null,
+    digest: digest ? { status: digest.status, changeBasis: digest.changeBasis, digest: digest.digest, failureCode: digest.failureCode,
+      generatedAt: digest.generatedAt, generatedToday: Date.parse(digest.generatedAt) >= Date.parse(windows.todayStart),
+      generatedThisWeek: Date.parse(digest.generatedAt) >= Date.parse(windows.weekStart) } : null,
     comments };
 }
 
@@ -80,9 +84,11 @@ export function renderSpaceProjectPageLines(view: SpaceProjectPageView): string[
     const d = digest.digest, join = (items: readonly { text: string }[]) => items.map((item) => founderText(item.text, 80)).join('；');
     if (digest.changeBasis === 'first_snapshot') {
       if (d.weekProgress.length) lines.push(`页面记载进展（首次同步，未区分本周）：${join(d.weekProgress)}`);
+    } else if (!digest.generatedThisWeek) {
+      lines.push(`本周页面无更新${d.weekProgress.length ? `；上次更新的进展（${new Date(digest.generatedAt).toISOString()}）：${join(d.weekProgress)}` : ''}`);
     } else {
       lines.push(`本周进展：${d.weekProgress.length ? join(d.weekProgress) : '本周页面无进展类更新'}`);
-      if (d.todayProgress.length) lines.push(`今日：${join(d.todayProgress)}`);
+      if (d.todayProgress.length && digest.generatedToday) lines.push(`今日：${join(d.todayProgress)}`);
     }
     if (d.currentFocus) lines.push(`当前重点：${founderText(d.currentFocus.text, 80)}`);
     if (d.nextSteps.length) lines.push(`下一步/卡点：${d.nextSteps.map((item) =>
