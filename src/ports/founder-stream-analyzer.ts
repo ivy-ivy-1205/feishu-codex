@@ -46,7 +46,7 @@ const currentTopicSchema = z.object({
 const founderStreamInputSchema = z.object({
   sources: z.array(z.object({
     id: text(256),
-    sourceType: z.enum(['group_message', 'minute_transcript']),
+    sourceType: z.enum(['group_message', 'minute_transcript', 'space_page_snapshot', 'space_page_comment']),
     sourceVersion: z.number().int().positive(),
     contentHash: z.string().regex(/^[a-f0-9]{64}$/),
     contentText: text(200_000),
