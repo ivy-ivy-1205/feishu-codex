@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { AlignmentIssueRepository } from '../repositories/alignment-issue-repository.js';
 import { AlignmentRepository } from '../repositories/alignment-repository.js';
+import { loadSpaceProjectPageView, renderSpaceProjectPageLines } from './space-project-page-view.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
 import { FounderTopicProjectBindingRepository } from '../repositories/founder-topic-project-binding-repository.js';
@@ -58,7 +59,7 @@ export function buildFounderManualQueryMessages(input:{client:Database.Database;
     totalPages:cards.length,targetChatId:input.chatId,card:withProcessingStatus(card,status)}));
 }
 
-function buildProjectProgress(input:{client:Database.Database;now:Date},name:string):Record<string,unknown>{
+function buildProjectProgress(input:{client:Database.Database;now:Date;spaceStaleAfterMinutes?:number},name:string):Record<string,unknown>{
   const topics=new TopicRepository(input.client).listCanonicalTopics();
   const wanted=normalize(name),matches=topics.filter(topic=>normalize(topic.displayName)===wanted);
   if(matches.length!==1)return founderCard('项目进展',[
@@ -79,8 +80,10 @@ function buildProjectProgress(input:{client:Database.Database;now:Date},name:str
     '当前资料没有明确标注下一步；需要结合最新项目表达确认。';
   const blockers=issues.length?issues.slice(0,6).map(issue=>`- ${founderText(issue.ivy.statement,120)} ↔ ${founderText(issue.james.statement,120)}`).join('\n'):
     '当前没有满足“双方向不同且影响行动”条件的卡点记录；这不代表没有依赖。';
+  const spacePage=loadSpaceProjectPageView(input.client,topic.id,input.now,input.spaceStaleAfterMinutes??defaultSpaceStaleAfterMinutes);
   return founderCard(`项目进展 · ${founderText(topic.displayName,100)}`,[
     `当前方向：${topic.outcome?founderText(topic.outcome,500):'尚未形成明确目标。'}`,
+    ...(spacePage?[renderSpaceProjectPageLines(spacePage).join('\n')]:[]),
     `01 当前阶段\n${stageLabels[topic.stage]}；本版本更新时间 ${new Date(input.now).toISOString()}。`,
     `02 已完成\n${completed}`,
     `03 待推进\n${next}`,
@@ -105,27 +108,13 @@ function buildWorkMap(input:{client:Database.Database;chatId:string;approvedChat
   {mapId:string;cards:FounderWorkMapCard[];boardView:FounderBoardView}|null {
   const topics=new TopicRepository(input.client).listCanonicalTopics();
   if(topics.length===0)return null;
-  const spaceFreshnessByTopicId=spaceFreshnessForCanonicalTopics(input.client,topics.map(t=>t.id),input.now,
-    input.spaceStaleAfterMinutes??defaultSpaceStaleAfterMinutes);
+  const spacePageByTopicId=new Map(topics.flatMap(topic=>{
+    const view=loadSpaceProjectPageView(input.client,topic.id,input.now,input.spaceStaleAfterMinutes??defaultSpaceStaleAfterMinutes);
+    return view?[[topic.id,view] as const]:[];
+  }));
   const result=buildCurrentFounderWorkMap({client:input.client,chatId:input.chatId,approvedChatIds:input.approvedChatIds,
-    expectedCanonicalTopicCount:topics.length,since:baselineSince,until:input.now.toISOString(),spaceFreshnessByTopicId});
+    expectedCanonicalTopicCount:topics.length,since:baselineSince,until:input.now.toISOString(),spacePageByTopicId});
   return{mapId:result.mapId,cards:result.cards,boardView:result.boardView};
-}
-
-/** Reads already-stored binding/run state only — never contacts Space itself (handoff doc §8.3). */
-function spaceFreshnessForCanonicalTopics(client:Database.Database,topicIds:readonly string[],now:Date,
-  staleAfterMinutes:number):ReadonlyMap<string,SpaceFreshnessSummary>{
-  const bindingRepo=new FounderTopicProjectBindingRepository(client),spaceSync=new SpaceSyncRepository(client);
-  const map=new Map<string,SpaceFreshnessSummary>();
-  for(const topicId of topicIds){
-    const canonical=bindingRepo.listForTopic(topicId).find(row=>row.role==='canonical');
-    if(!canonical)continue;
-    const binding=spaceSync.getBindingByProjectKey(canonical.projectKey);
-    if(!binding)continue;
-    const latestRun=spaceSync.getLatestRunForBinding(binding.id);
-    map.set(topicId,computeSpaceFreshness({binding,latestRun,now,staleAfterMinutes}));
-  }
-  return map;
 }
 
 function buildTopicAlignment(input:{client:Database.Database;now:Date},name:string):Record<string,unknown>{

@@ -1,6 +1,7 @@
 import type { CurrentTopic, TopicStage } from '../domain/topic.js';
 import { founderCard, founderSourceText, founderText, type FounderCardEvidence } from './founder-card.js';
 import type { SpaceFreshnessSummary } from './space-sync-freshness.js';
+import { renderSpaceProjectPageLines, type SpaceProjectPageView } from './space-project-page-view.js';
 
 export interface FounderWorkMapTopic extends Pick<CurrentTopic, 'id' | 'currentVersion' | 'displayName' | 'stage' | 'outcome'> {
   evidence: readonly FounderCardEvidence[];
@@ -11,6 +12,8 @@ export interface FounderWorkMapTopic extends Pick<CurrentTopic, 'id' | 'currentV
   supportingItems?: readonly {kind:'principle'|'artifact'|'research'|'task'|'goal';displayName:string}[];
   /** Only set for a topic bound to a Space project; never fetched here — see space-sync-freshness.ts. */
   spaceFreshness?: SpaceFreshnessSummary;
+  /** Project-page block (digest, freshness, comment summary); supersedes spaceFreshness when present. */
+  spacePage?: SpaceProjectPageView;
 }
 export interface FounderWorkMapInput {
   since: string;
@@ -77,7 +80,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     const title=displayKind==='task'?`${nestedSupporting}任务｜${topic.displayName}`:displayKind==='goal'?`${nestedSupporting}阶段目标｜${topic.displayName}`:
       displayKind==='idea'?`观点｜${topic.displayName}`:
       `${nestedProject?'↳ 子项目':'项目'}｜${topic.displayName}`;
-    const text=`${founderText(title, 120)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.displayName,topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}${spaceFreshnessPreview(topic.spaceFreshness)}`;
+    const text=`${founderText(title, 120)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.displayName,topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}${topic.spacePage?`\n${renderSpaceProjectPageLines(topic.spacePage).join('\n')}`:spaceFreshnessPreview(topic.spaceFreshness)}`;
     if(displayKind==='project'||displayKind==='idea')add(section,text,{ kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
     else addSupporting(section,text);
   }

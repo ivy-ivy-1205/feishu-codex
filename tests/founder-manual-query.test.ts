@@ -371,7 +371,7 @@ describe('founder manual queries',()=>{
       role: 'canonical', at });
     const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'work_map' },
       queryMessageId: 'om_space_freshness', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
-    expect(body).toContain('Space 同步');
+    expect(body).toContain('项目页（Space');
     expect(body).toContain('Space 内容可能滞后');
     db.close();
   });
@@ -381,7 +381,7 @@ describe('founder manual queries',()=>{
     new TopicRepository(db.client).createTopic({ displayName: 'Smart Listing', stage: 'active_project', createdAt: at });
     const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'work_map' },
       queryMessageId: 'om_no_space', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
-    expect(body).not.toContain('Space 同步');
+    expect(body).not.toContain('项目页（Space');
     db.close();
   });
 
