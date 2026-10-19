@@ -1,0 +1,41 @@
+{
+  "projects": [
+    {
+      "projectKey": "smart-listing",
+      "displayName": "Smart Listing",
+      "aliases": ["AiJia Smart Listing", "买家空间"],
+      "page": {
+        "pageId": "page_f095a79b4bb48191b797811f8f53862d",
+        "pageUrl": "https://chatgpt.com/space/page_f095a79b4bb48191b797811f8f53862d",
+        "managementMode": "hybrid",
+        "syncMode": "manual"
+      },
+      "topic": { "existingDisplayName": "Smart Listing" }
+    },
+    {
+      "projectKey": "family-first-ai-os",
+      "displayName": "Family First",
+      "aliases": ["family first"],
+      "page": {
+        "pageId": "page_0c8fafc25f948191b768868322257f00",
+        "pageUrl": "https://chatgpt.com/space/page_0c8fafc25f948191b768868322257f00",
+        "managementMode": "hybrid",
+        "syncMode": "manual"
+      },
+      "topic": { "create": { "displayName": "Family First", "stage": "active_project", "line": "A" } }
+    },
+    {
+      "projectKey": "super-individual-to-team",
+      "displayName": "超级个体到超级团队",
+      "aliases": ["超级个体", "超级个体到超级团队 视频项目与候选口播"],
+      "page": {
+        "pageId": "page_99af645338808191b63c00a4ba33b031",
+        "pageUrl": "https://chatgpt.com/space/page_99af645338808191b63c00a4ba33b031",
+        "managementMode": "hybrid",
+        "syncMode": "manual"
+      },
+      "topic": { "create": { "displayName": "超级个体到超级团队", "stage": "active_project", "line": "B" } }
+    }
+  ],
+  "authors": []
+}
