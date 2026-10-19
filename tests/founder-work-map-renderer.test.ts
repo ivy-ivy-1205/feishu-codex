@@ -214,7 +214,7 @@ describe('founder work map cards', () => {
       { ...topic('b', 'active_project'), displayName: '沉睡项目', outcome: '等待 Jimmy', dormant: true, lastActivityAt: '2026-08-01T00:00:00.000Z' }
     ], uncertainGrouping: [], coverageGaps: [] });
     const body = JSON.stringify(page!.card);
-    const section = body.indexOf('长期无动态 1 项');
+    const section = body.indexOf('暂停 / 长期无动态 1 项');
     expect(section).toBeGreaterThan(body.indexOf('活跃项目'));
     expect(body.indexOf('#2 · 项目｜沉睡项目')).toBeGreaterThan(section);
     expect(body).toContain('最近动态 2026-08-01');

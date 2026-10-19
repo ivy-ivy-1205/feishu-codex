@@ -11,7 +11,7 @@ export interface FounderWorkMapBoardTopic {
   /** Only for a Space-bound project card: one 本周 line and a small dated Space label. */
   space?:{weekLine:string|null;label:string};
   lastActivityAt?:string;
-  /** 30+ days without activity: kept off the board until new activity arrives. */
+  /** Paused, or 30+ days without activity: listed in the reminder section until resumed or new activity arrives. */
   dormant?:boolean;
   closedAt?:string|null;
 }
