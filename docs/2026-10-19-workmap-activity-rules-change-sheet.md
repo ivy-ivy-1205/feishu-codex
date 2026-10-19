@@ -1,6 +1,6 @@
 # 工作地图活跃规则上线变更单（Space 保持关闭）
 
-日期：2026-10-19；状态：待 Ivy 批准执行 C1 与 P1–P3
+日期：2026-10-19；状态：Ivy 已批准 C1 与 P1；P2、P3 待 P1 汇报后决定
 
 ## 一句话
 
@@ -9,8 +9,8 @@
 ## 版本
 
 - **当前生产：** revision `558c39a0c5678c6d8bc17237f2b301e41527112f`（依据 2026-10-15 变更单，P1 再核对一次）。
-- **候选：** `codex/phase1c-feishu-oauth` 的合并提交 `a635d47c4ba028adfa9f39a59120193b692a3a43`。它包含 PR #2（Space Phase 0–3）和 PR #3（Space Phase 2/3 与工作地图规则）。
-- 合并时共 1030 项测试通过，typecheck、build 和 `git diff --check` 均通过。
+- **候选：** `codex/phase1c-feishu-oauth` 上 C1 预览工具的合并提交（合并后在 P2 记录完整 SHA）。它在 `a635d47` 之上，包含 PR #2（Space Phase 0–3）、PR #3（Space Phase 2/3 与工作地图规则）和 C1。
+- 依据：`558c39a` 是候选的祖先，增量都已经过评审并合并。合并前 typecheck、build、全部测试和 `git diff --check` 均通过。
 
 ## 用户能看到的变化（仅工作地图）
 
@@ -61,11 +61,15 @@
 
 ## C1｜预览工具（本地，TDD）
 
-现有 `src/cli/current-founder-work-map.ts --preview` 已经以只读方式（`readonly` + `query_only`）输出完整文字卡片和 `boardView`，其中包含每个条目的 `lastActivityAt`、`dormant`、`closedAt`。为了让 Ivy 在切换前直接看图，补一个预览参数：
+状态：已完成（Ivy 2026-10-19 批准）。
 
-- `--board-png <path>`：把同一份 `boardView` 用 Grove 配色渲染成 PNG（与线上同一段白板代码）。
-- 新增 `activitySummary`：每个可见条目一行，内容为名称、分区（当前 / 长期无动态 / 已结束）、最近动态日期。只含条目名称和日期，不含消息正文。
-- 仍然只读，不写数据库、不调用 Codex、不发消息。先写测试再实现，完整门禁通过后合并。
+现有 `src/cli/current-founder-work-map.ts --preview` 已经以只读方式（`readonly` + `query_only`）输出完整文字卡片和 `boardView`，其中包含每个条目的 `lastActivityAt`、`dormant`、`closedAt`。为了让 Ivy 在切换前直接看图，新增：
+
+- `--board-png <path>`（仅 preview 可用）：用 worker 发布白板的同一段代码，把同一份 `boardView` 固定用 Grove 配色渲染成 PNG；标题取自第一张文字卡片，与线上一致。图片 ≥10MB 直接失败；不覆盖已有文件，权限 0600；输出里附带字节数和 SHA-256。
+- 输出新增 `activitySummary`：每个可见条目一行，内容为名称、类型、分区（当前 / 长期无动态 / 已结束）、最近动态日期和结束日期（UTC+8），以及三个分区的计数。只含名称和日期，不含结论、正文或 Space 摘要。
+- 仍然只读，不写数据库、不调用 Codex、不发消息。
+- 这条预览路径不读取 5 张新表，因此可以直接在未迁移的生产副本上运行。
+- 本地验证：测试先失败后通过（共 1034 项）。用 fixture 库跑编译后的 CLI：数据库 SHA-256 前后一致，PNG 正常生成；重复运行时拒绝覆盖已有图片。
 
 ## 生产步骤
 
@@ -77,9 +81,9 @@
 
 ### P2｜隔离候选与生产只读预览
 
-1. 在服务器构建候选镜像（OCI revision 必须精确为 `a635d47…`），不挂载生产 SQLite，不启动 webhook、worker 或自动投递。
-2. 用 SQLite 在线备份做一份生产一致性副本，记录 SHA-256，放在隔离目录。
-3. 用候选镜像对副本运行只读预览：`--preview --until <当前时间> --board-png`。
+1. 在服务器构建候选镜像（OCI revision 必须精确等于候选版本），不挂载生产 SQLite，不启动 webhook、worker 或自动投递。
+2. 用 SQLite 在线备份做一份生产一致性副本，记录 SHA-256，放在隔离目录。副本不做 migration：预览路径不读新表，这样“副本前后 SHA-256 不变”才能证明全程只读。migration 本身在 P3 由服务启动执行并核对。
+3. 用候选镜像对副本运行只读预览：`--preview --until <当前时间> --board-png <隔离目录>/board.png`。
    - 参数与生产“查看工作地图”一致：`since=2026-08-31T00:00:00Z`，`until`=执行时刻。
 4. 门禁：
    - A/B/C 结构不变；
