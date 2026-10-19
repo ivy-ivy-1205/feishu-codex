@@ -168,7 +168,7 @@ function layoutLane(topics:readonly FounderWorkMapBoardTopic[],x:number,y:number
         topic.kind==='idea'?`观点 / ${topic.name}`:topic.name;
       const titleLines=wrapText(title,textUnits(cardWidth-36,26),2).split('\n').length;
       const body=topic.outcome?.trim()?wrapText(topic.outcome,textUnits(cardWidth-36,21),2):'';
-      const bodyLines=body?body.split('\n').length:0,cardHeight=32+titleLines*34+(bodyLines?10+bodyLines*29:0)+34;
+      const bodyLines=body?body.split('\n').length:0,cardHeight=32+titleLines*34+(bodyLines?10+bodyLines*29:0)+(topic.space?.weekLine?spaceLineHeight:0)+34;
       const placement={topic,x:x+padding+column*(columnWidth+columnGap)+indent,y:heights[column]!,width:cardWidth,height:cardHeight,depth};
       placements.push(placement);heights[column]=placement.y+cardHeight+cardGap;
     }
@@ -176,7 +176,9 @@ function layoutLane(topics:readonly FounderWorkMapBoardTopic[],x:number,y:number
   return{x,y,width,height:Math.max(y+150,...heights)-y+2+(footer?64:0),placements,label,color,...(footer?{footer}:{})};
 }
 
-const cardGap=18;
+const cardGap=18,spaceLineHeight=33;
+/** Rendered width of a short single-line label in font-size units (CJK ≈ 1, Latin/digits ≈ 0.6). */
+function labelUnits(value:string):number{return Array.from(value).reduce((sum,char)=>sum+(/[\p{Script=Han}]/u.test(char)?1:/\s/u.test(char)?0.34:0.6),0)}
 function appendLane(nodes:FounderWhiteboardNode[],lane:LaneLayout,palette:FounderPalette,byName:ReadonlyMap<string,FounderWorkMapBoardTopic>):void{
   nodes.push(shape(lane.x,lane.y,lane.width,lane.height,palette.recess,palette.ink));
   nodes.push(shape(lane.x,lane.y,lane.width,58,lane.color,palette.ink));
@@ -195,10 +197,15 @@ function appendLane(nodes:FounderWhiteboardNode[],lane:LaneLayout,palette:Founde
       topic.kind==='idea'?`观点 / ${topic.name}`:topic.name;
     const wrappedTitle=wrapText(title,textUnits(width-36,26),2),titleLines=wrappedTitle.split('\n').length;
     nodes.push(textNode(x+18,y+16,width-36,titleLines*34,wrappedTitle,26,cardText,'bold'));
-    if(topic.outcome)nodes.push(textNode(x+18,y+22+titleLines*34,width-36,height-86,
-      wrapText(topic.outcome,textUnits(width-36,21),2),21,cardText,'regular'));
+    const outcome=topic.outcome?wrapText(topic.outcome,textUnits(width-36,21),2):'',outcomeLines=outcome?outcome.split('\n').length:0;
+    if(topic.outcome)nodes.push(textNode(x+18,y+22+titleLines*34,width-36,topic.space?outcomeLines*29+4:height-86,outcome,21,cardText,'regular'));
+    if(topic.space?.weekLine)nodes.push(textNode(x+18,y+22+titleLines*34+(outcomeLines?outcomeLines*29+6:0),width-36,27,
+      wrapText(topic.space.weekLine,textUnits(width-36,19),1),19,cardText,'regular'));
     const meta=[stageLabel(topic.stage),topic.sourceCount?`${topic.sourceCount} 个来源`:null].filter(Boolean).join(' · ');
     nodes.push(textNode(x+18,y+height-30,width-36,22,meta,17,cardText,'regular'));
+    if(topic.space){const chipWidth=Math.ceil(labelUnits(topic.space.label)*14)+20,chipX=x+width-14-chipWidth,chipY=y+height-34;
+      nodes.push(shape(chipX,chipY,chipWidth,24,palette.accent,palette.ink));
+      nodes.push(textNode(chipX+10,chipY+4,chipWidth-20,18,topic.space.label,14,readableText(palette.accent),'regular'));}
   }
   if(lane.footer){const y=lane.y+lane.height-54;
     nodes.push(shape(lane.x+20,y,lane.width-40,38,palette.secondary,palette.ink));

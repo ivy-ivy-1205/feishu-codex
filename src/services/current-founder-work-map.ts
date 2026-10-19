@@ -10,7 +10,7 @@ import type { FounderCardEvidence } from './founder-card.js';
 import { renderFounderWorkMap, type FounderWorkMapCard, type FounderWorkMapTopic } from './founder-work-map-renderer.js';
 import type { FounderWorkMapBoardView } from './founder-board-view.js';
 import type { SpaceFreshnessSummary } from './space-sync-freshness.js';
-import type { SpaceProjectPageView } from './space-project-page-view.js';
+import { spaceBoardSummary, type SpaceProjectPageView } from './space-project-page-view.js';
 
 export interface CurrentFounderWorkMapInput {
   client: Database.Database;
@@ -70,7 +70,8 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
   const cards=renderFounderWorkMap({since:input.since,until:input.until,topics:projected,uncertainGrouping:[],coverageGaps});
   const boardView:FounderWorkMapBoardView={kind:'work_map',since:input.since,until:input.until,coverageGaps,
     topics:projected.map(topic=>({id:topic.id,name:topic.displayName,stage:topic.stage,kind:topic.displayKind??'project',
-      outcome:topic.outcome,parentName:topic.parentName,sourceCount:topic.linkedSourceCount??topic.evidence.length}))};
+      outcome:topic.outcome,parentName:topic.parentName,sourceCount:topic.linkedSourceCount??topic.evidence.length,
+      ...(topic.spacePage?{space:spaceBoardSummary(topic.spacePage)}:{})}))};
   const mapId=stableId('foundermap',canonicalJson({chatId:input.chatId,since:input.since,until:input.until,
     topics:canonical.map(topic=>({id:topic.id,version:topic.currentVersion})),hiddenRoots:[...hiddenRoots].sort(),
     hideOrphanActive:preference?.hide_orphan_active===1,pages:cards.length}));

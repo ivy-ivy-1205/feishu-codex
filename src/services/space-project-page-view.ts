@@ -102,3 +102,26 @@ export function renderSpaceProjectPageLines(view: SpaceProjectPageView): string[
   }
   return lines;
 }
+
+/** The overview board's compact form of the same project-page block: one 本周 line and a dated label. */
+export function spaceBoardSummary(view: SpaceProjectPageView): { weekLine: string | null; label: string } {
+  const freshness = view.freshness;
+  const date = view.pageUpdatedAt ? founderMonthDay(view.pageUpdatedAt) : null;
+  const label = freshness.status === 'permission_lost' ? 'Space · 权限缺失'
+    : `Space · ${date ? `${date} 更新` : '未同步'}${freshness.status === 'stale' ? ' · 可能滞后' : ''}`;
+  const digest = view.digest;
+  const join = (items: readonly { text: string }[]) => items.map((item) => founderText(item.text, 80)).join('；');
+  let weekLine: string | null;
+  if (!digest) weekLine = view.pageUpdatedAt ? 'Space 摘要生成中' : null;
+  else if (digest.failureCode === 'pending_latest_version') weekLine = 'Space 摘要生成中';
+  else if (digest.status === 'failed' || !digest.digest) weekLine = 'Space 摘要未生成';
+  else if (digest.changeBasis === 'first_snapshot') weekLine = digest.digest.weekProgress.length ? `页面记载：${join(digest.digest.weekProgress)}` : null;
+  else if (!digest.generatedThisWeek) weekLine = '本周：页面无更新';
+  else weekLine = `本周：${digest.digest.weekProgress.length ? join(digest.digest.weekProgress) : '页面无进展类更新'}`;
+  return { weekLine, label };
+}
+
+/** MM-DD on the founder calendar (UTC+8), matching the 今日/本周 windows. */
+function founderMonthDay(value: string): string {
+  return new Date(Date.parse(value) + 8 * 60 * 60 * 1_000).toISOString().slice(5, 10);
+}

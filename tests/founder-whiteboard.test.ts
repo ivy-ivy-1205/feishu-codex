@@ -98,12 +98,35 @@ describe('founder whiteboard',()=>{
     expect(selectFounderPalette(null,()=>0.52,'project_detail').id).toBe('riptide-cobalt');
   });
 
+  it('adds one 本周 line and a small Space date chip to a Space-bound card, leaving other cards untouched',()=>{
+    const base={id:'smart',name:'Smart Listing',stage:'active_project' as const,kind:'project' as const,outcome:'27 Cecil Street 首套 listing 上线',
+      parentName:'AiJia AI Native 房产业务',sourceCount:3};
+    const view=(smart:Record<string,unknown>)=>({kind:'work_map' as const,since:'2026-08-31T00:00:00.000Z',until:'2026-10-19T08:10:00.000Z',coverageGaps:[],topics:[
+      {id:'a',name:'AiJia AI Native 房产业务',stage:'active_project' as const,kind:'project' as const,outcome:null},
+      {id:'site',name:'官网',stage:'active_project' as const,kind:'project' as const,outcome:null,parentName:'AiJia AI Native 房产业务'},
+      {...base,...smart}]});
+    const plain=buildFounderWhiteboard({title:'工作地图',paletteId:'grove',cards:[],view:view({})});
+    const withSpace=buildFounderWhiteboard({title:'工作地图',paletteId:'grove',cards:[],view:view({space:{
+      weekLine:'本周：买家空间页面上线，开始收集 Amy 反馈；补齐周边学校与交通配套信息和价格口径',label:'Space · 10-19 更新'}})});
+    const texts=withSpace.nodes.flatMap(node=>node.text?.text?[{...node.text,text:node.text.text}]:[]);
+    const week=texts.find(text=>text.text.startsWith('本周：'))!;
+    expect(week.text.split('\n')).toHaveLength(1);
+    expect(week.text.endsWith('…')).toBe(true);
+    expect(texts.find(text=>text.text==='Space · 10-19 更新')?.font_size).toBeLessThan(17);
+    const card=(result:typeof plain)=>result.nodes.find(node=>node.type==='composite_shape'&&node.style?.fill_color!==node.style?.border_color&&
+      result.nodes.some(text=>text.text?.text==='Smart Listing'&&text.x===(node.x??0)+18&&text.y===(node.y??0)+16))!;
+    expect(card(withSpace).height!).toBeGreaterThan(card(plain).height!);
+    const siteNodes=(result:typeof plain)=>result.nodes.filter(node=>node.text?.text==='官网');
+    expect(siteNodes(withSpace)).toEqual(siteNodes(plain));
+  });
+
   it('keeps every text node readable against its actual fill in all 25 palettes',()=>{
     for(const palette of founderPalettes){
       const result=buildFounderWhiteboard({title:'工作地图',paletteId:palette.id,cards:[],view:{
         kind:'work_map',since:'2026-08-31T00:00:00.000Z',until:'2026-10-15T00:00:00.000Z',coverageGaps:[{id:'gap',summary:'不可读取 1 条'}],topics:[
           {id:'a',name:'AiJia AI Native 房产业务',stage:'active_project',kind:'project',outcome:'主线'},
-          {id:'project',name:'Smart Listing',stage:'active_project',kind:'project',outcome:'项目卡',parentName:'AiJia AI Native 房产业务'},
+          {id:'project',name:'Smart Listing',stage:'active_project',kind:'project',outcome:'项目卡',parentName:'AiJia AI Native 房产业务',
+            space:{weekLine:'本周：买家空间页面上线',label:'Space · 10-19 更新'}},
           {id:'site',name:'AiJia AI Native 官网',stage:'active_project',kind:'project',outcome:'官网',parentName:'AiJia AI Native 房产业务'},
           {id:'task',name:'团队更新',stage:'active_project',kind:'task',outcome:'任务卡',parentName:'AiJia AI Native 房产业务'},
           {id:'goal',name:'阶段一',stage:'active_project',kind:'goal',outcome:'目标卡',parentName:'AiJia AI Native 房产业务'},

@@ -8,7 +8,7 @@ import { SpaceProjectDigestRepository } from '../src/repositories/space-project-
 import { SpaceSyncRepository } from '../src/repositories/space-sync-repository.js';
 import { TopicRepository } from '../src/repositories/topic-repository.js';
 import { buildFounderManualQueryMessages } from '../src/services/founder-manual-query.js';
-import { loadSpaceProjectPageView, renderSpaceProjectPageLines } from '../src/services/space-project-page-view.js';
+import { loadSpaceProjectPageView, renderSpaceProjectPageLines, spaceBoardSummary } from '../src/services/space-project-page-view.js';
 
 const at = new Date('2026-10-21T02:00:00.000Z');
 const chatId = 'oc_a84d5b6ca478220d0a37964b50776edb';
@@ -134,5 +134,29 @@ describe('Space project-page block', () => {
     // An older envelope replayed late cannot reopen it.
     spaceSync.recordCommentThreadStates({ pageId: 'page_1', observedAt: at, threads: [{ threadId: 't', threadState: 'open', resolvedAt: null }] });
     expect(loadSpaceProjectPageView(h.db.client, h.topic.id, at, 30)!.comments).toMatchObject({ open: 0, resolved: 1 });
+  });
+
+  it('summarizes the project page for the overview board in one 本周 line plus a dated Space label', () => {
+    const h = setup();
+    h.digests.saveReady({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h.page.id, pageSourceVersion: 1,
+      pageUpdatedAt: h.page.occurredAt, generatedAt: at, changeBasis: 'version_diff', digest });
+    const view = (now: Date, stale = 1440) => loadSpaceProjectPageView(h.db.client, h.topic.id, now, stale)!;
+    expect(spaceBoardSummary(view(at))).toEqual({ weekLine: '本周：27 Cecil Street 页面上线；补齐户型图', label: 'Space · 10-21 更新' });
+    expect(spaceBoardSummary(view(new Date('2026-10-23T02:00:00.000Z')))).toEqual({ weekLine: '本周：27 Cecil Street 页面上线；补齐户型图',
+      label: 'Space · 10-21 更新 · 可能滞后' });
+    expect(spaceBoardSummary(view(new Date('2026-10-27T02:00:00.000Z'), 100_000)).weekLine).toBe('本周：页面无更新');
+  });
+
+  it('shows first-snapshot, failed and pending digests honestly on the board', () => {
+    const h = setup();
+    expect(spaceBoardSummary(loadSpaceProjectPageView(h.db.client, h.topic.id, at, 1440)!).weekLine).toBe('Space 摘要生成中');
+    h.digests.saveFailed({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h.page.id, pageSourceVersion: 1,
+      pageUpdatedAt: h.page.occurredAt, generatedAt: at, failureCode: 'codex_execution_failed' });
+    expect(spaceBoardSummary(loadSpaceProjectPageView(h.db.client, h.topic.id, at, 1440)!).weekLine).toBe('Space 摘要未生成');
+    const h2 = setup();
+    h2.digests.saveReady({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h2.page.id, pageSourceVersion: 1,
+      pageUpdatedAt: h2.page.occurredAt, generatedAt: at, changeBasis: 'first_snapshot', digest: { ...digest, todayProgress: [] } });
+    expect(spaceBoardSummary(loadSpaceProjectPageView(h2.db.client, h2.topic.id, at, 1440)!).weekLine)
+      .toBe('页面记载：27 Cecil Street 页面上线；补齐户型图');
   });
 });

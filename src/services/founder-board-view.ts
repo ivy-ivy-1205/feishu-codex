@@ -8,6 +8,8 @@ export interface FounderWorkMapBoardTopic {
   outcome:string|null;
   parentName?:string;
   sourceCount?:number;
+  /** Only for a Space-bound project card: one 本周 line and a small dated Space label. */
+  space?:{weekLine:string|null;label:string};
 }
 
 export interface FounderWorkMapBoardView {
