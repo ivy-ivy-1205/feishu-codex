@@ -15,7 +15,12 @@
     - 必须回复一张最新的工作地图卡片；旧卡片上记录的版本过期后，纠正会被当成过期反馈拒绝。
     - 单行纠正只认两种固定写法：“暂停第N项”“第N项改为已结束”。
     - 批量纠正每行要带 `#N`，关闭只认 `close`、不认“结束”；先生成草稿，回复“确认修正 feedbackdraft_…”后才写入。
-  - 生产实时群消息分析在 10-17 和 10-19 两次因 `codex_execution_failed` 失败，原因未查，可能是 ChatGPT/Codex 额度问题（Ivy 本地 Codex 当时也没有额度），需要单独诊断。
+  - 生产实时群消息分析在 10-17、10-19 12:26、10-19 14:46 三次因 `codex_execution_failed` 失败，原因未查，可能是 ChatGPT/Codex 额度问题（Ivy 本地 Codex 当时也没有额度），需要单独诊断。
+  - **P3 已完成（UTC 2026-10-19T14:54Z）：生产现在是 revision `2d00845e9376e342e7853c36e5593dac66ba4ce1`，image `sha256:8508d797…`。**
+    - 5 张 Space 新表已建、均为空；Space 仍关闭。
+    - 回滚资产：rollback 镜像 `rollback-pre-workmap-activity-20261019T145406Z`（`83d27463`）、checkpoint 和数据库备份（同时间戳，SHA-256 `162f04e0…`）。
+    - 第一次运行因队列里有任务，在停机前中止，没有造成影响。
+    - 切换方式：`docker compose -p deploy -f /opt/feishu-codex/app/deploy/docker-compose.production.yml up -d --no-build bridge`，事先把候选镜像打上 `:local` 标签，旧 app 目录改名保留、不删除。
   - 生产 DB 在容器内的路径是 `/app/data/bridge.sqlite`（宿主机 `/opt/feishu-codex/data`）。只读核查可以用 `docker exec … node` 加 better-sqlite3 的 `readonly` + `query_only`，不需要宿主机装 sqlite3。
 
 - 2026-10-19 Ivy 确认工作地图白板的取舍规则。

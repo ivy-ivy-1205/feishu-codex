@@ -1,6 +1,6 @@
 # 工作地图活跃规则上线变更单（Space 保持关闭）
 
-日期：2026-10-19；状态：C1、P1、P2（候选 2d00845）已完成；等待 Ivy 批准 P3
+日期：2026-10-19；状态：P1–P3 已完成，生产为 2d00845；等待 Ivy 群内验收与纠正
 
 ## 一句话
 
@@ -231,3 +231,33 @@ P1–P3 全部通过后，请 Ivy 在群里发一次 `查看工作地图`，重�
   - Grove PNG 133,133B，SHA-256 `dda0ae4b8ad6f0e82984d1ebb1449988688b932f250a1302f377407ed4c4ee3f`。
 - 隔离副本已删除；`candidate-11b7651` 已作废，改由 `candidate-2d00845` 用于 P3。生产仍为 `558c39a`，healthy，restart 0。
 - **生产 Codex 分析连续失败：** 2026-10-17 和 2026-10-19 12:26 的两次实时群消息分析都以 `topic_analysis / codex_execution_failed` 失败。纠正和工作地图查询都不依赖 Codex，但新群消息无法自动归入条目。这个问题需要单独做只读诊断，不在本变更范围内。
+
+### P3 生产切换（Ivy 2026-10-19 批准）
+
+- **第一次运行（`20261019T145053Z`）：** 停机前的门禁发现队列里有 1 个任务在跑（14:46 收到的新群消息正在分析），于是在停机前中止。生产没有任何变化：没打标签，没做 checkpoint。等这个任务结束（它同样以 `codex_execution_failed` 失败）、队列清空后，再重新运行。
+- **第二次运行（`20261019T145406Z`）一次通过，没有回滚：**
+  - **停机前：** 包、候选 revision、现运行 `558c39a`/`83d27463` 均 healthy；队列为 0/0。
+  - **回滚资产：**
+    - 回滚镜像 `aijia/feishu-codex-bridge:rollback-pre-workmap-activity-20261019T145406Z`，指向 `83d27463`；
+    - app checkpoint `/opt/feishu-codex/checkpoints/app-pre-workmap-activity-20261019T145406Z`；
+    - 旧 app 目录改名为 `/opt/feishu-codex/app.replaced-workmap-activity-20261019T145406Z`，没有删除。
+  - **停机后的数据库：** `ok`，外键异常 0，active/pending 为 0/0，canonical 38，新表 0 张。
+  - **备份：** 用 SQLite backup API 生成 `/opt/feishu-codex/backups/bridge-pre-workmap-activity-20261019T145406Z.sqlite`，权限 600，`integrity_check=ok`，SHA-256 `162f04e0a08a29d6c1db2b8975a013500b9effb7784e5005b8bab8d5af66faf5`。
+  - **切换：** `/opt/feishu-codex/app` 换成 `2d00845` 的完整 git archive（SHA-256 `b20ec989249424baff144d401d62302722ba6b40b94b3ebb684ff968dd63537e`）；候选镜像打上 `:local` 标签；执行 `docker compose -p deploy … up -d --no-build bridge`。
+  - **切换后核对（全部通过）：**
+    - revision `2d00845e9376e342e7853c36e5593dac66ba4ce1`，image `sha256:8508d797…`，于 2026-10-19T14:54:10Z 启动，healthy，restart 0；
+    - health/ready 200；
+    - Space 路由 404；
+    - `codex login status` 合并 stdout/stderr 判断，结果为 ChatGPT 登录；
+    - 容器里没有 API Key；
+    - `bridge.env` 中的开关与切换前一致（按哈希比对），group delivery=false，没有 `SPACE_SYNC_*`，没有 HMAC secret；
+    - 数据库 `ok`，外键异常 0，canonical 38；**5 张新表已建、均为空**；没有 Space 任务；
+    - 线上只读预览：canonical 38、2 页、18 个可见条目，当前 11 / 提醒区 2 / 已结束 5，与 P2 一致。
+- **独立复核（14:54:59Z）：** running/healthy，restart 0，health/ready 200，启动后日志里没有 error/exception/fatal。全程没有发群消息。
+- **待清理：** 作废的 `candidate-11b7651` 镜像，以及服务器上的上传包。
+
+## 下一步：Ivy 验收与纠正
+
+1. 在群里发“查看工作地图”，验收三点：提醒区的名单与提示、已结束是否一行一项、观点是否合并。
+2. 在新卡片上纠正：知识库所在那页回复 `暂停第N项`，企业微信所在那页回复 `第M项改为已结束`。
+3. 再发一次“查看工作地图”：知识库应进入“暂停 / 长期无动态”，企业微信应进入“已结束”。
