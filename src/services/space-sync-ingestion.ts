@@ -14,6 +14,8 @@ import { ContextSourceRepository } from '../repositories/context-source-reposito
 import { SpaceSyncRepository, type SpaceSyncRunRecord } from '../repositories/space-sync-repository.js';
 import type { JobRepository } from '../repositories/job-repository.js';
 import { canonicalJson, sha256 } from './canonical-json.js';
+import { TopicRepository } from '../repositories/topic-repository.js';
+import { confirmedSpaceProjectTopic } from './space-batch-processor.js';
 
 export type SpaceSyncIngestionErrorCode =
   | 'space_sync_unregistered_page'
@@ -165,7 +167,10 @@ export function ingestSpaceSyncEnvelope(
       syncedAt: startedAt
     });
 
-    if (dependencies.spaceAnalysisEnabled && dependencies.jobRepository && newlyCreatedSourceIds.length > 0) {
+    // Without a human-mapped project card the sources stay unclaimed; worker recovery
+    // queues them once the mapping is registered.
+    if (dependencies.spaceAnalysisEnabled && dependencies.jobRepository && newlyCreatedSourceIds.length > 0 &&
+      confirmedSpaceProjectTopic(dependencies.client, new TopicRepository(dependencies.client), envelope.projectKey)) {
       dependencies.jobRepository.enqueueSpaceStreamBatch({
         projectKey: envelope.projectKey,
         since: envelope.page.updatedAt ?? envelope.capturedAt,

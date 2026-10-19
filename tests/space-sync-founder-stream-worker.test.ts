@@ -7,8 +7,9 @@ import { TopicRepository } from '../src/repositories/topic-repository.js';
 import { SpaceSyncRepository } from '../src/repositories/space-sync-repository.js';
 import { FounderTopicProjectBindingRepository } from '../src/repositories/founder-topic-project-binding-repository.js';
 import {
-  buildFounderStreamInput, buildFounderStreamSpaceInput, createFounderStreamRuntime, saveFounderEvidence
+  buildFounderStreamInput, createFounderStreamRuntime, saveFounderEvidence
 } from '../src/services/founder-stream-worker.js';
+import { loadSpaceBatchSources } from '../src/services/space-batch-processor.js';
 import { captureGroupMessageSource } from '../src/services/group-message-source-capture.js';
 
 const start = new Date('2026-10-19T00:00:00.000Z');
@@ -16,19 +17,29 @@ const chat = 'oc_a84d5b6ca478220d0a37964b50776edb';
 
 function setup() {
   const db = createSqliteDatabase(':memory:'); migrateDatabase(db.client);
-  db.client.prepare(`INSERT INTO projects (project_key, display_name, aliases, status, origin, stage, created_at, updated_at)
-    VALUES ('smart_listing', 'Smart Listing', '[]', 'active', 'human_confirmed', 'active_project', ?, ?)`)
-    .run(start.toISOString(), start.toISOString());
-  db.client.prepare(`INSERT INTO projects (project_key, display_name, aliases, status, origin, stage, created_at, updated_at)
-    VALUES ('other_project', 'Other', '[]', 'active', 'human_confirmed', 'active_project', ?, ?)`)
-    .run(start.toISOString(), start.toISOString());
+  for (const [key, name] of [['smart_listing', 'Smart Listing'], ['other_project', 'Other']] as const)
+    db.client.prepare(`INSERT INTO projects (project_key, display_name, aliases, status, origin, stage, created_at, updated_at)
+      VALUES (?, ?, '[]', 'active', 'human_confirmed', 'active_project', ?, ?)`).run(key, name, start.toISOString(), start.toISOString());
   const jobs = new JobRepository(db.client);
   const sources = new ContextSourceRepository(db.client);
   const topics = new TopicRepository(db.client);
   const spaceSync = new SpaceSyncRepository(db.client);
+  const bindings = new FounderTopicProjectBindingRepository(db.client);
   spaceSync.createBinding({ id: 'binding-1', projectKey: 'smart_listing', spaceId: null, pageId: 'page_1',
     pageUrl: 'https://chatgpt.com/space/page_1', managementMode: 'space', syncMode: 'manual', createdAt: start });
-  return { db, jobs, sources, topics, spaceSync };
+  return { db, jobs, sources, topics, spaceSync, bindings };
+}
+
+function canonicalTopic(h: ReturnType<typeof setup>, source: 'human' | 'analysis' = 'human') {
+  const feishu = h.sources.saveSource(captureGroupMessageSource({ chatId: chat, messageId: 'om_baseline', threadId: null,
+    rootId: null, author: { openId: 'ou_ivy', displayName: null }, messageType: 'text', senderType: 'user',
+    text: 'Smart Listing 推进 27 Cecil Street', occurredAt: start.toISOString() }, start).source).source;
+  const evidenceId = saveFounderEvidence(h.sources, feishu.id, feishu.contentText, start);
+  const topic = h.topics.createTopic({ displayName: 'Smart Listing', stage: 'active_project', outcome: '27 Cecil Street 上线',
+    evidenceIds: [evidenceId], createdAt: start });
+  if (source === 'human') h.bindings.recordHumanConfirmed({ topicId: topic.id, projectKey: 'smart_listing', role: 'canonical', at: start });
+  else h.bindings.proposeFromAnalysis({ topicId: topic.id, projectKey: 'smart_listing', role: 'canonical', at: start });
+  return topic;
 }
 
 function spacePageSource(sources: ContextSourceRepository, overrides: { pageId?: string; text?: string; occurredAt?: string } = {}) {
@@ -38,31 +49,35 @@ function spacePageSource(sources: ContextSourceRepository, overrides: { pageId?:
     sourceSystem: 'chatgpt_space', sourceType: 'space_page_snapshot', externalId: pageId,
     logicalKey: `chatgpt_space:page:${pageId}`, occurredAt: overrides.occurredAt ?? start.toISOString(),
     authors: [], locatorUri: `https://chatgpt.com/space/${pageId}`, contentFormat: 'text/markdown',
-    contentText: text, metadata: { pageId, blocks: [{ id: 'block_1', hash: 'a'.repeat(64), markdown: text }] },
+    contentText: text, metadata: { pageId, title: 'Smart Listing', blocks: [{ id: 'block_1', hash: 'a'.repeat(64), markdown: text }] },
     availabilityStatus: 'available', capturedAt: start
   }).source;
 }
 
-function spaceCommentSource(sources: ContextSourceRepository, overrides: { pageId?: string; text?: string; messageId?: string } = {}) {
+function spaceCommentSource(sources: ContextSourceRepository, overrides: { pageId?: string; text?: string; messageId?: string;
+  authorId?: string; threadState?: 'open' | 'resolved' } = {}) {
   const pageId = overrides.pageId ?? 'page_1';
   const messageId = overrides.messageId ?? 'msg_1';
+  const authorId = overrides.authorId ?? 'space_user_ivy';
   return sources.saveSource({
     sourceSystem: 'chatgpt_space', sourceType: 'space_page_comment', externalId: messageId,
     logicalKey: `chatgpt_space:page:${pageId}:thread:thread_1:message:${messageId}`, occurredAt: start.toISOString(),
-    authors: [{ openId: 'ou_ivy', displayName: 'Ivy' }], locatorUri: `https://chatgpt.com/space/${pageId}`,
+    authors: [{ openId: authorId, displayName: null }], locatorUri: `https://chatgpt.com/space/${pageId}`,
     contentFormat: 'text/plain', contentText: overrides.text ?? '需要补充负责人',
-    metadata: { pageId, threadId: 'thread_1', messageId, authorOpenId: 'ou_ivy', targetBlockId: null },
+    metadata: { pageId, threadId: 'thread_1', messageId, authorOpenId: authorId, targetBlockId: null,
+      threadState: overrides.threadState ?? 'open', resolvedAt: overrides.threadState === 'resolved' ? start.toISOString() : null },
     availabilityStatus: 'available', capturedAt: start
   }).source;
 }
 
-describe('buildFounderStreamSpaceInput admission', () => {
+describe('loadSpaceBatchSources admission', () => {
   it('admits a space page/comment source whose binding matches the requested projectKey', () => {
     const h = setup();
     const page = spacePageSource(h.sources);
     const comment = spaceCommentSource(h.sources);
-    const input = buildFounderStreamSpaceInput(h.sources, h.topics, h.spaceSync, [page.id, comment.id], 'smart_listing');
-    expect(input.sources.map((s) => s.id).sort()).toEqual([comment.id, page.id].sort());
+    const loaded = loadSpaceBatchSources(h.sources, h.spaceSync, [page.id, comment.id], 'smart_listing');
+    expect(loaded.pages.map((s) => s.id)).toEqual([page.id]);
+    expect(loaded.comments.map((s) => s.id)).toEqual([comment.id]);
   });
 
   it('rejects a source whose page is bound to a different project', () => {
@@ -70,21 +85,21 @@ describe('buildFounderStreamSpaceInput admission', () => {
     h.spaceSync.createBinding({ id: 'binding-2', projectKey: 'other_project', spaceId: null, pageId: 'page_2',
       pageUrl: 'https://chatgpt.com/space/page_2', managementMode: 'space', syncMode: 'manual', createdAt: start });
     const page = spacePageSource(h.sources, { pageId: 'page_2' });
-    expect(() => buildFounderStreamSpaceInput(h.sources, h.topics, h.spaceSync, [page.id], 'smart_listing')).toThrow();
+    expect(() => loadSpaceBatchSources(h.sources, h.spaceSync, [page.id], 'smart_listing')).toThrow();
   });
 
   it('rejects a source whose page has no binding at all', () => {
     const h = setup();
     const page = spacePageSource(h.sources, { pageId: 'page_unregistered' });
-    expect(() => buildFounderStreamSpaceInput(h.sources, h.topics, h.spaceSync, [page.id], 'smart_listing')).toThrow();
+    expect(() => loadSpaceBatchSources(h.sources, h.spaceSync, [page.id], 'smart_listing')).toThrow();
   });
 
-  it('rejects a group_message source even when its id is passed to the space builder', () => {
+  it('rejects a group_message source even when its id is passed to the space loader', () => {
     const h = setup();
     const source = h.sources.saveSource(captureGroupMessageSource({ chatId: chat, messageId: 'om_1', threadId: null, rootId: null,
       author: { openId: 'ou_ivy', displayName: null }, messageType: 'text', senderType: 'user', text: '知识库',
       occurredAt: start.toISOString() }, start).source).source;
-    expect(() => buildFounderStreamSpaceInput(h.sources, h.topics, h.spaceSync, [source.id], 'smart_listing')).toThrow();
+    expect(() => loadSpaceBatchSources(h.sources, h.spaceSync, [source.id], 'smart_listing')).toThrow();
   });
 
   it('never leaks a Space source into the chatId-scoped builder, even if its id is passed in', () => {
@@ -97,99 +112,112 @@ describe('buildFounderStreamSpaceInput admission', () => {
 function harness(spaceAnalysisEnabled = true) {
   const h = setup();
   let now = start;
-  const inputs: { projectKey?: string }[] = [];
+  const topicAnalyzerCalls: unknown[] = [];
   const runtime = createFounderStreamRuntime({
     client: h.db.client, jobRepository: h.jobs,
     flags: { captureEnabled: false, analysisEnabled: false, groupDeliveryEnabled: false },
     approvedChatIds: [], ivyPrivateChatId: 'oc_private', now: () => now, spaceAnalysisEnabled,
-    analyzer: { async analyze(input) { inputs.push({}); return { topics: [{
-      displayName: 'Smart Listing', stage: 'active_project', outcome: '项目总览', currentAction: 'Smart Listing',
-      confidence: 'high', sourceIds: [input.sources[0]!.id],
-      evidenceExcerpts: [{ sourceId: input.sources[0]!.id, excerpt: input.sources[0]!.contentText }],
-      joinDecision: input.currentTopics.length ? { kind: 'exact_continuation', topicId: input.currentTopics[0]!.id,
-        confidence: 'high', sharedTerms: ['Smart Listing'] } : { kind: 'new', topicId: null, confidence: 'high', sharedTerms: [] },
-      splitSuggestions: []
-    }] }; } }
+    // Space content must never go through topic extraction; any call here is a regression.
+    analyzer: { async analyze(input) { topicAnalyzerCalls.push(input); return { topics: [] }; } }
   });
-  return { ...h, runtime, now: () => now, setNow: (value: Date) => { now = value; }, inputs };
+  return { ...h, runtime, now: () => now, setNow: (value: Date) => { now = value; }, topicAnalyzerCalls };
+}
+
+function jobStatus(h: ReturnType<typeof harness>, key: string) {
+  return (h.db.client.prepare('SELECT status FROM batch_jobs WHERE stable_key=?').get(key) as { status: string }).status;
 }
 
 describe('founder-stream-worker Space-scoped processing', () => {
-  it('admits and persists a new topic from a Space batch without any approved chatId', async () => {
+  it('waits (retry) and creates nothing when the project has no confirmed canonical work-map topic', async () => {
     const h = harness();
     const page = spacePageSource(h.sources);
     const queued = h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(),
       until: start.toISOString(), sourceIds: [page.id], capturedAt: start });
     await h.runtime.runOnce();
-    const row = h.db.client.prepare('SELECT status FROM batch_jobs WHERE stable_key=?').get(queued.key) as { status: string };
-    expect(row.status).toBe('completed');
-    expect(h.topics.listCurrentTopics()).toHaveLength(1);
-    expect(h.topics.listCurrentTopics()[0]).toMatchObject({ displayName: 'Smart Listing', stage: 'active_project' });
+    expect(jobStatus(h, queued.key)).toBe('retry');
+    expect(h.topics.listCurrentTopics()).toHaveLength(0);
+    expect(h.bindings.listForProject('smart_listing')).toEqual([]);
   });
 
-  it('rejects a Space batch for a projectKey with no registered binding', async () => {
+  it('does not trust an analysis-proposed canonical binding as the Space target', async () => {
+    const h = harness();
+    canonicalTopic(h, 'analysis');
+    const comment = spaceCommentSource(h.sources);
+    const queued = h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(),
+      until: start.toISOString(), sourceIds: [comment.id], capturedAt: start });
+    await h.runtime.runOnce();
+    expect(jobStatus(h, queued.key)).toBe('retry');
+    expect(h.topics.listCurrentTopics()[0]!.currentVersion).toBe(1);
+  });
+
+  it('rejects a Space batch for a projectKey with no registered page binding', async () => {
     const h = harness();
     const queued = h.jobs.enqueueSpaceStreamBatch({ projectKey: 'unregistered_project', since: start.toISOString(),
       until: start.toISOString(), sourceIds: ['ctxsrc_missing'], capturedAt: start });
     await h.runtime.runOnce();
-    const row = h.db.client.prepare('SELECT status FROM batch_jobs WHERE stable_key=?').get(queued.key) as { status: string };
-    expect(row.status).toBe('retry');
-    expect(h.topics.listCurrentTopics()).toHaveLength(0);
+    expect(jobStatus(h, queued.key)).toBe('retry');
+  });
+
+  it('never runs topic extraction on page content and never creates, renames or restages a topic', async () => {
+    const h = harness();
+    const topic = canonicalTopic(h);
+    const page = spacePageSource(h.sources, { text: '完全不同的名字：Smart Listing 2.0，阶段已关闭' });
+    const queued = h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(),
+      until: start.toISOString(), sourceIds: [page.id], capturedAt: start });
+    await h.runtime.runOnce();
+    expect(jobStatus(h, queued.key)).toBe('completed');
+    expect(h.topicAnalyzerCalls).toHaveLength(0);
+    expect(h.topics.listCurrentTopics()).toHaveLength(1);
+    expect(h.topics.listCurrentTopics()[0]).toMatchObject({ id: topic.id, displayName: 'Smart Listing',
+      stage: 'active_project', outcome: '27 Cecil Street 上线' });
+  });
+
+  it('attaches comment evidence to the canonical topic while preserving its name, stage and outcome', async () => {
+    const h = harness();
+    const topic = canonicalTopic(h);
+    const comment = spaceCommentSource(h.sources, { text: '第二套 listing 先等 Amy 确认' });
+    h.setNow(new Date(start.getTime() + 1_000));
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(),
+      until: h.now().toISOString(), sourceIds: [comment.id], capturedAt: h.now() });
+    await h.runtime.runOnce();
+    const current = h.topics.listCurrentTopics().find((t) => t.id === topic.id)!;
+    expect(current).toMatchObject({ currentVersion: 2, displayName: 'Smart Listing', stage: 'active_project', outcome: '27 Cecil Street 上线' });
+    const commentEvidence = current.evidenceIds.map((id) => h.sources.getEvidence(id)!).find((e) => e.sourceId === comment.id);
+    expect(commentEvidence).toMatchObject({ excerpt: '第二套 listing 先等 Amy 确认', locator: { kind: 'space_comment' } });
+    expect(JSON.parse(h.topics.listVersions(topic.id).at(-1)!.rationale)).toMatchObject({ origin: 'space_sync', projectKey: 'smart_listing' });
+  });
+
+  it('keeps a human-paused canonical topic paused when Space comments arrive', async () => {
+    const h = harness();
+    const topic = canonicalTopic(h);
+    h.topics.appendVersion({ topicId: topic.id, expectedVersion: 1, displayName: 'Smart Listing', stage: 'paused',
+      outcome: '人工暂停', rationale: 'manual', evidenceIds: topic.evidenceIds, changedAt: start });
+    const comment = spaceCommentSource(h.sources, { text: '继续推进吧' });
+    h.setNow(new Date(start.getTime() + 1_000));
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(),
+      until: h.now().toISOString(), sourceIds: [comment.id], capturedAt: h.now() });
+    await h.runtime.runOnce();
+    expect(h.topics.listCurrentTopics()[0]).toMatchObject({ stage: 'paused', outcome: '人工暂停' });
+  });
+
+  it('never proposes an analysis-sourced project binding', async () => {
+    const h = harness();
+    canonicalTopic(h);
+    const comment = spaceCommentSource(h.sources);
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(),
+      until: start.toISOString(), sourceIds: [comment.id], capturedAt: start });
+    await h.runtime.runOnce();
+    expect(h.bindings.listForProject('smart_listing').map((b) => b.source)).toEqual(['human_confirmed']);
   });
 
   it('is not leased at all when spaceAnalysisEnabled is left off (default)', async () => {
     const h = harness(false);
+    canonicalTopic(h);
     const page = spacePageSource(h.sources);
     h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
       sourceIds: [page.id], capturedAt: start });
     await h.runtime.runOnce();
-    expect(h.topics.listCurrentTopics()).toHaveLength(0);
     expect(h.db.client.prepare("SELECT status FROM batch_jobs").get()).toEqual({ status: 'queued' });
-  });
-
-  it('continues (joins) the existing canonical topic on a later Space batch instead of duplicating it', async () => {
-    const h = harness();
-    const first = spacePageSource(h.sources, { text: 'Smart Listing 项目总览 V1' });
-    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
-      sourceIds: [first.id], capturedAt: start });
-    await h.runtime.runOnce();
-    expect(h.topics.listCurrentTopics()).toHaveLength(1);
-    const originalId = h.topics.listCurrentTopics()[0]!.id;
-
-    const second = spacePageSource(h.sources, { text: 'Smart Listing 项目总览 V2',
-      occurredAt: new Date(start.getTime() + 1_000).toISOString() });
-    h.setNow(new Date(start.getTime() + 2_000));
-    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: h.now().toISOString(),
-      sourceIds: [second.id], capturedAt: h.now() });
-    await h.runtime.runOnce();
-
-    expect(h.topics.listCurrentTopics()).toHaveLength(1);
-    expect(h.topics.listCurrentTopics()[0]!.id).toBe(originalId);
-    expect(h.topics.listCurrentTopics()[0]!.currentVersion).toBe(2);
-  });
-
-  it('protects a human-corrected topic from being overwritten by a later Space batch, same as the Feishu path', async () => {
-    const h = harness();
-    const source = h.sources.saveSource(captureGroupMessageSource({ chatId: chat, messageId: 'om_baseline', threadId: null,
-      rootId: null, author: { openId: 'ou_ivy', displayName: null }, messageType: 'text', senderType: 'user',
-      text: 'Smart Listing', occurredAt: start.toISOString() }, start).source).source;
-    const evidenceId = saveFounderEvidence(h.sources, source.id, source.contentText, start);
-    const topic = h.topics.createTopic({ displayName: 'Smart Listing', stage: 'paused', outcome: '人工暂停',
-      evidenceIds: [evidenceId], createdAt: start });
-    h.db.client.prepare(`INSERT INTO founder_feedback_corrections
-      (id, chat_id, source_message_id, author_open_id, binding_message_id, evidence_id, input_hash, correction_json, result_json, created_at)
-      VALUES ('feedback_1', ?, 'om_baseline', 'ou_ivy', 'om_baseline', ?, 'hash', ?, '{"status":"applied"}', ?)`)
-      .run(chat, evidenceId, JSON.stringify({ kind: 'pause_topic', topic: { id: topic.id, expectedVersion: 1 } }), start.toISOString());
-
-    const page = spacePageSource(h.sources, { occurredAt: new Date(start.getTime() + 1_000).toISOString() });
-    h.setNow(new Date(start.getTime() + 2_000));
-    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: h.now().toISOString(),
-      sourceIds: [page.id], capturedAt: h.now() });
-    await h.runtime.runOnce();
-
-    const current = h.topics.listCurrentTopics().find((t) => t.id === topic.id)!;
-    expect(current.stage).toBe('paused');
-    expect(current.outcome).toBe('人工暂停');
   });
 
   it('splits a Space batch of more than 20 sources into bounded durable sub-batches', async () => {
@@ -205,92 +233,21 @@ describe('founder-stream-worker Space-scoped processing', () => {
     expect(chunks.flat().sort()).toEqual(ids.slice().sort());
   });
 
-  it('recovers an un-enqueued Space source on afterTick and does not re-enqueue an already-claimed one', async () => {
+  it('recovery leaves sources unclaimed until a confirmed topic mapping exists, then enqueues them once', async () => {
     const h = harness();
-    const unclaimed = spacePageSource(h.sources, { pageId: 'page_1', text: 'Smart Listing 恢复案例' });
+    const page = spacePageSource(h.sources, { text: 'Smart Listing 恢复案例' });
+    await h.runtime.afterTick();
+    expect(h.db.client.prepare("SELECT count(*) n FROM batch_jobs WHERE type='analyze_founder_stream_space_batch'").get()).toEqual({ n: 0 });
+
+    canonicalTopic(h);
     const claimed = spaceCommentSource(h.sources, { messageId: 'msg_claimed', text: '已有分析任务引用' });
     h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
       sourceIds: [claimed.id], capturedAt: start });
-
     await h.runtime.afterTick();
-
     const rows = h.db.client.prepare("SELECT payload FROM batch_jobs WHERE type='analyze_founder_stream_space_batch'")
       .all() as { payload: string }[];
     const allSourceIds = rows.flatMap((r) => JSON.parse(r.payload).sourceIds as string[]);
-    expect(allSourceIds).toContain(unclaimed.id);
+    expect(allSourceIds).toContain(page.id);
     expect(allSourceIds.filter((id) => id === claimed.id)).toHaveLength(1);
-  });
-});
-
-describe('Space evidence merges into the project-bound canonical topic (never a second card)', () => {
-  it('registers the first Space-created topic as an analysis-sourced canonical binding for its project', async () => {
-    const h = harness();
-    const page = spacePageSource(h.sources);
-    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
-      sourceIds: [page.id], capturedAt: start });
-    await h.runtime.runOnce();
-    const topicId = h.topics.listCurrentTopics()[0]!.id;
-    const bindings = new FounderTopicProjectBindingRepository(h.db.client);
-    expect(bindings.getCanonicalBindingForProject('smart_listing')).toMatchObject({ topicId, role: 'canonical', source: 'analysis' });
-  });
-
-  it('forces every later Space batch to join the registered canonical topic, even when the model proposes "new"', async () => {
-    const h = harness();
-    const first = spacePageSource(h.sources, { text: 'Smart Listing 项目总览 V1' });
-    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
-      sourceIds: [first.id], capturedAt: start });
-    await h.runtime.runOnce();
-    const originalId = h.topics.listCurrentTopics()[0]!.id;
-    expect(h.topics.listCurrentTopics()).toHaveLength(1);
-
-    // A second, unrelated-looking Space page in the SAME project — the model has no
-    // continuation signal at all (empty currentTopics context), so on its own it would
-    // propose a brand-new topic. The canonical binding must still force a join.
-    const second = h.sources.saveSource({
-      sourceSystem: 'chatgpt_space', sourceType: 'space_page_snapshot', externalId: 'page_1',
-      logicalKey: 'chatgpt_space:page:page_1', occurredAt: new Date(start.getTime() + 1_000).toISOString(),
-      authors: [], locatorUri: 'https://chatgpt.com/space/page_1', contentFormat: 'text/markdown',
-      contentText: '完全不同的内容段落', metadata: { pageId: 'page_1', blocks: [{ id: 'block_2', hash: 'b'.repeat(64), markdown: '完全不同的内容段落' }] },
-      availabilityStatus: 'available', capturedAt: start
-    }).source;
-    const runtime = createFounderStreamRuntime({
-      client: h.db.client, jobRepository: h.jobs,
-      flags: { captureEnabled: false, analysisEnabled: false, groupDeliveryEnabled: false },
-      approvedChatIds: [], ivyPrivateChatId: 'oc_private', now: () => new Date(start.getTime() + 2_000), spaceAnalysisEnabled: true,
-      analyzer: { async analyze(input) { return { topics: [{
-        displayName: '完全不同的内容段落', stage: 'idea', outcome: null, currentAction: null, confidence: 'high',
-        sourceIds: [input.sources[0]!.id], evidenceExcerpts: [{ sourceId: input.sources[0]!.id, excerpt: input.sources[0]!.contentText }],
-        joinDecision: { kind: 'new', topicId: null, confidence: 'high', sharedTerms: [] }, splitSuggestions: []
-      }] }; } }
-    });
-    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(),
-      until: new Date(start.getTime() + 2_000).toISOString(), sourceIds: [second.id], capturedAt: new Date(start.getTime() + 2_000) });
-    await runtime.runOnce();
-
-    expect(h.topics.listCurrentTopics()).toHaveLength(1);
-    expect(h.topics.listCurrentTopics()[0]!.id).toBe(originalId);
-    expect(h.topics.listCurrentTopics()[0]!.currentVersion).toBe(2);
-  });
-
-  it('updates a pre-existing, human-confirmed canonical topic instead of creating a Space-only duplicate', async () => {
-    const h = harness();
-    const feishuSource = h.sources.saveSource(captureGroupMessageSource({ chatId: chat, messageId: 'om_preexisting', threadId: null,
-      rootId: null, author: { openId: 'ou_ivy', displayName: null }, messageType: 'text', senderType: 'user',
-      text: 'Smart Listing', occurredAt: start.toISOString() }, start).source).source;
-    const evidenceId = saveFounderEvidence(h.sources, feishuSource.id, feishuSource.contentText, start);
-    const preexisting = h.topics.createTopic({ displayName: 'Smart Listing', stage: 'active_project', outcome: '飞书确认的目标',
-      evidenceIds: [evidenceId], createdAt: start });
-    new FounderTopicProjectBindingRepository(h.db.client).recordHumanConfirmed({ topicId: preexisting.id,
-      projectKey: 'smart_listing', role: 'canonical', at: start });
-
-    const page = spacePageSource(h.sources, { occurredAt: new Date(start.getTime() + 1_000).toISOString() });
-    h.setNow(new Date(start.getTime() + 2_000));
-    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: h.now().toISOString(),
-      sourceIds: [page.id], capturedAt: h.now() });
-    await h.runtime.runOnce();
-
-    expect(h.topics.listCurrentTopics()).toHaveLength(1);
-    expect(h.topics.listCurrentTopics()[0]!.id).toBe(preexisting.id);
-    expect(h.topics.listCurrentTopics()[0]!.currentVersion).toBe(2);
   });
 });

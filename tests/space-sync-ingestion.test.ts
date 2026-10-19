@@ -6,6 +6,14 @@ import { SpaceSyncRepository } from '../src/repositories/space-sync-repository.j
 import { spaceSyncEnvelopeV1Schema, type SpaceSyncEnvelopeV1 } from '../src/domain/space-sync.js';
 import { ingestSpaceSyncEnvelope, SpaceSyncIngestionError } from '../src/services/space-sync-ingestion.js';
 import { JobRepository } from '../src/repositories/job-repository.js';
+import { TopicRepository } from '../src/repositories/topic-repository.js';
+import { FounderTopicProjectBindingRepository } from '../src/repositories/founder-topic-project-binding-repository.js';
+
+function mapProjectTopic(database: ReturnType<typeof createSqliteDatabase>) {
+  const at = new Date('2026-10-19T00:00:00.000Z');
+  const topic = new TopicRepository(database.client).createTopic({ displayName: 'Smart Listing', stage: 'active_project', createdAt: at });
+  new FounderTopicProjectBindingRepository(database.client).recordHumanConfirmed({ topicId: topic.id, projectKey: 'smart_listing', role: 'canonical', at });
+}
 
 function setup(nowSequence: readonly string[] = []) {
   const database = createSqliteDatabase(':memory:');
@@ -184,6 +192,7 @@ describe('ingestSpaceSyncEnvelope', () => {
 
   it('enqueues a Space analysis batch for the newly created sources when a jobRepository is supplied and enabled', () => {
     const { database, spaceSyncRepository, contextSourceRepository, now } = setup();
+    mapProjectTopic(database);
     const jobRepository = new JobRepository(database.client);
     ingestSpaceSyncEnvelope(envelope(), {
       client: database.client, spaceSyncRepository, contextSourceRepository,
@@ -212,6 +221,7 @@ describe('ingestSpaceSyncEnvelope', () => {
 
   it('does not re-enqueue on a replayed (idempotent) resubmit of the same syncId', () => {
     const { database, spaceSyncRepository, contextSourceRepository, now } = setup();
+    mapProjectTopic(database);
     const jobRepository = new JobRepository(database.client);
     const deps = { client: database.client, spaceSyncRepository, contextSourceRepository,
       limits: { maxBlocks: 100, maxComments: 100 }, now, jobRepository, spaceAnalysisEnabled: true };
@@ -224,6 +234,7 @@ describe('ingestSpaceSyncEnvelope', () => {
 
   it('does not enqueue a new batch for an unchanged page version when no new comment arrived', () => {
     const { database, spaceSyncRepository, contextSourceRepository, now } = setup();
+    mapProjectTopic(database);
     const jobRepository = new JobRepository(database.client);
     const deps = { client: database.client, spaceSyncRepository, contextSourceRepository,
       limits: { maxBlocks: 100, maxComments: 100 }, now, jobRepository, spaceAnalysisEnabled: true };
@@ -231,5 +242,17 @@ describe('ingestSpaceSyncEnvelope', () => {
     ingestSpaceSyncEnvelope(envelope({ syncId: 'sync_2' }), deps);
     expect(database.client.prepare("SELECT count(*) n FROM batch_jobs WHERE type='analyze_founder_stream_space_batch'").get())
       .toEqual({ n: 1 });
+  });
+
+  it('leaves sources unqueued while the project has no human-mapped work-map topic', () => {
+    const { database, spaceSyncRepository, contextSourceRepository, now } = setup();
+    const jobRepository = new JobRepository(database.client);
+    ingestSpaceSyncEnvelope(envelope(), {
+      client: database.client, spaceSyncRepository, contextSourceRepository,
+      limits: { maxBlocks: 100, maxComments: 100 }, now, jobRepository, spaceAnalysisEnabled: true
+    });
+    expect(database.client.prepare("SELECT count(*) n FROM batch_jobs WHERE type='analyze_founder_stream_space_batch'").get())
+      .toEqual({ n: 0 });
+    expect(contextSourceRepository.listSources().some((s) => s.sourceType === 'space_page_snapshot')).toBe(true);
   });
 });
