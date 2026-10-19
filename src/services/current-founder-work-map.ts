@@ -7,7 +7,7 @@ import { OutboxRepository } from '../repositories/outbox-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { canonicalJson, stableId } from './canonical-json.js';
 import type { FounderCardEvidence } from './founder-card.js';
-import { renderFounderWorkMap, type FounderWorkMapCard, type FounderWorkMapTopic } from './founder-work-map-renderer.js';
+import { founderLineRootNames, renderFounderWorkMap, type FounderWorkMapCard, type FounderWorkMapTopic } from './founder-work-map-renderer.js';
 import type { FounderWorkMapBoardView } from './founder-board-view.js';
 import type { SpaceFreshnessSummary } from './space-sync-freshness.js';
 import { spaceBoardSummary, type SpaceProjectPageView } from './space-project-page-view.js';
@@ -59,19 +59,23 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
     const parentId=parentByChild.get(topic.id);
     const displayName=cleanDisplayName(topic.displayName);
     const spaceFreshness=input.spaceFreshnessByTopicId?.get(topic.id),spacePage=input.spacePageByTopicId?.get(topic.id);
-    return{...topic,displayName,evidence:evidence.items,linkedSourceCount:evidence.linkedSourceCount,
+    const lastActivityAt=latestActivity(input.client,componentIds,topic.createdAt,spacePage?.pageUpdatedAt??null);
+    return{...topic,displayName,evidence:evidence.items,linkedSourceCount:evidence.linkedSourceCount,lastActivityAt,
+      ...(topic.stage==='closed'?{closedAt:closedSince(topics,topic.id)}:{}),
       displayKind:displayKindFor(topics,topic.id,topic.stage),
       parentName:parentId?cleanDisplayName(canonicalById.get(parentId)?.displayName??''):undefined,
       perspectives:alignment.listCanonicalPerspectives(topic.id).filter(perspective=>!isTopicLabelOnly(displayName,perspective.statement))
         .map(perspective=>projectPerspective(topic,perspective)),...(spaceFreshness?{spaceFreshness}:{}),...(spacePage?{spacePage}:{})};
   });
-  const projected=coalesceDisplayDuplicates(projectedRaw);
+  const projected=markDormant(coalesceDisplayDuplicates(projectedRaw),input.until);
   const coverageGaps=loadCoverageGaps(input.client,input.chatId,input.since,input.until);
   const cards=renderFounderWorkMap({since:input.since,until:input.until,topics:projected,uncertainGrouping:[],coverageGaps});
   const boardView:FounderWorkMapBoardView={kind:'work_map',since:input.since,until:input.until,coverageGaps,
     topics:projected.map(topic=>({id:topic.id,name:topic.displayName,stage:topic.stage,kind:topic.displayKind??'project',
       outcome:topic.outcome,parentName:topic.parentName,sourceCount:topic.linkedSourceCount??topic.evidence.length,
-      ...(topic.spacePage?{space:spaceBoardSummary(topic.spacePage)}:{})}))};
+      ...(topic.spacePage?{space:spaceBoardSummary(topic.spacePage)}:{}),
+      ...(topic.lastActivityAt?{lastActivityAt:topic.lastActivityAt}:{}),...(topic.dormant?{dormant:true}:{}),
+      ...(topic.stage==='closed'?{closedAt:topic.closedAt??null}:{})}))};
   const mapId=stableId('foundermap',canonicalJson({chatId:input.chatId,since:input.since,until:input.until,
     topics:canonical.map(topic=>({id:topic.id,version:topic.currentVersion})),hiddenRoots:[...hiddenRoots].sort(),
     hideOrphanActive:preference?.hide_orphan_active===1,pages:cards.length}));
@@ -149,6 +153,47 @@ function loadEvidence(client:Database.Database,topicIds:readonly string[],correc
   return{items,linkedSourceCount:new Set(links.map(link=>link.source_id)).size};
 }
 
+const dormantAfterMs=30*24*60*60*1_000;
+
+/** Latest occurrence among sources linked to the topic (corrections and Space comments included) or its Space page. */
+function latestActivity(client:Database.Database,topicIds:readonly string[],createdAt:string,spacePageUpdatedAt:string|null):string{
+  const placeholders=topicIds.map(()=>'?').join(',');
+  const linked=topicIds.length?(client.prepare(`SELECT s.occurred_at value FROM context_topic_sources ts
+    JOIN context_topic_versions tv ON tv.id=ts.topic_version_id JOIN context_sources s ON s.id=ts.source_id
+    WHERE tv.topic_id IN (${placeholders})`).all(...topicIds) as {value:string}[]).map(row=>row.value):[];
+  // A topic nobody has linked anything to yet (e.g. a freshly registered card) counts from its creation.
+  const candidates=[...linked,...(spacePageUpdatedAt?[spacePageUpdatedAt]:[])];
+  return (candidates.length?candidates:[createdAt]).reduce((latest,value)=>Date.parse(value)>Date.parse(latest)?value:latest);
+}
+
+/** When the topic entered its current closed run of versions. */
+function closedSince(topics:TopicRepository,topicId:string):string|null{
+  const versions=[...topics.listVersions(topicId)].sort((a,b)=>a.versionNumber-b.versionNumber);
+  let since:string|null=null;
+  for(let index=versions.length-1;index>=0&&versions[index]!.stage==='closed';index--)since=versions[index]!.changedAt;
+  return since;
+}
+
+/**
+ * Not-closed topics without activity for 30 days leave the board (listed at the end of the text card) until new
+ * activity arrives. Line roots and closed topics always stay; a parent stays while any not-closed child is active.
+ */
+function markDormant(topics:readonly FounderWorkMapTopic[],until:string):FounderWorkMapTopic[]{
+  const threshold=Date.parse(until)-dormantAfterMs;
+  const children=new Map<string,FounderWorkMapTopic[]>();
+  for(const topic of topics)if(topic.parentName)children.set(topic.parentName,[...(children.get(topic.parentName)??[]),topic]);
+  const memo=new Map<string,boolean>();
+  const dormant=(topic:FounderWorkMapTopic,seen:Set<string>):boolean=>{
+    if(memo.has(topic.id))return memo.get(topic.id)!;
+    if(seen.has(topic.id))return true;seen.add(topic.id);
+    const result=!founderLineRootNames.includes(topic.displayName)&&topic.stage!=='closed'&&
+      !(topic.lastActivityAt&&Date.parse(topic.lastActivityAt)>=threshold)&&
+      !(children.get(topic.displayName)??[]).some(child=>child.stage!=='closed'&&!dormant(child,seen));
+    memo.set(topic.id,result);return result;
+  };
+  return topics.map(topic=>dormant(topic,new Set())?{...topic,dormant:true}:topic);
+}
+
 function cleanDisplayName(value:string):string{
   return value.normalize('NFKC').replace(/^[\s,，:：;；|｜·.。]+/u,'').trim();
 }
@@ -167,6 +212,8 @@ function coalesceDisplayDuplicates(topics:readonly FounderWorkMapTopic[]):Founde
       .map(item=>[JSON.stringify([item.founder,item.status,item.statement,item.observedAt]),item])).values()];
     return[{...topic,displayName:cleanDisplayName(topic.displayName),parentName:group.find(item=>item.parentName)?.parentName,
       outcome:topic.outcome??group.find(item=>item.outcome)?.outcome??null,evidence,perspectives,
+      lastActivityAt:group.flatMap(item=>item.lastActivityAt?[item.lastActivityAt]:[]).reduce<string|undefined>((latest,value)=>
+        !latest||Date.parse(value)>Date.parse(latest)?value:latest,undefined),
       linkedSourceCount:group.reduce((sum,item)=>sum+(item.linkedSourceCount??item.evidence.length),0)}];
   });
 }

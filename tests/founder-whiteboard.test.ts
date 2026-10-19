@@ -75,6 +75,29 @@ describe('founder whiteboard',()=>{
     expect(y('企业微信接入')).toBeLessThan(y('已结束 / 历史')!);
   });
 
+  it('shows closed topics as compact dated rows, merges ideas per line and leaves dormant topics off the board',()=>{
+    const result=buildFounderWhiteboard({title:'工作地图',paletteId:'grove',cards:[],view:{
+      kind:'work_map',since:'2026-08-31T00:00:00.000Z',until:'2026-10-19T00:00:00.000Z',coverageGaps:[],topics:[
+        {id:'a',name:'AiJia AI Native 房产业务',stage:'active_project',kind:'project',outcome:null},
+        {id:'kb',name:'AI 选房经验与知识库',stage:'active_project',kind:'project',outcome:'等待 Jimmy',parentName:'AiJia AI Native 房产业务',dormant:true},
+        {id:'sl',name:'Smart Listing',stage:'active_project',kind:'project',outcome:'上线',parentName:'AiJia AI Native 房产业务'},
+        {id:'b',name:'自媒体生产线',stage:'active_project',kind:'project',outcome:null},
+        {id:'i1',name:'孵化这个 AI 产业落地',stage:'idea',kind:'idea',outcome:'观点讨论',parentName:'自媒体生产线'},
+        {id:'i2',name:'AI 蒸馏学习主题',stage:'idea',kind:'idea',outcome:'学习方法展示',parentName:'自媒体生产线'},
+        {id:'ep',name:'EP00《挺好》',stage:'closed',kind:'project',outcome:'EP00《挺好》已经发布，本内容项目已关闭。',parentName:'自媒体生产线',
+          closedAt:'2026-10-14T08:18:40.206Z'},
+        {id:'old',name:'旧任务',stage:'closed',kind:'task',outcome:null,closedAt:null}
+      ]}});
+    const texts=result.nodes.flatMap(node=>node.text?.text?[node.text.text]:[]);
+    expect(texts.some(text=>text.includes('AI 选房经验与知识库'))).toBe(false);
+    expect(texts.find(text=>text.startsWith('观点 2 条'))?.replace(/\n/gu,'')).toBe('观点 2 条：孵化这个 AI 产业落地 · AI 蒸馏学习主题');
+    expect(texts.some(text=>text.startsWith('观点 / '))).toBe(false);
+    expect(texts.find(text=>text.startsWith('EP00《挺好》 · 10-14 结束 · '))).toBeTruthy();
+    expect(texts).toContain('任务 / 旧任务');
+    // One compact row per closed item, not a full card with a stage/source footer.
+    expect(texts.filter(text=>text==='已结束')).toHaveLength(0);
+  });
+
   it('renders the exact whiteboard nodes into a bounded PNG preview for the chat card',async()=>{
     const board=buildFounderWhiteboard({title:'工作地图',paletteId:'coral',cards:[{
       header:{title:{content:'工作地图 · 1/1'}},elements:[{text:{content:'当前阶段\n正在推进'}}]

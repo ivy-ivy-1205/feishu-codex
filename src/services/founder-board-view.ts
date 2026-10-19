@@ -10,6 +10,10 @@ export interface FounderWorkMapBoardTopic {
   sourceCount?:number;
   /** Only for a Space-bound project card: one 本周 line and a small dated Space label. */
   space?:{weekLine:string|null;label:string};
+  lastActivityAt?:string;
+  /** 30+ days without activity: kept off the board until new activity arrives. */
+  dormant?:boolean;
+  closedAt?:string|null;
 }
 
 export interface FounderWorkMapBoardView {

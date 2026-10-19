@@ -167,4 +167,48 @@ describe('current founder work map publisher',()=>{
       .map(el=>el.text?.content??'').find(text=>text.includes('子项目'));
     expect(childCardText).not.toContain('Space');
   });
+
+  it('marks a not-closed topic dormant after 30 days without activity and lists it at the end of the text card',()=>{
+    const h=fixture();
+    const old=h.add('om_kb','ou_ivy','知识库：等待 Jimmy 回复。','2026-09-02T00:00:00Z');
+    const kb=h.topics.createTopic({displayName:'AI 选房经验与知识库',stage:'active_project',outcome:'等待 Jimmy',evidenceIds:[old],createdAt:new Date('2026-09-02T00:00:00Z')});
+    const fresh=h.add('om_sl','ou_ivy','Smart Listing 本周上线买家空间。','2026-10-12T00:00:00Z');
+    const sl=h.topics.createTopic({displayName:'Smart Listing',stage:'active_project',evidenceIds:[fresh],createdAt:new Date('2026-09-02T00:00:00Z')});
+    const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-10-19T00:00:00Z',approvedChatIds:[chatId],expectedCanonicalTopicCount:4});
+    const board=new Map(result.boardView.topics.map(topic=>[topic.id,topic]));
+    expect(board.get(kb.id)).toMatchObject({dormant:true,lastActivityAt:'2026-09-02T00:00:00Z'});
+    expect(board.get(sl.id)).toMatchObject({lastActivityAt:'2026-10-12T00:00:00Z'});
+    expect(board.get(sl.id)?.dormant).toBeFalsy();
+    const lines=result.cards.flatMap(card=>JSON.stringify(card.card)).join('');
+    // The fixture's own topics have no activity after mid-September, so they are dormant too.
+    expect(lines).toContain('长期无动态 3 项');
+    const dormantAt=lines.indexOf('长期无动态 3 项');
+    expect(dormantAt).toBeGreaterThan(-1);
+    expect(lines.indexOf('AI 选房经验与知识库')).toBeGreaterThan(dormantAt);
+    expect(lines).toContain('最近动态 2026-09-02');
+    expect(lines.indexOf('Smart Listing')).toBeLessThan(dormantAt);
+  });
+
+  it('keeps a quiet parent on the map while any child is active, and never marks closed topics dormant',()=>{
+    const h=fixture();
+    const recent=h.add('om_child','ou_ivy','子项目本周有进展。','2026-10-15T00:00:00Z');
+    h.topics.appendVersion({topicId:h.child.id,expectedVersion:1,displayName:'子项目',stage:'active_project',outcome:null,rationale:'test',
+      evidenceIds:[recent],changedAt:new Date('2026-10-15T00:00:00Z')});
+    const closed=h.topics.createTopic({displayName:'EP00《挺好》',stage:'active_project',createdAt:new Date('2026-08-01T00:00:00Z')});
+    h.topics.appendVersion({topicId:closed.id,expectedVersion:1,displayName:'EP00《挺好》',stage:'closed',outcome:'已发布',rationale:'closed',
+      evidenceIds:[],changedAt:new Date('2026-08-20T00:00:00Z')});
+    const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-10-19T00:00:00Z',approvedChatIds:[chatId],expectedCanonicalTopicCount:3});
+    const board=new Map(result.boardView.topics.map(topic=>[topic.id,topic]));
+    expect(board.get(h.parent.id)?.dormant).toBeFalsy();
+    expect(board.get(h.child.id)?.dormant).toBeFalsy();
+    expect(board.get(closed.id)).toMatchObject({stage:'closed',closedAt:'2026-08-20T00:00:00.000Z'});
+    expect(board.get(closed.id)?.dormant).toBeFalsy();
+  });
+
+  it('never marks an A/B/C line root dormant',()=>{
+    const h=fixture();
+    const root=h.topics.createTopic({displayName:'自媒体生产线',stage:'active_project',createdAt:new Date('2026-08-01T00:00:00Z')});
+    const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-10-19T00:00:00Z',approvedChatIds:[chatId],expectedCanonicalTopicCount:3});
+    expect(result.boardView.topics.find(topic=>topic.id===root.id)?.dormant).toBeFalsy();
+  });
 });

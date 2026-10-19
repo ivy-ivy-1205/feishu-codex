@@ -108,14 +108,19 @@ function buildGenericBoard(title:string,palette:FounderPalette,cards:readonly Re
 }
 
 interface Placement {topic:FounderWorkMapBoardTopic;x:number;y:number;width:number;height:number;depth:number}
-interface LaneLayout {x:number;y:number;width:number;height:number;placements:Placement[];label:string;color:string;footer?:string}
+interface CompactRow {text:string;x:number;y:number;width:number;height:number}
+interface LaneLayout {x:number;y:number;width:number;height:number;placements:Placement[];label:string;color:string;footer?:string;
+  /** Ideas in this line, merged into one row instead of one card each. */
+  ideaRow?:CompactRow;
+  /** Closed items as one dated row each. */
+  rows?:CompactRow[]}
 
 function buildWorkMapBoard(title:string,palette:FounderPalette,view:FounderWorkMapBoardView):BuiltFounderWhiteboard{
   const width=1160,margin=28,top=142,gap=24,contentWidth=width-margin*2,halfWidth=(contentWidth-gap)/2;
   const lineNames={A:'AiJia AI Native 房产业务',B:'自媒体生产线',C:'公司协作基础设施'} as const;
   const byName=new Map(view.topics.map(topic=>[topic.name,topic]));
   const root=(topic:FounderWorkMapBoardTopic):string=>{let current=topic,guard=0;while(current.parentName&&guard++<20){const parent=byName.get(current.parentName);if(!parent)break;current=parent}return current.name};
-  const visible=view.topics.filter(topic=>!Object.values(lineNames).includes(topic.name as typeof lineNames[keyof typeof lineNames]));
+  const visible=view.topics.filter(topic=>!topic.dormant&&!Object.values(lineNames).includes(topic.name as typeof lineNames[keyof typeof lineNames]));
   const history=visible.filter(topic=>topic.stage==='closed');
   const current=visible.filter(topic=>topic.stage!=='closed');
   const a=current.filter(topic=>root(topic)===lineNames.A),b=current.filter(topic=>root(topic)===lineNames.B),c=current.filter(topic=>root(topic)===lineNames.C);
@@ -130,8 +135,8 @@ function buildWorkMapBoard(title:string,palette:FounderPalette,view:FounderWorkM
   const mainBottom=Math.max(laneB.y+laneB.height,laneC.y+laneC.height),lowerSectionsY=mainBottom+gap;
   const otherLane=currentOther.length?layoutLane(currentOther,margin,lowerSectionsY,history.length?halfWidth:contentWidth,
     history.length?1:2,'待核对 / 其他项目',palette.highlight,byName,null):null;
-  const historyLane=history.length?layoutLane(history,otherLane?margin+halfWidth+gap:margin,lowerSectionsY,
-    otherLane?halfWidth:contentWidth,1,'已结束 / 历史',palette.secondary,byName,null):null;
+  const historyLane=history.length?layoutHistoryLane(history,otherLane?margin+halfWidth+gap:margin,lowerSectionsY,
+    otherLane?halfWidth:contentWidth,'已结束 / 历史',palette.secondary):null;
   const gapHeight=view.coverageGaps.length?88+view.coverageGaps.length*34:0;
   const contentBottom=Math.max(mainBottom,...[otherLane,historyLane].flatMap(lane=>lane?[lane.y+lane.height]:[]));
   const height=Math.max(900,contentBottom+gapHeight+80);
@@ -152,6 +157,8 @@ function buildWorkMapBoard(title:string,palette:FounderPalette,view:FounderWorkM
 function layoutLane(topics:readonly FounderWorkMapBoardTopic[],x:number,y:number,width:number,columns:number,label:string,color:string,
   byName:ReadonlyMap<string,FounderWorkMapBoardTopic>,lineRoot:string|null,footer?:string):LaneLayout{
   const padding=20,header=58,columnGap=20,columnWidth=(width-padding*2-columnGap*(columns-1))/columns;
+  const ideas=topics.filter(topic=>topic.kind==='idea');
+  topics=topics.filter(topic=>topic.kind!=='idea');
   const heights=Array.from({length:columns},()=>y+header+padding),placements:Placement[]=[];
   const names=new Set(topics.map(topic=>topic.name)),children=new Map<string,FounderWorkMapBoardTopic[]>();
   for(const topic of topics){if(topic.parentName&&names.has(topic.parentName)){const list=children.get(topic.parentName)??[];list.push(topic);children.set(topic.parentName,list)}}
@@ -173,10 +180,29 @@ function layoutLane(topics:readonly FounderWorkMapBoardTopic[],x:number,y:number
       placements.push(placement);heights[column]=placement.y+cardHeight+cardGap;
     }
   }
-  return{x,y,width,height:Math.max(y+150,...heights)-y+2+(footer?64:0),placements,label,color,...(footer?{footer}:{})};
+  const cardsBottom=placements.length?Math.max(...heights):y+header+padding;
+  const ideaText=`观点 ${ideas.length} 条：${ideas.map(topic=>topic.name).join(' · ')}`;
+  // Idea names may need two lines in a half-width lane; truncating a name would hide which idea it is.
+  const ideaLines=ideas.length?wrapText(ideaText,fullLineUnits(width-padding*2-32,19),2).split('\n').length:0;
+  const ideaRow=ideas.length?{text:ideaText,x:x+padding,y:cardsBottom,width:width-padding*2,height:compactRowHeight+(ideaLines-1)*26}:undefined;
+  const contentBottom=ideaRow?ideaRow.y+ideaRow.height+cardGap:Math.max(...heights);
+  return{x,y,width,height:Math.max(y+150,contentBottom)-y+2+(footer?64:0),placements,label,color,...(footer?{footer}:{}),...(ideaRow?{ideaRow}:{})};
 }
 
-const cardGap=18,spaceLineHeight=33;
+/** Closed items stay visible, but as one dated line each so history never outweighs current work. */
+function layoutHistoryLane(topics:readonly FounderWorkMapBoardTopic[],x:number,y:number,width:number,label:string,color:string):LaneLayout{
+  const padding=20,header=58,ordered=[...topics].sort((a,b)=>(b.closedAt?Date.parse(b.closedAt):0)-(a.closedAt?Date.parse(a.closedAt):0)||a.name.localeCompare(b.name));
+  const rows=ordered.map((topic,index)=>{
+    const title=topic.kind==='goal'?`阶段目标 / ${topic.name}`:topic.kind==='task'?`任务 / ${topic.name}`:topic.kind==='idea'?`观点 / ${topic.name}`:topic.name;
+    const text=[title,topic.closedAt?`${founderMonthDay(topic.closedAt)} 结束`:null,topic.outcome?.trim()||null].filter(Boolean).join(' · ');
+    return{text,x:x+padding,y:y+header+padding+index*(compactRowHeight+compactRowGap),width:width-padding*2,height:compactRowHeight};
+  });
+  const height=header+padding*2+rows.length*(compactRowHeight+compactRowGap)-compactRowGap+2;
+  return{x,y,width,height:Math.max(150,height),placements:[],label,color,rows};
+}
+
+const cardGap=18,spaceLineHeight=33,compactRowHeight=40,compactRowGap=8;
+function founderMonthDay(value:string):string{return new Date(Date.parse(value)+8*60*60*1_000).toISOString().slice(5,10)}
 /** Rendered width of a short single-line label in font-size units (CJK ≈ 1, Latin/digits ≈ 0.6). */
 function labelUnits(value:string):number{return Array.from(value).reduce((sum,char)=>sum+(/[\p{Script=Han}]/u.test(char)?1:/\s/u.test(char)?0.34:0.6),0)}
 function appendLane(nodes:FounderWhiteboardNode[],lane:LaneLayout,palette:FounderPalette,byName:ReadonlyMap<string,FounderWorkMapBoardTopic>):void{
@@ -206,6 +232,11 @@ function appendLane(nodes:FounderWhiteboardNode[],lane:LaneLayout,palette:Founde
     if(topic.space){const chipWidth=Math.ceil(labelUnits(topic.space.label)*14)+20,chipX=x+width-14-chipWidth,chipY=y+height-34;
       nodes.push(shape(chipX,chipY,chipWidth,24,palette.accent,palette.ink));
       nodes.push(textNode(chipX+10,chipY+4,chipWidth-20,18,topic.space.label,14,readableText(palette.accent),'regular'));}
+  }
+  for(const row of [...(lane.rows??[]),...(lane.ideaRow?[lane.ideaRow]:[])]){
+    const lines=Math.max(1,Math.round((row.height-compactRowHeight)/26)+1);
+    nodes.push(shape(row.x,row.y,row.width,row.height,palette.surface,palette.ink));
+    nodes.push(textNode(row.x+16,row.y+9,row.width-32,row.height-16,wrapText(row.text,fullLineUnits(row.width-32,19),lines),19,readableText(palette.surface),'regular'));
   }
   if(lane.footer){const y=lane.y+lane.height-54;
     nodes.push(shape(lane.x+20,y,lane.width-40,38,palette.secondary,palette.ink));

@@ -207,4 +207,17 @@ describe('founder work map cards', () => {
     expect(body).not.toContain('来源：待补充');
     expect(body).toContain('项目页（Space · 页面更新于 2026-09-19T11:00:00.000Z');
   });
+
+  it('moves dormant topics into a numbered 长期无动态 section at the end of the text card', () => {
+    const [page] = renderFounderWorkMap({ ...window, topics: [
+      { ...topic('a', 'active_project'), displayName: '活跃项目' },
+      { ...topic('b', 'active_project'), displayName: '沉睡项目', outcome: '等待 Jimmy', dormant: true, lastActivityAt: '2026-08-01T00:00:00.000Z' }
+    ], uncertainGrouping: [], coverageGaps: [] });
+    const body = JSON.stringify(page!.card);
+    const section = body.indexOf('长期无动态 1 项');
+    expect(section).toBeGreaterThan(body.indexOf('活跃项目'));
+    expect(body.indexOf('#2 · 项目｜沉睡项目')).toBeGreaterThan(section);
+    expect(body).toContain('最近动态 2026-08-01');
+    expect(page!.itemRefs.map((ref) => ref.id)).toEqual(['a', 'b']);
+  });
 });

@@ -14,6 +14,10 @@ export interface FounderWorkMapTopic extends Pick<CurrentTopic, 'id' | 'currentV
   spaceFreshness?: SpaceFreshnessSummary;
   /** Project-page block (digest, freshness, comment summary); supersedes spaceFreshness when present. */
   spacePage?: SpaceProjectPageView;
+  /** Latest linked activity; with dormant=true the topic leaves the board and is listed at the end of the text card. */
+  lastActivityAt?: string;
+  dormant?: boolean;
+  closedAt?: string | null;
 }
 export interface FounderWorkMapInput {
   since: string;
@@ -43,6 +47,7 @@ const labels: Record<TopicStage, string> = {
 interface Item { section: string; text: string; ref?: FounderWorkMapItemRef }
 const compareId = (a: { id: string }, b: { id: string }): number => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 const aLine='AiJia AI Native 房产业务',bLine='自媒体生产线',cLine='公司协作基础设施';
+export const founderLineRootNames:readonly string[]=[aLine,bLine,cLine];
 
 export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMapCard[] {
   const start = Date.parse(input.since), end = Date.parse(input.until);
@@ -64,7 +69,9 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
   for(const topic of input.topics){if(topicByName.has(topic.displayName)){topicByName.delete(topic.displayName);duplicateNames.add(topic.displayName)}
     else if(!duplicateNames.has(topic.displayName))topicByName.set(topic.displayName,topic)}
   const topics = [...input.topics].sort((a,b)=>compareHierarchy(a,b,topicByName));
+  const dormantTopics: FounderWorkMapTopic[] = [];
   for (const topic of topics) {
+    if (topic.dormant) { dormantTopics.push(topic); continue; }
     if (!stages.includes(topic.stage) || !Number.isInteger(topic.currentVersion) || topic.currentVersion < 1 || !topic.displayName.trim()) {
       throw new Error('valid work-map topic is required');
     }
@@ -83,6 +90,20 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     const text=`${founderText(title, 120)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.displayName,topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${topicEvidencePreview(topic)}${topic.spacePage?`\n${renderSpaceProjectPageLines(topic.spacePage).join('\n')}`:spaceFreshnessPreview(topic.spaceFreshness)}`;
     if(displayKind==='project'||displayKind==='idea')add(section,text,{ kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
     else addSupporting(section,text);
+  }
+  // Off the board but never lost: numbered so it can still be corrected, and it returns once new activity arrives.
+  const dormantSection = `长期无动态 ${dormantTopics.length} 项（30 天以上无新动态，暂不上白板；有新动态会自动回到白板）`;
+  for (const topic of dormantTopics) {
+    if (!stages.includes(topic.stage) || !Number.isInteger(topic.currentVersion) || topic.currentVersion < 1 || !topic.displayName.trim()) {
+      throw new Error('valid work-map topic is required');
+    }
+    const displayKind = topic.displayKind ?? 'project';
+    const kind = displayKind === 'task' ? '任务' : displayKind === 'goal' ? '阶段目标' : displayKind === 'idea' ? '观点' : '项目';
+    const suffix = topic.stage === 'paused' ? '（暂停）' : '';
+    const activity = topic.lastActivityAt ? `最近动态 ${new Date(topic.lastActivityAt).toISOString().slice(0, 10)}` : '最近动态未知';
+    const text = `${kind}｜${founderText(topic.displayName, 120)}${suffix}\n${activity}${topic.outcome ? `；当前方向：${founderText(topic.outcome, 160)}` : ''}`;
+    if (displayKind === 'project' || displayKind === 'idea') add(dormantSection, text, { kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
+    else addSupporting(dormantSection, text);
   }
   for (const grouping of [...input.uncertainGrouping].sort(compareId)) {
     const related = [...new Set(grouping.topicIds)].map((id) => items.find((item) => item.ref?.kind === 'topic' && item.ref.id === id)?.ref?.displayedNumber);
