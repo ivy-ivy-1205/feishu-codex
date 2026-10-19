@@ -12,6 +12,7 @@ import {
 } from '../domain/space-sync.js';
 import { ContextSourceRepository } from '../repositories/context-source-repository.js';
 import { SpaceSyncRepository, type SpaceSyncRunRecord } from '../repositories/space-sync-repository.js';
+import type { JobRepository } from '../repositories/job-repository.js';
 import { canonicalJson, sha256 } from './canonical-json.js';
 
 export type SpaceSyncIngestionErrorCode =
@@ -33,6 +34,9 @@ export interface SpaceSyncIngestionDependencies {
   contextSourceRepository: ContextSourceRepository;
   limits: SpaceSyncEnvelopeLimits;
   now(): Date;
+  /** When provided and spaceAnalysisEnabled, newly created sources are queued for Founder analysis — see founder-stream-worker.ts. */
+  jobRepository?: JobRepository;
+  spaceAnalysisEnabled?: boolean;
 }
 
 export interface SpaceSyncIngestionResult {
@@ -91,6 +95,8 @@ export function ingestSpaceSyncEnvelope(
       availabilityStatus: 'available',
       capturedAt: startedAt
     });
+    const newlyCreatedSourceIds: string[] = [];
+    if (pageSave.created) newlyCreatedSourceIds.push(pageSave.source.id);
 
     let commentSourcesCreated = 0;
     for (const comment of envelope.comments) {
@@ -117,7 +123,7 @@ export function ingestSpaceSyncEnvelope(
         availabilityStatus: 'available',
         capturedAt: startedAt
       });
-      if (commentSave.created) commentSourcesCreated += 1;
+      if (commentSave.created) { commentSourcesCreated += 1; newlyCreatedSourceIds.push(commentSave.source.id); }
     }
 
     dependencies.contextSourceRepository.saveSource({
@@ -158,6 +164,16 @@ export function ingestSpaceSyncEnvelope(
       pageUpdatedAt: envelope.page.updatedAt,
       syncedAt: startedAt
     });
+
+    if (dependencies.spaceAnalysisEnabled && dependencies.jobRepository && newlyCreatedSourceIds.length > 0) {
+      dependencies.jobRepository.enqueueSpaceStreamBatch({
+        projectKey: envelope.projectKey,
+        since: envelope.page.updatedAt ?? envelope.capturedAt,
+        until: envelope.capturedAt,
+        sourceIds: newlyCreatedSourceIds,
+        capturedAt: startedAt
+      });
+    }
 
     const run = dependencies.spaceSyncRepository.insertRun({
       syncId: envelope.syncId,

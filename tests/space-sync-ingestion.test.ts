@@ -5,6 +5,7 @@ import { ContextSourceRepository } from '../src/repositories/context-source-repo
 import { SpaceSyncRepository } from '../src/repositories/space-sync-repository.js';
 import { spaceSyncEnvelopeV1Schema, type SpaceSyncEnvelopeV1 } from '../src/domain/space-sync.js';
 import { ingestSpaceSyncEnvelope, SpaceSyncIngestionError } from '../src/services/space-sync-ingestion.js';
+import { JobRepository } from '../src/repositories/job-repository.js';
 
 function setup(nowSequence: readonly string[] = []) {
   const database = createSqliteDatabase(':memory:');
@@ -179,5 +180,56 @@ describe('ingestSpaceSyncEnvelope', () => {
     const gapSources = contextSourceRepository.listSources().filter((s) => s.sourceType === 'space_sync_gap');
     expect(gapSources).toHaveLength(1);
     expect(gapSources[0]?.contentText).toBe('评论分页未读完');
+  });
+
+  it('enqueues a Space analysis batch for the newly created sources when a jobRepository is supplied and enabled', () => {
+    const { database, spaceSyncRepository, contextSourceRepository, now } = setup();
+    const jobRepository = new JobRepository(database.client);
+    ingestSpaceSyncEnvelope(envelope(), {
+      client: database.client, spaceSyncRepository, contextSourceRepository,
+      limits: { maxBlocks: 100, maxComments: 100 }, now, jobRepository, spaceAnalysisEnabled: true
+    });
+    const rows = database.client.prepare("SELECT payload FROM batch_jobs WHERE type='analyze_founder_stream_space_batch'")
+      .all() as { payload: string }[];
+    expect(rows).toHaveLength(1);
+    const payload = JSON.parse(rows[0]!.payload);
+    expect(payload.projectKey).toBe('smart_listing');
+    const pageSourceId = contextSourceRepository.listSources().find((s) => s.sourceType === 'space_page_snapshot')!.id;
+    const commentSourceId = contextSourceRepository.listSources().find((s) => s.sourceType === 'space_page_comment')!.id;
+    expect(payload.sourceIds.sort()).toEqual([commentSourceId, pageSourceId].sort());
+  });
+
+  it('does not enqueue anything when spaceAnalysisEnabled is left off, even with a jobRepository supplied', () => {
+    const { database, spaceSyncRepository, contextSourceRepository, now } = setup();
+    const jobRepository = new JobRepository(database.client);
+    ingestSpaceSyncEnvelope(envelope(), {
+      client: database.client, spaceSyncRepository, contextSourceRepository,
+      limits: { maxBlocks: 100, maxComments: 100 }, now, jobRepository
+    });
+    expect(database.client.prepare("SELECT count(*) n FROM batch_jobs WHERE type='analyze_founder_stream_space_batch'").get())
+      .toEqual({ n: 0 });
+  });
+
+  it('does not re-enqueue on a replayed (idempotent) resubmit of the same syncId', () => {
+    const { database, spaceSyncRepository, contextSourceRepository, now } = setup();
+    const jobRepository = new JobRepository(database.client);
+    const deps = { client: database.client, spaceSyncRepository, contextSourceRepository,
+      limits: { maxBlocks: 100, maxComments: 100 }, now, jobRepository, spaceAnalysisEnabled: true };
+    ingestSpaceSyncEnvelope(envelope(), deps);
+    const countAfterFirst = (database.client.prepare("SELECT count(*) n FROM batch_jobs WHERE type='analyze_founder_stream_space_batch'").get() as { n: number }).n;
+    ingestSpaceSyncEnvelope(envelope(), deps);
+    expect((database.client.prepare("SELECT count(*) n FROM batch_jobs WHERE type='analyze_founder_stream_space_batch'").get() as { n: number }).n)
+      .toBe(countAfterFirst);
+  });
+
+  it('does not enqueue a new batch for an unchanged page version when no new comment arrived', () => {
+    const { database, spaceSyncRepository, contextSourceRepository, now } = setup();
+    const jobRepository = new JobRepository(database.client);
+    const deps = { client: database.client, spaceSyncRepository, contextSourceRepository,
+      limits: { maxBlocks: 100, maxComments: 100 }, now, jobRepository, spaceAnalysisEnabled: true };
+    ingestSpaceSyncEnvelope(envelope(), deps);
+    ingestSpaceSyncEnvelope(envelope({ syncId: 'sync_2' }), deps);
+    expect(database.client.prepare("SELECT count(*) n FROM batch_jobs WHERE type='analyze_founder_stream_space_batch'").get())
+      .toEqual({ n: 1 });
   });
 });

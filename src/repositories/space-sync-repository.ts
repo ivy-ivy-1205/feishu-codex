@@ -111,6 +111,13 @@ export class SpaceSyncRepository {
     return row ? toBindingRecord(row) : null;
   }
 
+  /** Worker eligibility is scoped by projectKey, not pageId — see founder-stream-worker.ts. */
+  getBindingByProjectKey(projectKey: string): ProjectSpaceBindingRecord | null {
+    const row = this.client.prepare('SELECT * FROM project_space_bindings WHERE project_key = ?')
+      .get(projectKey) as BindingRow | undefined;
+    return row ? toBindingRecord(row) : null;
+  }
+
   recordSuccessfulSync(input: RecordSuccessfulSyncInput): void {
     const timestamp = input.syncedAt.toISOString();
     const result = this.client.prepare(`

@@ -26,6 +26,30 @@ describe('SpaceSyncRepository bindings', () => {
     expect(repository.getBindingById('missing')).toBeNull();
   });
 
+  it('reads a binding back by projectKey, for worker eligibility that is unaware of pageId', () => {
+    const repository = setup();
+    repository.createBinding({
+      id: 'binding-1', projectKey: 'smart_listing', spaceId: null,
+      pageId: 'page_1', pageUrl: 'https://chatgpt.com/space/page_1',
+      managementMode: 'space', syncMode: 'manual', createdAt: new Date('2026-10-19T00:00:00.000Z')
+    });
+    expect(repository.getBindingByProjectKey('smart_listing')?.id).toBe('binding-1');
+    expect(repository.getBindingByProjectKey('unbound_project')).toBeNull();
+  });
+
+  it('still returns a permission_lost binding by projectKey, since history remains analyzable', () => {
+    const repository = setup();
+    repository.createBinding({
+      id: 'binding-1', projectKey: 'smart_listing', spaceId: null,
+      pageId: 'page_1', pageUrl: 'https://chatgpt.com/space/page_1',
+      managementMode: 'space', syncMode: 'manual', createdAt: new Date('2026-10-19T00:00:00.000Z')
+    });
+    repository.recordSyncFailure({
+      bindingId: 'binding-1', errorCode: 'permission_denied', attemptedAt: new Date('2026-10-19T01:00:00.000Z')
+    });
+    expect(repository.getBindingByProjectKey('smart_listing')?.status).toBe('permission_lost');
+  });
+
   it('records a successful sync and clears any prior error', () => {
     const repository = setup();
     repository.createBinding({

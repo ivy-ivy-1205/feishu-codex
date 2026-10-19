@@ -2,7 +2,8 @@ import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import type { AppConfig } from '../config.js';
 import { ContextSourceRepository, type ContextSourceRecord } from '../repositories/context-source-repository.js';
-import { JobRepository, LeaseLostError, type FounderDurableJob, type FounderStreamJob } from '../repositories/job-repository.js';
+import { JobRepository, LeaseLostError, type FounderDurableJob, type FounderStreamJob, type FounderStreamSpaceJob } from '../repositories/job-repository.js';
+import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
 import { AlignmentRepository } from '../repositories/alignment-repository.js';
@@ -48,6 +49,8 @@ export interface FounderStreamOptions {
   attachmentReader?: { read(input:{messageId:string;fileKey:string;fileName:string}):Promise<{body:Buffer;mimeType:string}> };
   perspectiveAnalyzer?: FounderPerspectiveAnalysisPort;
   now?: () => Date; intervalMs?: number;
+  /** Admits space_page_snapshot/space_page_comment batches scoped by projectKey, independent of captureEnabled/approvedChatIds. */
+  spaceAnalysisEnabled?: boolean;
   policy?: Pick<AlignmentNotificationPolicy, 'reconcilePending'>;
   dailyReconciliation?:{bootstrapSince:string;run(input:{since:string;until:string;now:Date}):Promise<unknown>};
   whiteboardPublisher?:{publish(input:{title:string;chatId:string;cards:readonly Record<string,unknown>[];
@@ -71,6 +74,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   if (options.flags.dailyReconciliationEnabled && !options.dailyReconciliation) throw new Error('daily reconciliation runner is required');
   const now = options.now ?? (() => new Date());
   const sources = new ContextSourceRepository(options.client), topics = new TopicRepository(options.client);
+  const spaceSync = new SpaceSyncRepository(options.client);
   const outbox = new OutboxRepository(options.client);
   const perspectives = new AlignmentRepository(options.client);
   const perspectiveReconciler = new PerspectiveReconciler(perspectives);
@@ -151,6 +155,65 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
   async function process(job: FounderDurableJob) {
     let failureStage: FounderFailureStage = 'input';
     try {
+      if (job.kind === 'analyze_founder_stream_space_batch') {
+        if (!spaceSync.getBindingByProjectKey(job.projectKey)) throw new Error('unregistered space project');
+        if (job.sourceIds.length > 20) {
+          options.client.transaction(() => {
+            const stamp=now();if(!options.jobRepository.ownsLease(job,stamp))throw new LeaseLostError(job.key);
+            const ordered=job.sourceIds.slice().sort((a,b)=>(sources.getSource(a)?.occurredAt??a).localeCompare(sources.getSource(b)?.occurredAt??b));
+            for(let offset=0;offset<ordered.length;offset+=20) options.jobRepository.enqueueSpaceStreamBatch({
+              projectKey:job.projectKey,since:stamp.toISOString(),until:stamp.toISOString(),sourceIds:ordered.slice(offset,offset+20),capturedAt:stamp });
+            options.jobRepository.markCompleted(job,stamp);
+          }).immediate();
+          return 'completed' as const;
+        }
+        if (!options.analyzer) throw new Error('founder analyzer unavailable');
+        const input = buildFounderStreamSpaceInput(sources, topics, spaceSync, job.sourceIds, job.projectKey);
+        failureStage = 'topic_analysis';
+        const analysis = input.sources.length ? await options.analyzer.analyze(input) : { topics: [] };
+        failureStage = 'semantic_classification';
+        const classified = options.classifier ? projectFounderWorkMap(analysis, await options.classifier.classify(analysis))
+          : { analysis, supportingByDisplayName: {} as Record<string, never[]>, canonicalNames: {} as Record<string,string> };
+        failureStage = 'topic_reconciliation';
+        const plan = reconcileTopics(input, classified.analysis);
+        failureStage = 'evidence_preparation';
+        // Space content follows the same human-correction authority as the Feishu
+        // path (topicAuthority), so a human-protected topic cannot be overwritten
+        // by a Space-sourced proposal either — see handoff doc §7.2 source ranking.
+        for (const item of plan.topics) {
+          const target = topics.listCurrentTopics().find(t => t.id === item.proposal.joinDecision.topicId);
+          if (target && topicAuthority(options.client, topics, target)) {
+            item.action = 'join'; item.topicId = target.id; item.expectedVersion = target.currentVersion;
+          }
+        }
+        const plannedAt = now();
+        failureStage = 'new_evidence_persistence';
+        const prepared = plan.topics.map(item => ({ item,
+          topicId: item.topicId ?? stableId('topic', `${new Date(plannedAt.getTime()+item.proposalIndex).toISOString()}\n${item.proposal.displayName.trim()}`),
+          ids: item.proposal.evidenceExcerpts.map(e => saveFounderEvidence(sources,e.sourceId,e.excerpt,plannedAt)) }));
+        const byTopic = new Map<string, typeof prepared>();
+        for(const row of prepared) byTopic.set(row.topicId,[...(byTopic.get(row.topicId) ?? []),row]);
+        failureStage = 'persistence';
+        options.client.transaction(() => {
+          const stamp = now(); if (!options.jobRepository.ownsLease(job, stamp)) throw new LeaseLostError(job.key);
+          for (const [,rows] of [...byTopic.entries()].sort(([a],[b])=>a.localeCompare(b))) {
+            const {item}=rows[0]!;
+            const old = item.topicId ? topics.listCurrentTopics().find(t => t.id === item.topicId) : undefined;
+            const evidenceIds = [...new Set([...(old?.evidenceIds ?? []), ...rows.flatMap(row=>row.ids)])].sort();
+            const authority = old ? topicAuthority(options.client, topics, old) : null;
+            const rationale = JSON.stringify({ origin: 'space_sync', jobKey: job.key, projectKey: job.projectKey });
+            if (item.action === 'join') topics.appendVersion({ topicId: item.topicId!, expectedVersion: item.expectedVersion!,
+              displayName: authority?.snapshot.displayName ?? item.proposal.displayName,
+              stage: authority?.snapshot.stage ?? item.proposal.stage,
+              outcome: authority ? authority.snapshot.outcome : item.proposal.outcome,
+              evidenceIds, rationale, changedAt: stamp });
+            else topics.createTopic({ displayName: item.proposal.displayName, stage: item.proposal.stage, outcome: item.proposal.outcome,
+              evidenceIds, rationale, createdAt: new Date(plannedAt.getTime() + item.proposalIndex) });
+          }
+          options.jobRepository.markCompleted(job, stamp);
+        }).immediate();
+        return 'completed' as const;
+      }
       if (!allowed(job.chatId)) throw new Error('unapproved founder group');
       if(job.kind==='capture_founder_attachment'){
         if(!options.attachmentReader)throw new Error('founder attachment reader unavailable');
@@ -342,8 +405,11 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
       return 'retry' as const;
     }
   }
-  const supportedKinds: FounderDurableJob['kind'][] = !options.flags.captureEnabled ? [] : options.flags.analysisEnabled ?
-    ['capture_group_message','capture_founder_attachment','analyze_founder_stream_batch'] : ['capture_group_message','capture_founder_attachment'];
+  const supportedKinds: FounderDurableJob['kind'][] = [
+    ...(!options.flags.captureEnabled ? [] : options.flags.analysisEnabled ?
+      ['capture_group_message','capture_founder_attachment','analyze_founder_stream_batch'] as const : ['capture_group_message','capture_founder_attachment'] as const),
+    ...(options.spaceAnalysisEnabled ? ['analyze_founder_stream_space_batch'] as const : [])
+  ];
   const afterTick = async () => {
       if(options.flags.dailyReconciliationEnabled&&options.dailyReconciliation&&now().getTime()>=nextDailyReconciliationAt){
         const stamp=now();nextDailyReconciliationAt=stamp.getTime()+dayMs;
@@ -351,6 +417,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         try{if(Date.parse(since)<stamp.getTime())await options.dailyReconciliation.run({since,until:stamp.toISOString(),now:stamp})}
         catch{/* A failed daily audit waits until the next daily window; history reads persist their own safe gaps. */}
       }
+      // Independent of Feishu's captureEnabled/analysisEnabled — Space sync has its own gate.
+      if (options.spaceAnalysisEnabled) recoverSpaceAnalysis();
       if (!options.flags.analysisEnabled) return;
       if (allowed(approvedGroup)) recoverGroupAnalysis();
       // The immutable source survives an enqueue failure. Stable source-set keys
@@ -413,6 +481,45 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           const batch=threadSources.slice(offset,offset+20);
           options.jobRepository.enqueueFounderStreamBatch({chatId:approvedGroup,sourceIds:batch.map(s=>s.id),
             since:batch[0]!.occurredAt,until:stamp.toISOString(),capturedAt:stamp,recoveryThreadId:thread||null});
+        }
+      }
+    }).immediate();
+  }
+  /** Mirrors recoverGroupAnalysis, scoped by projectKey (via project_space_bindings) instead of chatId. */
+  function recoverSpaceAnalysis() {
+    options.client.transaction(() => {
+      const claimed = new Set<string>();
+      const rows = options.client.prepare("SELECT payload FROM batch_jobs WHERE type='analyze_founder_stream_space_batch'")
+        .all() as { payload: string }[];
+      for (const row of rows) {
+        try {
+          const payload = JSON.parse(row.payload);
+          if (!Array.isArray(payload.sourceIds)) continue;
+          for (const id of payload.sourceIds) if (typeof id === 'string') claimed.add(id);
+        } catch { /* Invalid jobs remain diagnostic failures, not source authority. */ }
+      }
+      const stamp = now();
+      const spaceSources = sources.listSources().filter(source =>
+        ['space_page_snapshot','space_page_comment'].includes(source.sourceType) &&
+        source.contentState === 'cleartext' && source.availabilityStatus === 'available' &&
+        typeof source.metadata.pageId === 'string' && !claimed.has(source.id));
+      const projectKeyByPageId = new Map<string,string|null>();
+      const projectKeyFor = (pageId: string): string | null => {
+        if (!projectKeyByPageId.has(pageId)) projectKeyByPageId.set(pageId, spaceSync.getBindingByPageId(pageId)?.projectKey ?? null);
+        return projectKeyByPageId.get(pageId)!;
+      };
+      const byProject = new Map<string, ContextSourceRecord[]>();
+      for (const source of spaceSources) {
+        const projectKey = projectKeyFor(source.metadata.pageId as string);
+        if (!projectKey) continue;
+        byProject.set(projectKey, [...(byProject.get(projectKey) ?? []), source]);
+      }
+      for (const [projectKey, projectSources] of byProject) {
+        const ordered = projectSources.slice().sort((a,b)=>a.occurredAt.localeCompare(b.occurredAt)||a.id.localeCompare(b.id));
+        for (let offset=0; offset<ordered.length; offset+=20) {
+          const batch = ordered.slice(offset, offset+20);
+          options.jobRepository.enqueueSpaceStreamBatch({ projectKey, since: batch[0]!.occurredAt, until: stamp.toISOString(),
+            sourceIds: batch.map(s=>s.id), capturedAt: stamp });
         }
       }
     }).immediate();
@@ -566,6 +673,55 @@ export function buildFounderStreamInput(sources: ContextSourceRepository, topics
   }
   return validateFounderStreamInput({ sources: [...selected.values()], currentTopics });
 }
+
+/**
+ * Parallel to buildFounderStreamInput, but scoped by projectKey (via project_space_bindings)
+ * instead of chatId — never admits a chatId-scoped source and is never itself admitted through
+ * the chatId path. See docs/2026-10-19-space-to-context-sync-cloud-code-handoff.md §8.1.
+ */
+export function buildFounderStreamSpaceInput(sources: ContextSourceRepository, topics: TopicRepository,
+  spaceSync: SpaceSyncRepository, sourceIds: readonly string[], projectKey: string): FounderStreamInput {
+  const selected = new Map<string, ContextSourceRecord>();
+  const trustedSource = (id: string) => {
+    const source = sources.getSource(id);
+    if (!source || source.contentState !== 'cleartext' || source.availabilityStatus !== 'available' ||
+      !['space_page_snapshot','space_page_comment'].includes(source.sourceType)) return null;
+    const pageId = source.metadata.pageId;
+    if (typeof pageId !== 'string') return null;
+    const binding = spaceSync.getBindingByPageId(pageId);
+    if (!binding || binding.projectKey !== projectKey) return null;
+    return source;
+  };
+  const include = (id: string) => {
+    const source = trustedSource(id);
+    if (source) selected.set(id, source);
+    return source;
+  };
+  for (const id of sourceIds) {
+    const source=sources.getSource(id);if(!source)throw new Error('FOUNDER_SOURCE_UNAVAILABLE');
+    if(source.contentState !== 'cleartext')throw new Error('FOUNDER_SOURCE_UNAVAILABLE');
+    if(!include(id))throw new Error('FOUNDER_SOURCE_UNAVAILABLE');
+  }
+  if(selected.size===0)return {sources:[],currentTopics:[]};
+  const currentTopics: FounderStreamCurrentTopic[] = [];
+  for (const topic of topics.listCanonicalTopics().slice(-200)) {
+    const full = topic.evidenceIds.map(id => sources.getEvidence(id)).filter(e => e !== null)
+      .filter(e => trustedSource(e.sourceId) !== null)
+      .sort((a,b) => trustedSource(b.sourceId)!.occurredAt.localeCompare(trustedSource(a.sourceId)!.occurredAt) ||
+        b.capturedAt.localeCompare(a.capturedAt) || b.id.localeCompare(a.id));
+    const nameAnchor = full.find(e => e.excerpt.includes(topic.displayName));
+    if (!nameAnchor) continue;
+    const outcomeAnchor = topic.outcome === null ? undefined : full.find(e => e.excerpt.includes(topic.outcome!));
+    const anchors = outcomeAnchor ? [nameAnchor, outcomeAnchor] : [nameAnchor];
+    const bounded = [...new Map([...anchors, ...full].map(e => [e.id,e])).values()].slice(0,20);
+    const addedSourceIds = new Set(bounded.filter(e => !selected.has(e.sourceId)).map(e => e.sourceId));
+    if (selected.size + addedSourceIds.size > 500) continue;
+    for (const evidence of bounded) include(evidence.sourceId);
+    currentTopics.push({ id: topic.id, currentVersion: topic.currentVersion, displayName: topic.displayName,
+      stage: topic.stage, outcome: outcomeAnchor ? topic.outcome : null, evidenceExcerpts: bounded.map(e => ({ sourceId:e.sourceId,excerpt:e.excerpt })) });
+  }
+  return validateFounderStreamInput({ sources: [...selected.values()], currentTopics });
+}
 function minuteEligible(source:ContextSourceRecord,chatId:string):boolean {
   return source.metadata.founderStreamEligible===true && source.metadata.founderStreamChatId===chatId;
 }
@@ -640,7 +796,18 @@ export function saveFounderEvidence(repository: ContextSourceRepository, sourceI
   if (source.sourceType === 'group_message') locator = { kind: 'group_message', sourceVersion: source.sourceVersion,
     contentHash: source.contentHash, chatId: source.metadata.chatId, messageId: source.externalId,
     threadId: source.metadata.threadId ?? null, authorOpenId: source.authors[0]?.openId ?? null, occurredAt: source.occurredAt };
-  else {
+  else if (source.sourceType === 'space_page_snapshot') {
+    const blocks = source.metadata.blocks as Record<string, unknown>[] | undefined;
+    const blockOrdinal = blocks?.findIndex(b => typeof b.markdown === 'string' && b.markdown.includes(excerpt)) ?? -1;
+    if (blockOrdinal < 0) throw new Error('space page evidence must fit one block');
+    const block = blocks![blockOrdinal]!;
+    locator = { kind: 'space_page_block', sourceVersion: source.sourceVersion, contentHash: source.contentHash,
+      pageId: source.metadata.pageId, blockId: block.id, blockHash: block.hash, blockOrdinal };
+  } else if (source.sourceType === 'space_page_comment') {
+    locator = { kind: 'space_comment', sourceVersion: source.sourceVersion, contentHash: source.contentHash,
+      pageId: source.metadata.pageId, threadId: source.metadata.threadId, messageId: source.metadata.messageId,
+      authorOpenId: source.metadata.authorOpenId ?? null, targetBlockId: source.metadata.targetBlockId ?? null };
+  } else {
     const segment = (source.metadata.segments as Record<string, unknown>[] | undefined)?.find(s => typeof s.text === 'string' && s.text.includes(excerpt));
     if (!segment) throw new Error('minute evidence must fit one segment');
     locator = { kind: 'minute_segment', sourceVersion: source.sourceVersion, contentHash: source.contentHash,

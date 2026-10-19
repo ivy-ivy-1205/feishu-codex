@@ -36,7 +36,21 @@ export interface FounderAttachmentJob {
   fileName: string; threadId: string | null; occurredAt: string; authorOpenId: string | null;
   attempt: number; failureStage?: string; failureCode?: string; leaseExpiresAt?: string;
 }
-export type FounderDurableJob = FounderStreamJob | FounderAttachmentJob;
+/** Scoped by projectKey (project_space_bindings), never by chatId — see founder-stream-worker.ts eligibility split. */
+export interface FounderStreamSpaceJob {
+  kind: 'analyze_founder_stream_space_batch';
+  key: string;
+  projectKey: string;
+  sourceIds: string[];
+  since: string;
+  until: string;
+  windowKey: string;
+  attempt: number;
+  failureStage?: string;
+  failureCode?: string;
+  leaseExpiresAt?: string;
+}
+export type FounderDurableJob = FounderStreamJob | FounderAttachmentJob | FounderStreamSpaceJob;
 export type DurableJob = ProcessMinuteJob | ExtractContextCandidatesJob | FounderDurableJob;
 
 export type RetryErrorCode = 'MINUTE_NOT_READY' | 'RATE_LIMITED';
@@ -225,6 +239,24 @@ export class JobRepository {
     return { created: result.changes === 1, key };
   }
 
+  /** Queued for the founder-stream consumer only; scoped by projectKey instead of chatId. */
+  enqueueSpaceStreamBatch(input: {
+    projectKey: string; since: string; until: string; sourceIds: readonly string[]; capturedAt: Date;
+  }): { created: boolean; key: string } {
+    const sourceIds = [...new Set(input.sourceIds)].sort();
+    if (sourceIds.length === 0) throw new Error('space stream batch requires sources');
+    const windowKey = `space:${sha256(canonicalJson(sourceIds))}`;
+    const payload = { projectKey: input.projectKey, since: input.since, until: input.until, sourceIds, windowKey, attempt: 0 };
+    const key = `analyze_founder_stream_space_batch:${input.projectKey}:${windowKey}`;
+    const timestamp = input.capturedAt.toISOString();
+    const result = this.client.prepare(`
+      INSERT INTO batch_jobs (id, type, stable_key, payload, status, created_at, updated_at)
+      VALUES (?, 'analyze_founder_stream_space_batch', ?, ?, 'queued', ?, ?)
+      ON CONFLICT(stable_key) DO NOTHING
+    `).run(key, key, JSON.stringify(payload), timestamp, timestamp);
+    return { created: result.changes === 1, key };
+  }
+
   leaseNextProcessMinute(availableAt: Date): ProcessMinuteJob | null {
     const job = this.leaseNextSupportedJob(availableAt, ['process_minute']);
     return job?.kind === 'process_minute' ? job : null;
@@ -236,7 +268,7 @@ export class JobRepository {
   ): DurableJob | null {
     const kinds = [...new Set(supportedKinds)];
     if (kinds.length === 0) return null;
-    if (kinds.some((kind) => !['process_minute', 'extract_context_candidates', 'capture_group_message', 'capture_founder_attachment', 'analyze_founder_stream_batch'].includes(kind))) {
+    if (kinds.some((kind) => !['process_minute', 'extract_context_candidates', 'capture_group_message', 'capture_founder_attachment', 'analyze_founder_stream_batch', 'analyze_founder_stream_space_batch'].includes(kind))) {
       throw new Error('unsupported durable job kind');
     }
     const leaseUntil = new Date(availableAt.getTime() + this.leaseDurationMs);
@@ -530,6 +562,21 @@ function normalizeJobRow(row: JobRow): DurableJob | null {
         windowKey: typeof payload.windowKey === 'string' ? payload.windowKey : row.stable_key, attempt: payload.attempt ?? 0,
         ...(typeof payload.failureStage==='string'?{failureStage:payload.failureStage}:{}),
         ...(typeof payload.failureCode==='string'?{failureCode:payload.failureCode}:{}) } as FounderStreamJob;
+    } catch { return null; }
+  }
+  if (row.type === 'analyze_founder_stream_space_batch') {
+    try {
+      const payload = JSON.parse(row.payload);
+      const allowed = ['projectKey','sourceIds','windowKey','attempt','failureReason','failureStage','failureCode','since','until'];
+      if (!isRecord(payload) || Object.keys(payload).some(k => !allowed.includes(k)) || typeof payload.projectKey !== 'string' ||
+        !payload.projectKey.trim() || !isStringArray(payload.sourceIds) || !payload.sourceIds.length ||
+        payload.sourceIds.some(id => !id.startsWith('ctxsrc_')) || typeof payload.since !== 'string' || typeof payload.until !== 'string' ||
+        (payload.attempt !== undefined && !isRetryAttempt(payload.attempt))) return null;
+      return { kind: 'analyze_founder_stream_space_batch', key: row.stable_key, projectKey: payload.projectKey,
+        sourceIds: payload.sourceIds, since: payload.since, until: payload.until,
+        windowKey: typeof payload.windowKey === 'string' ? payload.windowKey : row.stable_key, attempt: payload.attempt ?? 0,
+        ...(typeof payload.failureStage==='string'?{failureStage:payload.failureStage}:{}),
+        ...(typeof payload.failureCode==='string'?{failureCode:payload.failureCode}:{}) } as FounderStreamSpaceJob;
     } catch { return null; }
   }
   if (row.type === 'process_minute') {
