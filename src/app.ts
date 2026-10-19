@@ -25,6 +25,10 @@ import type { OutboxRepository } from './repositories/outbox-repository.js';
 import type { ContextRecordRepository } from './repositories/context-record-repository.js';
 import type { FounderStreamRoute } from './services/founder-stream-worker.js';
 import { registerFounderStreamDiagnosticsRoute } from './routes/founder-stream-diagnostics.js';
+import {
+  registerSpaceSyncIngestRoutes,
+  type SpaceSyncIngestRouteDependencies
+} from './routes/space-sync.js';
 
 type LoggerOption = FastifyServerOptions['logger'];
 
@@ -49,6 +53,7 @@ export interface AppDependencies {
       recordRepository: ContextRecordRepository;
     };
   };
+  spaceSyncIngest?: SpaceSyncIngestRouteDependencies;
   logger?: LoggerOption;
 }
 
@@ -89,6 +94,9 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
   }
   if (dependencies.founderStreamDiagnostics) {
     registerFounderStreamDiagnosticsRoute(app, dependencies.founderStreamDiagnostics.client);
+  }
+  if (dependencies.spaceSyncIngest) {
+    registerSpaceSyncIngestRoutes(app, dependencies.spaceSyncIngest);
   }
 
   return app;

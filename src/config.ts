@@ -59,7 +59,16 @@ const envSchema = z.object({
   CONTEXT_SOURCE_MAX_BYTES: z.coerce.number().int().positive().default(2_000_000),
   CONTEXT_SOURCE_MAX_SEGMENTS: z.coerce.number().int().positive().default(10_000),
   CONTEXT_EXTRACTOR_MAX_BYTES: z.coerce.number().int().positive().default(500_000),
-  CONTEXT_EXTRACTOR_MAX_SEGMENTS: z.coerce.number().int().positive().default(2_000)
+  CONTEXT_EXTRACTOR_MAX_SEGMENTS: z.coerce.number().int().positive().default(2_000),
+  SPACE_SYNC_INGEST_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  SPACE_SYNC_ANALYSIS_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  SPACE_SYNC_WORKMAP_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  SPACE_SYNC_HMAC_SECRET_FILE: z.string().trim().min(1).optional(),
+  SPACE_SYNC_SIGNATURE_WINDOW_SECONDS: z.coerce.number().int().positive().default(300),
+  SPACE_SYNC_STALE_AFTER_MINUTES: z.coerce.number().int().positive().default(30),
+  SPACE_SYNC_MAX_BLOCKS: z.coerce.number().int().positive().default(500),
+  SPACE_SYNC_MAX_COMMENTS: z.coerce.number().int().positive().default(2_000),
+  SPACE_SYNC_MAX_BODY_BYTES: z.coerce.number().int().positive().default(2_000_000)
 }).superRefine((config, context) => {
   if (config.FOUNDER_STREAM_ANALYSIS_ENABLED && !config.FOUNDER_STREAM_CAPTURE_ENABLED) {
     context.addIssue({ code: 'custom', message: 'Founder analysis requires capture' });
@@ -138,6 +147,18 @@ const envSchema = z.object({
     context.addIssue({ code: 'custom', path: ['CONTEXT_EXTRACTOR_MAX_SEGMENTS'],
       message: 'Context extractor segment limit cannot exceed the stored source segment limit' });
   }
+  if (config.SPACE_SYNC_INGEST_ENABLED && !config.SPACE_SYNC_HMAC_SECRET_FILE) {
+    context.addIssue({ code: 'custom', path: ['SPACE_SYNC_HMAC_SECRET_FILE'],
+      message: 'Space sync ingest requires an HMAC secret file' });
+  }
+  if (config.SPACE_SYNC_ANALYSIS_ENABLED && !config.SPACE_SYNC_INGEST_ENABLED) {
+    context.addIssue({ code: 'custom', path: ['SPACE_SYNC_ANALYSIS_ENABLED'],
+      message: 'Space sync analysis requires ingest to be enabled' });
+  }
+  if (config.SPACE_SYNC_WORKMAP_ENABLED && !config.SPACE_SYNC_ANALYSIS_ENABLED) {
+    context.addIssue({ code: 'custom', path: ['SPACE_SYNC_WORKMAP_ENABLED'],
+      message: 'Space sync work map projection requires analysis to be enabled' });
+  }
 });
 
 type DatabaseKind = 'postgresql' | 'sqlite';
@@ -195,6 +216,17 @@ export interface AppConfig {
     sourceMaxSegments: number;
     extractorMaxBytes: number;
     extractorMaxSegments: number;
+  };
+  spaceSync: {
+    ingestEnabled: boolean;
+    analysisEnabled: boolean;
+    workmapEnabled: boolean;
+    hmacSecretFile: string | null;
+    signatureWindowSeconds: number;
+    staleAfterMinutes: number;
+    maxBlocks: number;
+    maxComments: number;
+    maxBodyBytes: number;
   };
 }
 
@@ -275,6 +307,17 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       sourceMaxSegments: parsed.CONTEXT_SOURCE_MAX_SEGMENTS,
       extractorMaxBytes: parsed.CONTEXT_EXTRACTOR_MAX_BYTES,
       extractorMaxSegments: parsed.CONTEXT_EXTRACTOR_MAX_SEGMENTS
+    },
+    spaceSync: {
+      ingestEnabled: parsed.SPACE_SYNC_INGEST_ENABLED,
+      analysisEnabled: parsed.SPACE_SYNC_ANALYSIS_ENABLED,
+      workmapEnabled: parsed.SPACE_SYNC_WORKMAP_ENABLED,
+      hmacSecretFile: parsed.SPACE_SYNC_HMAC_SECRET_FILE ?? null,
+      signatureWindowSeconds: parsed.SPACE_SYNC_SIGNATURE_WINDOW_SECONDS,
+      staleAfterMinutes: parsed.SPACE_SYNC_STALE_AFTER_MINUTES,
+      maxBlocks: parsed.SPACE_SYNC_MAX_BLOCKS,
+      maxComments: parsed.SPACE_SYNC_MAX_COMMENTS,
+      maxBodyBytes: parsed.SPACE_SYNC_MAX_BODY_BYTES
     }
   };
 }

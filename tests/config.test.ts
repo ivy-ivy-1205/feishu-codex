@@ -194,4 +194,27 @@ describe('loadConfig', () => {
       tokenKeyFile: '/opt/feishu-codex/secrets/feishu-oauth-token-key'
     });
   });
+
+  it('defaults Space sync off with safe limits and enforces ordered flag/secret dependencies', () => {
+    expect(loadConfig(baseEnv).spaceSync).toEqual({
+      ingestEnabled: false, analysisEnabled: false, workmapEnabled: false,
+      hmacSecretFile: null, signatureWindowSeconds: 300, staleAfterMinutes: 30,
+      maxBlocks: 500, maxComments: 2_000, maxBodyBytes: 2_000_000
+    });
+    expect(() => loadConfig({ ...baseEnv, SPACE_SYNC_INGEST_ENABLED: 'true' }))
+      .toThrow(/HMAC secret file/i);
+    expect(loadConfig({
+      ...baseEnv, SPACE_SYNC_INGEST_ENABLED: 'true',
+      SPACE_SYNC_HMAC_SECRET_FILE: '/opt/feishu-codex/secrets/space-sync-hmac-secret'
+    }).spaceSync).toMatchObject({ ingestEnabled: true, hmacSecretFile: '/opt/feishu-codex/secrets/space-sync-hmac-secret' });
+    expect(() => loadConfig({ ...baseEnv, SPACE_SYNC_ANALYSIS_ENABLED: 'true' }))
+      .toThrow(/analysis requires ingest/i);
+    expect(() => loadConfig({ ...baseEnv, SPACE_SYNC_WORKMAP_ENABLED: 'true' }))
+      .toThrow(/work map.*analysis/i);
+    expect(loadConfig({
+      ...baseEnv, SPACE_SYNC_INGEST_ENABLED: 'true', SPACE_SYNC_ANALYSIS_ENABLED: 'true',
+      SPACE_SYNC_WORKMAP_ENABLED: 'true',
+      SPACE_SYNC_HMAC_SECRET_FILE: '/opt/feishu-codex/secrets/space-sync-hmac-secret'
+    }).spaceSync).toMatchObject({ ingestEnabled: true, analysisEnabled: true, workmapEnabled: true });
+  });
 });
