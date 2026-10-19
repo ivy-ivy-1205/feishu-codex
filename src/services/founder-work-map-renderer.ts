@@ -1,5 +1,6 @@
 import type { CurrentTopic, TopicStage } from '../domain/topic.js';
 import { founderCard, founderSourceText, founderText, type FounderCardEvidence } from './founder-card.js';
+import type { SpaceFreshnessSummary } from './space-sync-freshness.js';
 
 export interface FounderWorkMapTopic extends Pick<CurrentTopic, 'id' | 'currentVersion' | 'displayName' | 'stage' | 'outcome'> {
   evidence: readonly FounderCardEvidence[];
@@ -8,6 +9,8 @@ export interface FounderWorkMapTopic extends Pick<CurrentTopic, 'id' | 'currentV
   parentName?: string;
   perspectives?: readonly { founder:'Ivy'|'James'|'双方';status:'current'|'historical'|'unresolved';statement:string;observedAt:string }[];
   supportingItems?: readonly {kind:'principle'|'artifact'|'research'|'task'|'goal';displayName:string}[];
+  /** Only set for a topic bound to a Space project; never fetched here — see space-sync-freshness.ts. */
+  spaceFreshness?: SpaceFreshnessSummary;
 }
 export interface FounderWorkMapInput {
   since: string;
@@ -74,7 +77,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     const title=displayKind==='task'?`${nestedSupporting}任务｜${topic.displayName}`:displayKind==='goal'?`${nestedSupporting}阶段目标｜${topic.displayName}`:
       displayKind==='idea'?`观点｜${topic.displayName}`:
       `${nestedProject?'↳ 子项目':'项目'}｜${topic.displayName}`;
-    const text=`${founderText(title, 120)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.displayName,topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}`;
+    const text=`${founderText(title, 120)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.displayName,topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}${spaceFreshnessPreview(topic.spaceFreshness)}`;
     if(displayKind==='project'||displayKind==='idea')add(section,text,{ kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
     else addSupporting(section,text);
   }
@@ -146,6 +149,15 @@ function perspectivePreview(topicName:string,items:NonNullable<FounderWorkMapTop
     .map(item=>{const at=new Date(item.observedAt);if(!Number.isFinite(at.getTime()))throw new Error('valid perspective time is required');
       return `\n${labels[item.status]}（${item.founder}，${at.toISOString().slice(0,10)}）：${founderText(item.statement,180)}`}).join('');
   return `${details}${historyCount?`\n历史记录：${historyCount} 条，可用“查看对齐：${founderText(topicName,80)}”查看`:''}`;
+}
+
+function spaceFreshnessPreview(freshness: SpaceFreshnessSummary | undefined): string {
+  if (!freshness || freshness.status === 'not_bound') return '';
+  const lastSync = freshness.lastSuccessfulSyncAt ? new Date(freshness.lastSuccessfulSyncAt).toISOString() : '尚无成功同步记录';
+  if (freshness.status === 'permission_lost') return `\nSpace 同步：权限缺失，最后成功同步 ${lastSync}；保留历史内容`;
+  const gapNote = freshness.coverageIncomplete || freshness.gapCount > 0 ? `；缺口 ${freshness.gapCount} 项` : '';
+  if (freshness.status === 'stale') return `\nSpace 同步：最后成功同步 ${lastSync}${gapNote}。Space 内容可能滞后，请以最新 Page 为准`;
+  return `\nSpace 同步：最后成功同步 ${lastSync}${gapNote}`;
 }
 
 function evidencePreview(evidence: readonly FounderCardEvidence[],linkedSourceCount=0): string {

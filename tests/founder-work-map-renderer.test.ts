@@ -159,4 +159,38 @@ describe('founder work map cards', () => {
     expect(() => renderFounderWorkMap({ ...window, topics: [topic('a')],
       uncertainGrouping: [{ id: 'join', topicIds: ['a', 'missing'], summary: '可能相关', evidence: [] }], coverageGaps: [] })).toThrow();
   });
+
+  it('shows a Space sync line for a bound, up-to-date topic without a staleness warning', () => {
+    const [page] = renderFounderWorkMap({ ...window, topics: [{ ...topic('a'), spaceFreshness: {
+      status: 'synced', lastSuccessfulSyncAt: '2026-09-19T12:00:00.000Z', pageUpdatedAt: '2026-09-19T11:00:00.000Z',
+      lastErrorCode: null, coverageIncomplete: false, gapCount: 0
+    } }], uncertainGrouping: [], coverageGaps: [] });
+    const body = JSON.stringify(page!.card);
+    expect(body).toContain('Space');
+    expect(body).toContain('2026-09-19T12:00:00.000Z');
+    expect(body).not.toContain('可能滞后');
+  });
+
+  it('warns that Space content may be stale for a bound topic past the threshold', () => {
+    const [page] = renderFounderWorkMap({ ...window, topics: [{ ...topic('a'), spaceFreshness: {
+      status: 'stale', lastSuccessfulSyncAt: '2026-08-01T00:00:00.000Z', pageUpdatedAt: '2026-08-01T00:00:00.000Z',
+      lastErrorCode: null, coverageIncomplete: false, gapCount: 0
+    } }], uncertainGrouping: [], coverageGaps: [] });
+    const body = JSON.stringify(page!.card);
+    expect(body).toContain('Space 内容可能滞后');
+  });
+
+  it('surfaces a permission_lost Space binding without claiming it is up to date', () => {
+    const [page] = renderFounderWorkMap({ ...window, topics: [{ ...topic('a'), spaceFreshness: {
+      status: 'permission_lost', lastSuccessfulSyncAt: '2026-08-01T00:00:00.000Z', pageUpdatedAt: null,
+      lastErrorCode: 'permission_denied', coverageIncomplete: false, gapCount: 0
+    } }], uncertainGrouping: [], coverageGaps: [] });
+    const body = JSON.stringify(page!.card);
+    expect(body).toContain('权限缺失');
+  });
+
+  it('renders no Space line at all for a topic with no binding', () => {
+    const [page] = renderFounderWorkMap({ ...window, topics: [topic('a')], uncertainGrouping: [], coverageGaps: [] });
+    expect(JSON.stringify(page!.card)).not.toContain('Space');
+  });
 });

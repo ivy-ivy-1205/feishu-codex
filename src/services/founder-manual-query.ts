@@ -2,10 +2,15 @@ import type Database from 'better-sqlite3';
 import { AlignmentIssueRepository } from '../repositories/alignment-issue-repository.js';
 import { AlignmentRepository } from '../repositories/alignment-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
+import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
+import { FounderTopicProjectBindingRepository } from '../repositories/founder-topic-project-binding-repository.js';
 import { buildCurrentFounderWorkMap } from './current-founder-work-map.js';
+import { computeSpaceFreshness, type SpaceFreshnessSummary } from './space-sync-freshness.js';
 import { founderCard, founderText } from './founder-card.js';
 import type { FounderWorkMapCard } from './founder-work-map-renderer.js';
 import type { FounderBoardView } from './founder-board-view.js';
+
+const defaultSpaceStaleAfterMinutes = 30;
 
 export type FounderManualQuery =
   | { kind:'work_map' }
@@ -38,7 +43,7 @@ export function isConfiguredFounder(client:Database.Database,openId:string):bool
 }
 
 export function buildFounderManualQueryMessages(input:{client:Database.Database;query:FounderManualQuery;
-  queryMessageId:string;chatId:string;approvedChatIds:readonly string[];now:Date}):FounderManualQueryMessage[]{
+  queryMessageId:string;chatId:string;approvedChatIds:readonly string[];now:Date;spaceStaleAfterMinutes?:number}):FounderManualQueryMessage[]{
   const status=processingStatus(input.client,input.chatId);
   if(input.query.kind==='work_map'){
     const result=buildWorkMap(input);
@@ -96,13 +101,31 @@ export function enqueueFounderManualQuery(client:Database.Database,messages:read
   return created;
 }
 
-function buildWorkMap(input:{client:Database.Database;chatId:string;approvedChatIds:readonly string[];now:Date}):
+function buildWorkMap(input:{client:Database.Database;chatId:string;approvedChatIds:readonly string[];now:Date;spaceStaleAfterMinutes?:number}):
   {mapId:string;cards:FounderWorkMapCard[];boardView:FounderBoardView}|null {
-  const count=new TopicRepository(input.client).listCanonicalTopics().length;
-  if(count===0)return null;
+  const topics=new TopicRepository(input.client).listCanonicalTopics();
+  if(topics.length===0)return null;
+  const spaceFreshnessByTopicId=spaceFreshnessForCanonicalTopics(input.client,topics.map(t=>t.id),input.now,
+    input.spaceStaleAfterMinutes??defaultSpaceStaleAfterMinutes);
   const result=buildCurrentFounderWorkMap({client:input.client,chatId:input.chatId,approvedChatIds:input.approvedChatIds,
-    expectedCanonicalTopicCount:count,since:baselineSince,until:input.now.toISOString()});
+    expectedCanonicalTopicCount:topics.length,since:baselineSince,until:input.now.toISOString(),spaceFreshnessByTopicId});
   return{mapId:result.mapId,cards:result.cards,boardView:result.boardView};
+}
+
+/** Reads already-stored binding/run state only — never contacts Space itself (handoff doc §8.3). */
+function spaceFreshnessForCanonicalTopics(client:Database.Database,topicIds:readonly string[],now:Date,
+  staleAfterMinutes:number):ReadonlyMap<string,SpaceFreshnessSummary>{
+  const bindingRepo=new FounderTopicProjectBindingRepository(client),spaceSync=new SpaceSyncRepository(client);
+  const map=new Map<string,SpaceFreshnessSummary>();
+  for(const topicId of topicIds){
+    const canonical=bindingRepo.listForTopic(topicId).find(row=>row.role==='canonical');
+    if(!canonical)continue;
+    const binding=spaceSync.getBindingByProjectKey(canonical.projectKey);
+    if(!binding)continue;
+    const latestRun=spaceSync.getLatestRunForBinding(binding.id);
+    map.set(topicId,computeSpaceFreshness({binding,latestRun,now,staleAfterMinutes}));
+  }
+  return map;
 }
 
 function buildTopicAlignment(input:{client:Database.Database;now:Date},name:string):Record<string,unknown>{
@@ -178,7 +201,19 @@ function processingStatus(client:Database.Database,chatId:string):string{
   const audit=latestCoverageAudit(client,chatId);
   const failureStatus=[`未补偿分析来源：${unresolvedSources.size}`,...(invalidAnalysisJobs?[`分析异常任务：${invalidAnalysisJobs}`]:[]),
     `采集失败任务：${failedCaptureJobs}`].join('；');
-  return `处理状态\n最后收到：${received.value??'尚无记录'}\n最后完成分析：${analyzedAt??'尚无完成记录'}\n最新已分析语料：${analyzedSourceAt??'尚无完成记录'}\n最后防漏复核：${audit??'尚无记录'}\n待处理：${pending}；${failureStatus}；不可读/跳过缺口：${gaps}\n“待处理为 0”只证明已入库任务没有积压；缺口会单独显示，不把未读取内容算作已覆盖。`;
+  return `处理状态\n最后收到：${received.value??'尚无记录'}\n最后完成分析：${analyzedAt??'尚无完成记录'}\n最新已分析语料：${analyzedSourceAt??'尚无完成记录'}\n最后防漏复核：${audit??'尚无记录'}\n待处理：${pending}；${failureStatus}；不可读/跳过缺口：${gaps}\n“待处理为 0”只证明已入库任务没有积压；缺口会单独显示，不把未读取内容算作已覆盖。${spaceProcessingStatusLine(client)}`;
+}
+
+/** Aggregate, read-only summary over already-stored bindings/runs — never contacts Space itself. */
+function spaceProcessingStatusLine(client:Database.Database):string{
+  const spaceSync=new SpaceSyncRepository(client);
+  const bindings=spaceSync.listBindings();
+  if(bindings.length===0)return'';
+  const active=bindings.filter(b=>b.status==='active').length;
+  const permissionLost=bindings.filter(b=>b.status==='permission_lost').length;
+  const latestSync=bindings.map(b=>b.lastSuccessfulSyncAt).filter((v):v is string=>Boolean(v)).sort().at(-1)??null;
+  const gapCount=bindings.reduce((sum,b)=>sum+(spaceSync.getLatestRunForBinding(b.id)?.gapCount??0),0);
+  return `\nSpace 页面\n已绑定项目：${bindings.length}；活跃：${active}；权限缺失：${permissionLost}\n最后成功同步：${latestSync??'尚无记录'}\n缺口：${gapCount}`;
 }
 
 function latestSourceOccurredAt(client:Database.Database,sourceIds:readonly string[]):string|null{

@@ -9,6 +9,7 @@ import { canonicalJson, stableId } from './canonical-json.js';
 import type { FounderCardEvidence } from './founder-card.js';
 import { renderFounderWorkMap, type FounderWorkMapCard, type FounderWorkMapTopic } from './founder-work-map-renderer.js';
 import type { FounderWorkMapBoardView } from './founder-board-view.js';
+import type { SpaceFreshnessSummary } from './space-sync-freshness.js';
 
 export interface CurrentFounderWorkMapInput {
   client: Database.Database;
@@ -17,6 +18,8 @@ export interface CurrentFounderWorkMapInput {
   until: string;
   approvedChatIds: readonly string[];
   expectedCanonicalTopicCount: number;
+  /** Precomputed via computeSpaceFreshness() by the caller; this function never reaches Space itself. */
+  spaceFreshnessByTopicId?: ReadonlyMap<string, SpaceFreshnessSummary>;
 }
 
 export interface CurrentFounderWorkMapResult {
@@ -53,11 +56,12 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
     const evidence=loadEvidence(input.client,componentIds,correctionMessageIds);
     const parentId=parentByChild.get(topic.id);
     const displayName=cleanDisplayName(topic.displayName);
+    const spaceFreshness=input.spaceFreshnessByTopicId?.get(topic.id);
     return{...topic,displayName,evidence:evidence.items,linkedSourceCount:evidence.linkedSourceCount,
       displayKind:displayKindFor(topics,topic.id,topic.stage),
       parentName:parentId?cleanDisplayName(canonicalById.get(parentId)?.displayName??''):undefined,
       perspectives:alignment.listCanonicalPerspectives(topic.id).filter(perspective=>!isTopicLabelOnly(displayName,perspective.statement))
-        .map(perspective=>projectPerspective(topic,perspective))};
+        .map(perspective=>projectPerspective(topic,perspective)),...(spaceFreshness?{spaceFreshness}:{})};
   });
   const projected=coalesceDisplayDuplicates(projectedRaw);
   const coverageGaps=loadCoverageGaps(input.client,input.chatId,input.since,input.until);

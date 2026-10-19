@@ -151,4 +151,20 @@ describe('current founder work map publisher',()=>{
     const names=result.boardView.topics.filter(topic=>topic.name.includes('同名方向')).map(topic=>topic.name);
     expect(names).toEqual(['同名方向（同名待确认）','同名方向（同名待确认）']);
   });
+
+  it('carries a caller-supplied Space freshness summary through to the rendered card for a bound topic only',()=>{
+    const h=fixture();
+    const freshness=new Map([[h.parent.id,{status:'stale' as const,lastSuccessfulSyncAt:'2026-08-01T00:00:00.000Z',
+      pageUpdatedAt:'2026-08-01T00:00:00.000Z',lastErrorCode:null,coverageIncomplete:false,gapCount:0}]]);
+    const result=buildCurrentFounderWorkMap({client:h.db.client,chatId,since:'2026-08-31T00:00:00Z',until:'2026-09-24T00:00:00Z',
+      approvedChatIds:[chatId],expectedCanonicalTopicCount:2,spaceFreshnessByTopicId:freshness});
+    const body=JSON.stringify(result.cards);
+    expect(body).toContain('Space 内容可能滞后');
+    const parentCardText=result.cards.flatMap(card=>(card.card.elements as {text?:{content?:string}}[]))
+      .map(el=>el.text?.content??'').find(text=>text.includes('A 线'));
+    expect(parentCardText).toContain('Space');
+    const childCardText=result.cards.flatMap(card=>(card.card.elements as {text?:{content?:string}}[]))
+      .map(el=>el.text?.content??'').find(text=>text.includes('子项目'));
+    expect(childCardText).not.toContain('Space');
+  });
 });

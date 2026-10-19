@@ -37,6 +37,17 @@ describe('SpaceSyncRepository bindings', () => {
     expect(repository.getBindingByProjectKey('unbound_project')).toBeNull();
   });
 
+  it('lists every binding, for a global Space processing-status summary', () => {
+    const repository = setup();
+    expect(repository.listBindings()).toEqual([]);
+    repository.createBinding({
+      id: 'binding-1', projectKey: 'smart_listing', spaceId: null,
+      pageId: 'page_1', pageUrl: 'https://chatgpt.com/space/page_1',
+      managementMode: 'space', syncMode: 'manual', createdAt: new Date('2026-10-19T00:00:00.000Z')
+    });
+    expect(repository.listBindings().map((b) => b.id)).toEqual(['binding-1']);
+  });
+
   it('still returns a permission_lost binding by projectKey, since history remains analyzable', () => {
     const repository = setup();
     repository.createBinding({

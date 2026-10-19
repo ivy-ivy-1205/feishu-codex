@@ -10,6 +10,8 @@ import { buildFounderManualQueryMessages } from '../src/services/founder-manual-
 import { TopicRepository } from '../src/repositories/topic-repository.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
 import { captureGroupMessageSource } from '../src/services/group-message-source-capture.js';
+import { SpaceSyncRepository } from '../src/repositories/space-sync-repository.js';
+import { FounderTopicProjectBindingRepository } from '../src/repositories/founder-topic-project-binding-repository.js';
 
 const chatId='oc_a84d5b6ca478220d0a37964b50776edb';
 const at=new Date('2026-09-25T10:00:00.000Z');
@@ -351,6 +353,58 @@ describe('founder manual queries',()=>{
     expect(body).toContain('最新已分析语料：2026-09-23T00:00:00.000Z');
     expect(body).toContain('未补偿分析来源：1；采集失败任务：1');
     expect(body).not.toContain('未补偿失败：');
+    db.close();
+  });
+
+  it('shows a Space freshness line in the work map for a project-bound canonical topic', () => {
+    const db = createSqliteDatabase(':memory:'); migrateDatabase(db.client);
+    db.client.prepare(`INSERT INTO projects (project_key, display_name, aliases, status, origin, stage, created_at, updated_at)
+      VALUES ('smart_listing', 'Smart Listing', '[]', 'active', 'human_confirmed', 'active_project', ?, ?)`)
+      .run(at.toISOString(), at.toISOString());
+    const topic = new TopicRepository(db.client).createTopic({ displayName: 'Smart Listing', stage: 'active_project', createdAt: at });
+    const spaceSync = new SpaceSyncRepository(db.client);
+    const binding = spaceSync.createBinding({ id: 'binding-1', projectKey: 'smart_listing', spaceId: null, pageId: 'page_1',
+      pageUrl: 'https://chatgpt.com/space/page_1', managementMode: 'space', syncMode: 'manual', createdAt: at });
+    spaceSync.recordSuccessfulSync({ bindingId: binding.id, pageSequence: 1, pageUpdatedAt: at.toISOString(),
+      syncedAt: new Date(at.getTime() - 60 * 60_000) });
+    new FounderTopicProjectBindingRepository(db.client).recordHumanConfirmed({ topicId: topic.id, projectKey: 'smart_listing',
+      role: 'canonical', at });
+    const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'work_map' },
+      queryMessageId: 'om_space_freshness', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
+    expect(body).toContain('Space 同步');
+    expect(body).toContain('Space 内容可能滞后');
+    db.close();
+  });
+
+  it('does not show a Space line in the work map for a topic with no project binding', () => {
+    const db = createSqliteDatabase(':memory:'); migrateDatabase(db.client);
+    new TopicRepository(db.client).createTopic({ displayName: 'Smart Listing', stage: 'active_project', createdAt: at });
+    const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'work_map' },
+      queryMessageId: 'om_no_space', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
+    expect(body).not.toContain('Space 同步');
+    db.close();
+  });
+
+  it('extends the global processing status with a Space page summary when any binding exists', () => {
+    const db = createSqliteDatabase(':memory:'); migrateDatabase(db.client);
+    db.client.prepare(`INSERT INTO projects (project_key, display_name, aliases, status, origin, stage, created_at, updated_at)
+      VALUES ('smart_listing', 'Smart Listing', '[]', 'active', 'human_confirmed', 'active_project', ?, ?)`)
+      .run(at.toISOString(), at.toISOString());
+    const spaceSync = new SpaceSyncRepository(db.client);
+    const binding = spaceSync.createBinding({ id: 'binding-1', projectKey: 'smart_listing', spaceId: null, pageId: 'page_1',
+      pageUrl: 'https://chatgpt.com/space/page_1', managementMode: 'space', syncMode: 'manual', createdAt: at });
+    spaceSync.recordSuccessfulSync({ bindingId: binding.id, pageSequence: 1, pageUpdatedAt: at.toISOString(), syncedAt: at });
+    const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'project_progress',
+      topicName: 'whatever' }, queryMessageId: 'om_global_space', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
+    expect(body).toContain('Space 页面');
+    expect(body).toContain('已绑定项目：1');
+  });
+
+  it('does not show the Space page summary line when no binding exists at all', () => {
+    const db = createSqliteDatabase(':memory:'); migrateDatabase(db.client);
+    const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'project_progress',
+      topicName: 'whatever' }, queryMessageId: 'om_no_global_space', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
+    expect(body).not.toContain('Space 页面');
     db.close();
   });
 });

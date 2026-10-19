@@ -118,6 +118,11 @@ export class SpaceSyncRepository {
     return row ? toBindingRecord(row) : null;
   }
 
+  listBindings(): ProjectSpaceBindingRecord[] {
+    return (this.client.prepare('SELECT * FROM project_space_bindings ORDER BY created_at, id').all() as BindingRow[])
+      .map(toBindingRecord);
+  }
+
   recordSuccessfulSync(input: RecordSuccessfulSyncInput): void {
     const timestamp = input.syncedAt.toISOString();
     const result = this.client.prepare(`
