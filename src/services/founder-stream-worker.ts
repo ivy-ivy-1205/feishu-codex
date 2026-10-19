@@ -635,7 +635,7 @@ async function deliverManualQueryMessages(options:FounderStreamOptions,now:()=>D
   }
 }
 
-function manualQueryTitle(card:Record<string,unknown>|undefined):string{
+export function manualQueryTitle(card:Record<string,unknown>|undefined):string{
   const content=(card?.header as {title?:{content?:unknown}}|undefined)?.title?.content;
   return typeof content==='string'&&content.trim()?content.replace(/\s*·\s*\d+\/\d+\s*$/u,'').trim():'AiJia 工作看板';
 }
