@@ -198,7 +198,7 @@ describe('loadConfig', () => {
   it('defaults Space sync off with safe limits and enforces ordered flag/secret dependencies', () => {
     expect(loadConfig(baseEnv).spaceSync).toEqual({
       ingestEnabled: false, analysisEnabled: false, workmapEnabled: false,
-      hmacSecretFile: null, signatureWindowSeconds: 300, staleAfterMinutes: 30,
+      hmacSecretFile: null, signatureWindowSeconds: 300, staleAfterMinutes: 1440,
       maxBlocks: 500, maxComments: 2_000, maxBodyBytes: 2_000_000
     });
     expect(() => loadConfig({ ...baseEnv, SPACE_SYNC_INGEST_ENABLED: 'true' }))

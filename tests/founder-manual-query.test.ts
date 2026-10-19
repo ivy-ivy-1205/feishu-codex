@@ -366,13 +366,33 @@ describe('founder manual queries',()=>{
     const binding = spaceSync.createBinding({ id: 'binding-1', projectKey: 'smart_listing', spaceId: null, pageId: 'page_1',
       pageUrl: 'https://chatgpt.com/space/page_1', managementMode: 'space', syncMode: 'manual', createdAt: at });
     spaceSync.recordSuccessfulSync({ bindingId: binding.id, pageSequence: 1, pageUpdatedAt: at.toISOString(),
-      syncedAt: new Date(at.getTime() - 60 * 60_000) });
+      syncedAt: new Date(at.getTime() - 25 * 60 * 60_000) });
     new FounderTopicProjectBindingRepository(db.client).recordHumanConfirmed({ topicId: topic.id, projectKey: 'smart_listing',
       role: 'canonical', at });
     const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'work_map' },
       queryMessageId: 'om_space_freshness', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
     expect(body).toContain('项目页（Space');
     expect(body).toContain('Space 内容可能滞后');
+    db.close();
+  });
+
+  it('does not warn about lag within the default 24-hour window', () => {
+    const db = createSqliteDatabase(':memory:'); migrateDatabase(db.client);
+    db.client.prepare(`INSERT INTO projects (project_key, display_name, aliases, status, origin, stage, created_at, updated_at)
+      VALUES ('smart_listing', 'Smart Listing', '[]', 'active', 'human_confirmed', 'active_project', ?, ?)`)
+      .run(at.toISOString(), at.toISOString());
+    const topic = new TopicRepository(db.client).createTopic({ displayName: 'Smart Listing', stage: 'active_project', createdAt: at });
+    const spaceSync = new SpaceSyncRepository(db.client);
+    const binding = spaceSync.createBinding({ id: 'binding-1', projectKey: 'smart_listing', spaceId: null, pageId: 'page_1',
+      pageUrl: 'https://chatgpt.com/space/page_1', managementMode: 'space', syncMode: 'manual', createdAt: at });
+    spaceSync.recordSuccessfulSync({ bindingId: binding.id, pageSequence: 1, pageUpdatedAt: at.toISOString(),
+      syncedAt: new Date(at.getTime() - 23 * 60 * 60_000) });
+    new FounderTopicProjectBindingRepository(db.client).recordHumanConfirmed({ topicId: topic.id, projectKey: 'smart_listing',
+      role: 'canonical', at });
+    const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'work_map' },
+      queryMessageId: 'om_space_fresh_day', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
+    expect(body).toContain('项目页（Space');
+    expect(body).not.toContain('可能滞后');
     db.close();
   });
 

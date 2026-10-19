@@ -11,7 +11,7 @@ import { founderCard, founderText } from './founder-card.js';
 import type { FounderWorkMapCard } from './founder-work-map-renderer.js';
 import type { FounderBoardView } from './founder-board-view.js';
 
-const defaultSpaceStaleAfterMinutes = 30;
+const defaultSpaceStaleAfterMinutes = 24 * 60;
 
 export type FounderManualQuery =
   | { kind:'work_map' }

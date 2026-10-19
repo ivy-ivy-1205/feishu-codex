@@ -65,7 +65,8 @@ const envSchema = z.object({
   SPACE_SYNC_WORKMAP_ENABLED: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
   SPACE_SYNC_HMAC_SECRET_FILE: z.string().trim().min(1).optional(),
   SPACE_SYNC_SIGNATURE_WINDOW_SECONDS: z.coerce.number().int().positive().default(300),
-  SPACE_SYNC_STALE_AFTER_MINUTES: z.coerce.number().int().positive().default(30),
+  // Ivy 2026-10-19: Space pages are published periodically by hand, so warn only after a day without a sync.
+  SPACE_SYNC_STALE_AFTER_MINUTES: z.coerce.number().int().positive().default(24 * 60),
   SPACE_SYNC_MAX_BLOCKS: z.coerce.number().int().positive().default(500),
   SPACE_SYNC_MAX_COMMENTS: z.coerce.number().int().positive().default(2_000),
   SPACE_SYNC_MAX_BODY_BYTES: z.coerce.number().int().positive().default(2_000_000)

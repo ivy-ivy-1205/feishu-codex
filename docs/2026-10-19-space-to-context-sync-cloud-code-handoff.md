@@ -360,7 +360,7 @@ Space 页面：最后成功同步 / Page 更新时间 / 待处理 / 缺口
 
 - `查看工作地图` 读取 Context 当前状态，不临时抓取 Space，也不无限等待外部同步。
 - Space 超过阈值未同步时，地图仍可生成，但必须显示“Space 内容可能滞后”。
-- 默认建议 `SPACE_SYNC_STALE_AFTER_MINUTES=30`，生产值在变更单中确认。
+- 默认 `SPACE_SYNC_STALE_AFTER_MINUTES=1440`（Ivy 2026-10-19 确认改为 24 小时：页面按需手动发布，30 分钟会让提醒常亮）；生产值仍在变更单中确认。
 - 如果将来存在可靠的 producer 控制通道，可以在查询时发出 refresh request；没有控制通道时不能显示“正在实时刷新”。
 
 ## 9. 自动触发条件
