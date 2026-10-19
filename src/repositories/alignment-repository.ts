@@ -106,6 +106,8 @@ export class AlignmentRepository {
     let sourceText = row.content_text;
     let externalAuthorId: string | null = null;
     if (row.source_type === 'group_message') externalAuthorId = singleAuthorOpenId(row.authors_json);
+    // Space comment authors map through founder_identities(source_system='chatgpt_space'), never by display name.
+    else if (row.source_type === 'space_page_comment') externalAuthorId = singleAuthorOpenId(row.authors_json);
     else if (row.source_type === 'minute_transcript') {
       const locator = JSON.parse(row.locator_json);
       const segment = JSON.parse(row.metadata_json).segments?.[locator.segmentOrdinal];

@@ -11,6 +11,7 @@ import {
 } from '../src/services/founder-stream-worker.js';
 import { loadSpaceBatchSources } from '../src/services/space-batch-processor.js';
 import { captureGroupMessageSource } from '../src/services/group-message-source-capture.js';
+import { AlignmentRepository } from '../src/repositories/alignment-repository.js';
 import { SpaceProjectDigestRepository } from '../src/repositories/space-project-digest-repository.js';
 import type { SpaceProjectDigestInput } from '../src/services/space-project-digest.js';
 
@@ -318,5 +319,75 @@ describe('Space project-page digest per page version', () => {
     await h.runtime.runOnce();
     expect(h.calls).toHaveLength(0);
     expect(h.digests.getForPageSource(old.id)).toBeNull();
+  });
+});
+
+describe('Space comments feed the shared perspective/alignment mechanism', () => {
+  type PerspectiveInput = Parameters<NonNullable<Parameters<typeof createFounderStreamRuntime>[0]['perspectiveAnalyzer']>['analyze']>[0];
+  function perspectiveHarness(respond: (input: PerspectiveInput) => Awaited<ReturnType<NonNullable<Parameters<typeof createFounderStreamRuntime>[0]['perspectiveAnalyzer']>['analyze']>>) {
+    const h = setup();
+    const alignment = new AlignmentRepository(h.db.client);
+    alignment.configureFounderIdentity({ founder: 'ivy', sourceSystem: 'chatgpt_space', externalAuthorId: 'space_user_ivy', configuredAt: start });
+    alignment.configureFounderIdentity({ founder: 'james', sourceSystem: 'chatgpt_space', externalAuthorId: 'space_user_james', configuredAt: start });
+    const inputs: PerspectiveInput[] = [];
+    const runtime = createFounderStreamRuntime({
+      client: h.db.client, jobRepository: h.jobs,
+      flags: { captureEnabled: false, analysisEnabled: false, groupDeliveryEnabled: false },
+      approvedChatIds: [], ivyPrivateChatId: 'oc_private', now: () => start, spaceAnalysisEnabled: true,
+      perspectiveAnalyzer: { async analyze(input) { inputs.push(input); return respond(input); } }
+    });
+    return { ...h, runtime, inputs, alignment };
+  }
+
+  it('attributes comment authors via chatgpt_space identities and skips resolved threads', async () => {
+    const h = perspectiveHarness(() => ({ observations: [], alignmentProposals: [] }));
+    const topic = canonicalTopic(h);
+    const ivy = spaceCommentSource(h.sources, { messageId: 'msg_ivy', text: '先做 27 Cecil Street' });
+    const james = spaceCommentSource(h.sources, { messageId: 'msg_james', authorId: 'space_user_james', text: '同意先做 27 Cecil Street' });
+    const stranger = spaceCommentSource(h.sources, { messageId: 'msg_agent', authorId: 'space_agent_x', text: 'agent 备注' });
+    const resolved = spaceCommentSource(h.sources, { messageId: 'msg_old', threadState: 'resolved', text: '旧讨论' });
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [ivy.id, james.id, stranger.id, resolved.id], capturedAt: start });
+    await h.runtime.runOnce();
+    expect(h.inputs).toHaveLength(1);
+    expect(h.inputs[0]!.topicIds).toEqual([topic.id]);
+    expect(new Map(h.inputs[0]!.evidence.map((e) => [e.sourceId, e.founder]))).toEqual(new Map<string, string | null>([[ivy.id, 'ivy'], [james.id, 'james'], [stranger.id, null]]));
+    // Resolved threads remain on the card as historical evidence.
+    const evidenceSources = h.topics.listCurrentTopics()[0]!.evidenceIds.map((id) => h.sources.getEvidence(id)!.sourceId);
+    expect(evidenceSources).toContain(resolved.id);
+  });
+
+  it('can record consensus from explicit statements by both founders (comments are not forced into divergence)', async () => {
+    const h = perspectiveHarness((input) => ({ alignmentProposals: [], observations: input.evidence.filter((e) => e.founder).map((e) => ({
+      topicId: input.topicIds[0]!, evidenceId: e.id, statement: e.excerpt, speechAct: e.founder === 'ivy' ? 'decision_proposal' as const : 'explicit_agreement' as const,
+      decisionKey: 'first-listing', confidence: 1, observedAt: new Date(e.occurredAt) })) }));
+    const topic = canonicalTopic(h);
+    const ivy = spaceCommentSource(h.sources, { messageId: 'msg_ivy', text: '先做 27 Cecil Street' });
+    const james = spaceCommentSource(h.sources, { messageId: 'msg_james', authorId: 'space_user_james', text: '同意先做 27 Cecil Street' });
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [ivy.id, james.id], capturedAt: start });
+    await h.runtime.runOnce();
+    const kinds = h.alignment.listCurrentPerspectives(topic.id).map((p) => p.kind).sort();
+    expect(kinds).toContain('ivy_view');
+    expect(kinds).toContain('james_view');
+  });
+
+  it('records a grounded divergence as a 查看分歧 candidate without sending any Feishu message', async () => {
+    const h = perspectiveHarness((input) => {
+      const ivy = input.evidence.find((e) => e.founder === 'ivy')!, james = input.evidence.find((e) => e.founder === 'james')!;
+      return { observations: [ivy, james].map((e) => ({ topicId: input.topicIds[0]!, evidenceId: e.id, statement: e.excerpt,
+        speechAct: 'view' as const, decisionKey: 'first-listing', confidence: 1, observedAt: new Date(e.occurredAt) })),
+      alignmentProposals: [{ topicId: input.topicIds[0]!, decisionKey: 'first-listing', dimension: 'direction',
+        ivy: { evidenceId: ivy.id, statement: '先做 27 Cecil Street' }, james: { evidenceId: james.id, statement: '先做第二套 listing' },
+        actionConsequence: null, actionHorizon: null }] };
+    });
+    canonicalTopic(h);
+    const ivy = spaceCommentSource(h.sources, { messageId: 'msg_ivy', text: '先做 27 Cecil Street' });
+    const james = spaceCommentSource(h.sources, { messageId: 'msg_james', authorId: 'space_user_james', text: '先做第二套 listing' });
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [ivy.id, james.id], capturedAt: start });
+    await h.runtime.runOnce();
+    expect(h.db.client.prepare("SELECT status FROM batch_jobs WHERE type='analyze_founder_stream_space_batch'").get()).toEqual({ status: 'completed' });
+    expect(h.db.client.prepare('SELECT count(*) n FROM outbox').get()).toEqual({ n: 0 });
   });
 });

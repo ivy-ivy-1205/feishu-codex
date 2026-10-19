@@ -4,7 +4,7 @@ import type { AppConfig } from '../config.js';
 import { ContextSourceRepository, type ContextSourceRecord } from '../repositories/context-source-repository.js';
 import { JobRepository, LeaseLostError, type FounderDurableJob, type FounderStreamJob, type FounderStreamSpaceJob } from '../repositories/job-repository.js';
 import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
-import { confirmedSpaceProjectTopic, loadSpaceBatchSources, spaceCommentExcerpt } from './space-batch-processor.js';
+import { confirmedSpaceProjectTopic, isResolvedSpaceComment, loadSpaceBatchSources, spaceCommentExcerpt } from './space-batch-processor.js';
 import { buildSpaceDigestInput, type SpaceProjectDigest, type SpaceProjectDigestAnalyzer } from './space-project-digest.js';
 import { SpaceProjectDigestRepository } from '../repositories/space-project-digest-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
@@ -201,6 +201,25 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           const excerpt = spaceCommentExcerpt(comment);
           return excerpt ? [saveFounderEvidence(sources, comment.id, excerpt, plannedAt)] : [];
         });
+        // Open threads are live views. Resolved threads stay as historical evidence only.
+        // Comments may show consensus or divergence; the shared reconciler still needs
+        // explicit, attributed statements from both founders, and silence is never agreement.
+        failureStage = 'founder_attribution';
+        const liveEvidence = loaded.comments.filter(comment => !isResolvedSpaceComment(comment)).flatMap(comment => {
+          const excerpt = spaceCommentExcerpt(comment);
+          if (!excerpt) return [];
+          const id = commentEvidenceIds.find(evidenceId => sources.getEvidence(evidenceId)?.sourceId === comment.id)!;
+          return [{ id, sourceId: comment.id, topicIds: [target.id], excerpt, founder: perspectives.resolveFounderForEvidence(id),
+            occurredAt: comment.occurredAt }];
+        });
+        failureStage = 'perspective_analysis';
+        const perspectiveResult = options.perspectiveAnalyzer && liveEvidence.length ? await options.perspectiveAnalyzer.analyze({
+          sourceIds: liveEvidence.map(e => e.sourceId), topicIds: [target.id], evidence: liveEvidence
+        }) : { observations: [], alignmentProposals: [] };
+        const liveIds = new Set(liveEvidence.map(e => e.id));
+        const assertSpaceScoped = (topicId: string, evidenceIds: readonly string[]) => {
+          if (topicId !== target.id || evidenceIds.some(id => !liveIds.has(id))) throw new Error('FOUNDER_PERSPECTIVE_OUT_OF_SCOPE');
+        };
         failureStage = 'persistence';
         options.client.transaction(() => {
           const stamp = now(); if (!options.jobRepository.ownsLease(job, stamp)) throw new LeaseLostError(job.key);
@@ -211,6 +230,14 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
             displayName: current.displayName, stage: current.stage, outcome: current.outcome,
             evidenceIds: [...new Set([...current.evidenceIds, ...added])].sort(),
             rationale: JSON.stringify({ origin: 'space_sync', jobKey: job.key, projectKey: job.projectKey }), changedAt: stamp });
+          for (const observation of perspectiveResult.observations) assertSpaceScoped(observation.topicId, [observation.evidenceId]);
+          perspectiveReconciler.reconcileBatch(perspectiveResult.observations);
+          for (const proposal of perspectiveResult.alignmentProposals) {
+            const candidate = new AlignmentDetector().propose(proposal);
+            assertSpaceScoped(candidate.topicId, candidate.evidenceIds);
+            // Space has no chat: divergence is recorded for 查看分歧, never pushed as a Feishu message.
+            notificationPolicy.recordShadowCandidate(candidate, stamp);
+          }
           for (const { page, result } of digestResults) {
             const base = { projectKey: job.projectKey, pageId: String(page.metadata.pageId), pageSourceId: page.id,
               pageSourceVersion: page.sourceVersion, pageUpdatedAt: page.occurredAt, generatedAt: stamp };
