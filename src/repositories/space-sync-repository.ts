@@ -138,6 +138,13 @@ export class SpaceSyncRepository {
     return row ? toRunRecord(row) : null;
   }
 
+  getLatestRunForBinding(bindingId: string): SpaceSyncRunRecord | null {
+    const row = this.client.prepare(`
+      SELECT * FROM space_sync_runs WHERE binding_id = ? ORDER BY completed_at DESC, id DESC LIMIT 1
+    `).get(bindingId) as RunRow | undefined;
+    return row ? toRunRecord(row) : null;
+  }
+
   insertRun(input: InsertSpaceSyncRunInput): SpaceSyncRunRecord {
     this.client.prepare(`
       INSERT INTO space_sync_runs (
