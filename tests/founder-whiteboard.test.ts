@@ -120,6 +120,19 @@ describe('founder whiteboard',()=>{
     expect(siteNodes(withSpace)).toEqual(siteNodes(plain));
   });
 
+  it('lets the 本周 line run to nearly the full card width before truncating',()=>{
+    const result=buildFounderWhiteboard({title:'工作地图',paletteId:'grove',cards:[],view:{kind:'work_map',since:'2026-08-31T00:00:00.000Z',
+      until:'2026-10-19T08:10:00.000Z',coverageGaps:[],topics:[
+        {id:'a',name:'AiJia AI Native 房产业务',stage:'active_project',kind:'project',outcome:null},
+        {id:'site',name:'官网',stage:'active_project',kind:'project',outcome:null,parentName:'AiJia AI Native 房产业务'},
+        {id:'smart',name:'Smart Listing',stage:'active_project',kind:'project',outcome:null,parentName:'AiJia AI Native 房产业务',
+          space:{weekLine:'本周进展'.repeat(20),label:'Space · 10-19 更新'}}]}});
+    const week=result.nodes.find(node=>node.text?.text?.startsWith('本周进展'))!;
+    // A-lane card: 522px wide, 486px of text at 19px — about 25 CJK characters.
+    expect(Array.from(week.text!.text!).length).toBeGreaterThanOrEqual(25);
+    expect(Array.from(week.text!.text!).length*19).toBeLessThanOrEqual(week.width!);
+  });
+
   it('keeps every text node readable against its actual fill in all 25 palettes',()=>{
     for(const palette of founderPalettes){
       const result=buildFounderWhiteboard({title:'工作地图',paletteId:palette.id,cards:[],view:{

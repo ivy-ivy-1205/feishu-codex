@@ -200,7 +200,7 @@ function appendLane(nodes:FounderWhiteboardNode[],lane:LaneLayout,palette:Founde
     const outcome=topic.outcome?wrapText(topic.outcome,textUnits(width-36,21),2):'',outcomeLines=outcome?outcome.split('\n').length:0;
     if(topic.outcome)nodes.push(textNode(x+18,y+22+titleLines*34,width-36,topic.space?outcomeLines*29+4:height-86,outcome,21,cardText,'regular'));
     if(topic.space?.weekLine)nodes.push(textNode(x+18,y+22+titleLines*34+(outcomeLines?outcomeLines*29+6:0),width-36,27,
-      wrapText(topic.space.weekLine,textUnits(width-36,19),1),19,cardText,'regular'));
+      wrapText(topic.space.weekLine,fullLineUnits(width-36,19),1),19,cardText,'regular'));
     const meta=[stageLabel(topic.stage),topic.sourceCount?`${topic.sourceCount} 个来源`:null].filter(Boolean).join(' · ');
     nodes.push(textNode(x+18,y+height-30,width-36,22,meta,17,cardText,'regular'));
     if(topic.space){const chipWidth=Math.ceil(labelUnits(topic.space.label)*14)+20,chipX=x+width-14-chipWidth,chipY=y+height-34;
@@ -244,6 +244,8 @@ function whiteboardSvg(board:BuiltFounderWhiteboard):string{
   parts.push('</svg>');return parts.join('');
 }
 function textUnits(width:number,fontSize:number):number{return Math.max(8,Math.floor(width/(fontSize*1.14)))}
+/** Single-line text that should use almost the whole width: CJK glyphs are one em wide, with a small safety margin. */
+function fullLineUnits(width:number,fontSize:number):number{return Math.max(8,Math.floor(width/(fontSize*1.02)))}
 function wrapText(value:string,limit:number,maxLines:number):string{
   const chars=Array.from(value.replace(/\s+/gu,' ').trim()),lines:string[]=[];let line='',units=0,index=0;
   const weight=(char:string)=>/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(char)?1:/[A-Z0-9]/u.test(char)?0.72:/\s/u.test(char)?0.34:0.58;
