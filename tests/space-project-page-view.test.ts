@@ -105,4 +105,9 @@ describe('Space project-page block', () => {
       queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
     expect(progress).toContain('当前重点：把 27 Cecil Street 买家空间做成可复用模板');
   });
+
+  it('says the digest is being generated when a snapshot exists but no digest is stored yet', () => {
+    const h = setup();
+    expect(renderSpaceProjectPageLines(loadSpaceProjectPageView(h.db.client, h.topic.id, at, 30)!)).toContain('项目页摘要：生成中');
+  });
 });

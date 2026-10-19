@@ -80,7 +80,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     const title=displayKind==='task'?`${nestedSupporting}任务｜${topic.displayName}`:displayKind==='goal'?`${nestedSupporting}阶段目标｜${topic.displayName}`:
       displayKind==='idea'?`观点｜${topic.displayName}`:
       `${nestedProject?'↳ 子项目':'项目'}｜${topic.displayName}`;
-    const text=`${founderText(title, 120)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.displayName,topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${evidencePreview(topic.evidence,topic.linkedSourceCount??0)}${topic.spacePage?`\n${renderSpaceProjectPageLines(topic.spacePage).join('\n')}`:spaceFreshnessPreview(topic.spaceFreshness)}`;
+    const text=`${founderText(title, 120)}${suffix}${topic.outcome ? `\n当前方向：${founderText(topic.outcome, 420)}` : ''}${perspectivePreview(topic.displayName,topic.perspectives??[])}${supportingPreview(topic.supportingItems??[])}${topicEvidencePreview(topic)}${topic.spacePage?`\n${renderSpaceProjectPageLines(topic.spacePage).join('\n')}`:spaceFreshnessPreview(topic.spaceFreshness)}`;
     if(displayKind==='project'||displayKind==='idea')add(section,text,{ kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
     else addSupporting(section,text);
   }
@@ -161,6 +161,13 @@ function spaceFreshnessPreview(freshness: SpaceFreshnessSummary | undefined): st
   const gapNote = freshness.coverageIncomplete || freshness.gapCount > 0 ? `；缺口 ${freshness.gapCount} 项` : '';
   if (freshness.status === 'stale') return `\nSpace 同步：最后成功同步 ${lastSync}${gapNote}。Space 内容可能滞后，请以最新 Page 为准`;
   return `\nSpace 同步：最后成功同步 ${lastSync}${gapNote}`;
+}
+
+/** With a project-page block, Space comments are already summarized there; the 来源 line shows other evidence only. */
+function topicEvidencePreview(topic: FounderWorkMapTopic): string {
+  if (!topic.spacePage) return evidencePreview(topic.evidence, topic.linkedSourceCount ?? 0);
+  const other = topic.evidence.filter((item) => item.locator.kind !== 'space_comment');
+  return other.length ? evidencePreview(other) : '';
 }
 
 function evidencePreview(evidence: readonly FounderCardEvidence[],linkedSourceCount=0): string {

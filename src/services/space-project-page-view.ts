@@ -72,7 +72,7 @@ export function renderSpaceProjectPageLines(view: SpaceProjectPageView): string[
   else if (freshness.status === 'stale') lines.push('Space 内容可能滞后，请以最新 Page 为准');
   if (freshness.coverageIncomplete || freshness.gapCount > 0) lines.push(`同步缺口：${freshness.gapCount} 项，未覆盖内容不计入进展`);
   const digest = view.digest;
-  if (!digest) lines.push('项目页摘要：尚无页面快照');
+  if (!digest) lines.push(view.pageUpdatedAt ? '项目页摘要：生成中' : '项目页摘要：尚无页面快照');
   else if (digest.status === 'failed' || !digest.digest) {
     lines.push(digest.failureCode === 'pending_latest_version' ? '项目页摘要：最新版本摘要生成中，暂不展示旧摘要'
       : `项目页摘要未生成（${failureLabels[digest.failureCode ?? ''] ?? '原因未知'}）`);

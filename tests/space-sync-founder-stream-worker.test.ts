@@ -391,3 +391,24 @@ describe('Space comments feed the shared perspective/alignment mechanism', () =>
     expect(h.db.client.prepare('SELECT count(*) n FROM outbox').get()).toEqual({ n: 0 });
   });
 });
+
+describe('Space digest grounding is enforced by the worker, not only by the Codex adapter', () => {
+  it('records space_digest_invalid when an analyzer claims an ungrounded excerpt', async () => {
+    const h = setup();
+    const runtime = createFounderStreamRuntime({
+      client: h.db.client, jobRepository: h.jobs,
+      flags: { captureEnabled: false, analysisEnabled: false, groupDeliveryEnabled: false },
+      approvedChatIds: [], ivyPrivateChatId: 'oc_private', now: () => start, spaceAnalysisEnabled: true,
+      spaceDigestAnalyzer: { async digest(input) { return { currentFocus: { text: 'x', blockId: input.blocks[0]!.id, excerpt: '页面没有这句话' },
+        weekProgress: [], todayProgress: [], nextSteps: [] }; } }
+    });
+    canonicalTopic(h);
+    const page = spacePageSource(h.sources);
+    const queued = h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [page.id], capturedAt: start });
+    h.db.client.prepare("UPDATE batch_jobs SET payload=json_set(payload,'$.attempt',2) WHERE stable_key=?").run(queued.key);
+    await runtime.runOnce();
+    expect(new SpaceProjectDigestRepository(h.db.client).getLatestForProject('smart_listing'))
+      .toMatchObject({ status: 'failed', failureCode: 'space_digest_invalid' });
+  });
+});

@@ -1,5 +1,8 @@
 # MEMORY.md
 
+- 2026-10-19 Ivy 纠正 Space Phase 2 方案：页面由 Ivy、James 和多个 AI agent 局部编辑，不能要求固定模板，摘要只能由 AI 从无结构页面浓缩；评论是理解双方想法的重要入口，必须进入工作地图，且评论既可能是共识也可能是分歧，不得硬性只归为分歧（共识仍需双方明确表态，沉默不等于同意）。已确认映射：Smart Listing 页 `page_f095a79b4bb48191b797811f8f53862d` = A 线 Smart Listing；Family First 页 `page_0c8fafc25f948191b768868322257f00` = A 线下独立 AI Native 项目，与教育系列无关；“超级个体到超级团队”页 `page_99af645338808191b63c00a4ba33b031` = B 线新项目（三篇公众号中 Ivy 已发第一篇，James 在做视频号）。登记计划在 `docs/2026-10-19-space-mapping-plan.json`。
+- 2026-10-19 Space Phase 2 架构决策（分支 `codex/space-sync-phase2-3`）：Space 只补充人工登记过的项目条目（`human_confirmed`/`mapping_rule` 的 canonical 绑定），不做 topic 抽取，不新建、不改名、不改阶段；机器建议的绑定不被信任。页面按版本比对，以 UTC+8、周一为一周起点算“今日/本周”变化；每个页面版本生成一份摘要（重点 1、本周 ≤3、今日 ≤2、下一步/卡点 ≤2），每条都要有 blockId 和逐字原文，本周和今日条目必须引用对应时间窗内改过的段落，worker 会再校验一遍。摘要失败时显示缺口。打开的评论线程进入观点分析，已解决的线程只作为历史；分歧只记为候选，不发飞书消息。Ivy 问到“周报”：本期只做每个项目卡片里的“本周进展”，跨项目周报留待看过效果后再决定。内置浏览器打开 Space 页面会跳到 ChatGPT 登录页，Claude 不代为登录。
+
 - 2026-10-19 Ivy 明确当前有两个对齐工作面：飞书“对齐工作室”负责跨项目工作地图，Space 项目 Page 负责单项目持续编辑与评论；现有 Bridge 无法读取 Space，因此地图会滞后。建议增加独立 Space 同步器，把登记 Page 的正文、评论、作者、时间、版本与来源链接作为第二类证据写入 Context；评论不自动视为共识，失败必须显示新鲜度和缺口，先做 Space→Context 单向同步，不反向自动改写 Page。Cloud Code 实施交接位于 `docs/2026-10-19-space-to-context-sync-cloud-code-handoff.md`，包含 registry、同步协议、触发验证、数据治理、分阶段实施、测试、shadow rollout 与生产审批边界；当前仅形成交接与本地候选实施授权，未读取真实 Page、未改业务代码或生产。
 - 2026-10-19 Claude Code 实际环境已确认没有 ChatGPT Pages/Space connector，因此只能完成 Bridge 接收端、fixture 和本地测试，不能验证或读取 Smart Listing 真实 Page。该限制不阻塞已授权的本地 Phase 0–3；真实 Page 读取／binding 应由具备 Pages connector 的 Codex App 环境在另行批准后完成，生产 secret、入口、migration、部署和定时任务仍需变更单。同步 envelope 实现时应避免同时信任 `contentMarkdown` 与 blocks 两份正文，优先以有序 blocks 为唯一输入并由 Bridge 派生 `content_text`，防止不一致来源。
 

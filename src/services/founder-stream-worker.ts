@@ -5,7 +5,7 @@ import { ContextSourceRepository, type ContextSourceRecord } from '../repositori
 import { JobRepository, LeaseLostError, type FounderDurableJob, type FounderStreamJob, type FounderStreamSpaceJob } from '../repositories/job-repository.js';
 import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
 import { confirmedSpaceProjectTopic, isResolvedSpaceComment, loadSpaceBatchSources, spaceCommentExcerpt } from './space-batch-processor.js';
-import { buildSpaceDigestInput, type SpaceProjectDigest, type SpaceProjectDigestAnalyzer } from './space-project-digest.js';
+import { buildSpaceDigestInput, validateSpaceDigest, type SpaceProjectDigest, type SpaceProjectDigestAnalyzer } from './space-project-digest.js';
 import { SpaceProjectDigestRepository } from '../repositories/space-project-digest-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
@@ -189,7 +189,9 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           if (!options.spaceDigestAnalyzer) { digestResults.push({ page, result: { failureCode: 'analyzer_unavailable' } }); continue; }
           const digestInput = buildSpaceDigestInput({ projectKey: job.projectKey, projectName: projectDisplayName(options.client, job.projectKey) ?? target.displayName,
             page, versions, now: plannedAt });
-          try { digestResults.push({ page, result: { ready: await options.spaceDigestAnalyzer.digest(digestInput), basis: digestInput.changeBasis } }); }
+          // Validated here too, so no analyzer implementation can bypass grounding or the change-window rule.
+          try { digestResults.push({ page, result: { ready: validateSpaceDigest(await options.spaceDigestAnalyzer.digest(digestInput), digestInput),
+            basis: digestInput.changeBasis } }); }
           catch (error) {
             // Bounded retries, then a visible "摘要未生成" gap instead of a silently missing summary.
             if (job.attempt < 2) throw error;

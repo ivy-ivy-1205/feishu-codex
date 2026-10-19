@@ -193,4 +193,18 @@ describe('founder work map cards', () => {
     const [page] = renderFounderWorkMap({ ...window, topics: [topic('a')], uncertainGrouping: [], coverageGaps: [] });
     expect(JSON.stringify(page!.card)).not.toContain('Space');
   });
+
+  it('does not use Space comments as the 来源 line when a project-page block already summarizes them', () => {
+    const comment = { id: 'ctxev_c', sourceId: 'ctxsrc_c', sourceVersion: 1, excerpt: 'agent：已更新配套信息', occurredAt: '2026-09-19T00:00:00.000Z',
+      locator: { kind: 'space_comment' as const, sourceVersion: 1, contentHash: 'a'.repeat(64), pageId: 'page_1', threadId: 't', messageId: 'm',
+        authorOpenId: null, targetBlockId: null } };
+    const spacePage = { freshness: { status: 'synced' as const, lastSuccessfulSyncAt: '2026-09-19T12:00:00.000Z', pageUpdatedAt: null,
+      lastErrorCode: null, coverageIncomplete: false, gapCount: 0 }, pageUpdatedAt: '2026-09-19T11:00:00.000Z', digest: null,
+      comments: { open: 0, resolved: 1, ivy: 0, james: 0, other: 0, divergenceCandidates: 0 } };
+    const [page] = renderFounderWorkMap({ ...window, topics: [{ ...topic('a'), evidence: [comment], spacePage }], uncertainGrouping: [], coverageGaps: [] });
+    const body = JSON.stringify(page!.card);
+    expect(body).not.toContain('agent：已更新配套信息');
+    expect(body).not.toContain('来源：待补充');
+    expect(body).toContain('项目页（Space · 页面更新于 2026-09-19T11:00:00.000Z');
+  });
 });
