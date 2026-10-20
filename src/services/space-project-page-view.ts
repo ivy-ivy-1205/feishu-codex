@@ -16,7 +16,14 @@ export interface SpaceProjectPageView {
   digest: (Pick<SpaceProjectDigestRecord, 'status' | 'changeBasis' | 'digest' | 'failureCode' | 'generatedAt'> &
     { generatedToday: boolean; generatedThisWeek: boolean }) | null;
   comments: { open: number; resolved: number; ivy: number; james: number; other: number; divergenceCandidates: number };
+  /** Plain-language names of what the latest sync did not cover; absent when the gap records are unavailable. */
+  syncGaps?: string[];
 }
+
+const gapLabels: Record<string, string> = {
+  comments_not_exported: '评论未同步（本次只导入了页面正文），评论里的看法暂未计入',
+  page_updated_at_unknown: '页面更新时间未知'
+};
 
 const failureLabels: Record<string, string> = {
   analyzer_unavailable: '摘要服务未启用', codex_auth_required: '本地 Codex 需要重新登录',
@@ -33,7 +40,14 @@ export function loadSpaceProjectPageView(client: Database.Database, topicId: str
   const spaceSync = new SpaceSyncRepository(client);
   const binding = spaceSync.getBindingByProjectKey(canonical.projectKey);
   if (!binding) return null;
-  const freshness = computeSpaceFreshness({ binding, latestRun: spaceSync.getLatestRunForBinding(binding.id), now, staleAfterMinutes });
+  const latestRun = spaceSync.getLatestRunForBinding(binding.id);
+  const freshness = computeSpaceFreshness({ binding, latestRun, now, staleAfterMinutes });
+  const syncGaps = latestRun ? (client.prepare(`SELECT content_text, json_extract(metadata_json, '$.gapCode') AS code FROM context_sources
+    WHERE source_type = 'space_sync_gap' AND json_extract(metadata_json, '$.pageId') = ? AND json_extract(metadata_json, '$.syncId') = ?
+    ORDER BY logical_key`).all(binding.pageId, latestRun.id) as { content_text: string; code: string | null }[])
+    .map((gap) => gapLabels[gap.code ?? ''] ?? founderText(gap.content_text, 60)) : [];
+  if (latestRun && !latestRun.coverageCommentsComplete && !syncGaps.some((gap) => gap.startsWith('评论'))) syncGaps.push('评论未读完整');
+  if (latestRun && !latestRun.coveragePageComplete) syncGaps.push('页面正文未读完整');
   const latestByKey = new Map<string, ReturnType<ContextSourceRepository['listSources']>[number]>();
   for (const source of new ContextSourceRepository(client).listSpacePageSources(binding.pageId)) latestByKey.set(source.logicalKey, source);
   const latest = [...latestByKey.values()];
@@ -63,18 +77,21 @@ export function loadSpaceProjectPageView(client: Database.Database, topicId: str
     digest: digest ? { status: digest.status, changeBasis: digest.changeBasis, digest: digest.digest, failureCode: digest.failureCode,
       generatedAt: digest.generatedAt, generatedToday: Date.parse(digest.generatedAt) >= Date.parse(windows.todayStart),
       generatedThisWeek: Date.parse(digest.generatedAt) >= Date.parse(windows.weekStart) } : null,
-    comments };
+    comments, syncGaps };
 }
 
 /** One compact block per project: page-recorded status, never attributed to a person, never the page rewritten. */
 export function renderSpaceProjectPageLines(view: SpaceProjectPageView): string[] {
   const { freshness } = view;
-  const synced = freshness.lastSuccessfulSyncAt ? new Date(freshness.lastSuccessfulSyncAt).toISOString() : '尚无成功同步';
-  const updated = view.pageUpdatedAt ? new Date(view.pageUpdatedAt).toISOString() : '未知';
+  const synced = freshness.lastSuccessfulSyncAt ? founderMonthDayTime(freshness.lastSuccessfulSyncAt) : '尚无成功同步';
+  const updated = view.pageUpdatedAt ? founderMonthDay(view.pageUpdatedAt) : '未知';
   const lines = [`项目页（Space · 页面更新于 ${updated} · 同步于 ${synced}）`];
   if (freshness.status === 'permission_lost') lines.push('Space 权限缺失：以下为最后一次成功同步的历史内容');
   else if (freshness.status === 'stale') lines.push('Space 内容可能滞后，请以最新 Page 为准');
-  if (freshness.coverageIncomplete || freshness.gapCount > 0) lines.push(`同步缺口：${freshness.gapCount} 项，未覆盖内容不计入进展`);
+  if (view.syncGaps?.length) lines.push(`同步缺口：${view.syncGaps.join('；')}`);
+  else if (freshness.coverageIncomplete || freshness.gapCount > 0) {
+    lines.push(`同步缺口：有 ${Math.max(freshness.gapCount, 1)} 处内容未同步，未同步的部分不计入进展`);
+  }
   const digest = view.digest;
   if (!digest) lines.push(view.pageUpdatedAt ? '项目页摘要：生成中' : '项目页摘要：尚无页面快照');
   else if (digest.status === 'failed' || !digest.digest) {
@@ -85,7 +102,7 @@ export function renderSpaceProjectPageLines(view: SpaceProjectPageView): string[
     if (digest.changeBasis === 'first_snapshot') {
       if (d.weekProgress.length) lines.push(`页面记载进展（首次同步，未区分本周）：${join(d.weekProgress)}`);
     } else if (!digest.generatedThisWeek) {
-      lines.push(`本周页面无更新${d.weekProgress.length ? `；上次更新的进展（${new Date(digest.generatedAt).toISOString()}）：${join(d.weekProgress)}` : ''}`);
+      lines.push(`本周页面无更新${d.weekProgress.length ? `；上次更新的进展（${founderMonthDay(digest.generatedAt)}）：${join(d.weekProgress)}` : ''}`);
     } else {
       lines.push(`本周进展：${d.weekProgress.length ? join(d.weekProgress) : '本周页面无进展类更新'}`);
       if (d.todayProgress.length && digest.generatedToday) lines.push(`今日：${join(d.todayProgress)}`);
@@ -124,4 +141,10 @@ export function spaceBoardSummary(view: SpaceProjectPageView): { weekLine: strin
 /** MM-DD on the founder calendar (UTC+8), matching the 今日/本周 windows. */
 function founderMonthDay(value: string): string {
   return new Date(Date.parse(value) + 8 * 60 * 60 * 1_000).toISOString().slice(5, 10);
+}
+
+/** MM-DD HH:MM in Beijing time (UTC+8). */
+function founderMonthDayTime(value: string): string {
+  const local = new Date(Date.parse(value) + 8 * 60 * 60 * 1_000).toISOString();
+  return `${local.slice(5, 10)} ${local.slice(11, 16)}`;
 }
