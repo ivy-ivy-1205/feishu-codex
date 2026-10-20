@@ -30,7 +30,12 @@
     - 仍未覆盖：如果开了 Space 分析、但没开工作地图展示，Space 评论分析出的观点仍可能作为条目观点或来源出现。Space 上线变更单里应把分析和展示一起打开，或者另行过滤。
   - 2026-10-20 已清理 11b7651/2d00845/d3fb118 三个旧候选的镜像标签、构建目录和上传包；保留当前镜像、全部 rollback 镜像、备份、checkpoint 和切换脚本。同日按 Ivy 批准删除 `/opt/feishu-codex/uploads` 中 7–8 月的 67 个历史上传包和一次性脚本（Phase 1C–1E，共 16MB，无 cron/systemd/挂载引用），并执行 `docker builder prune -f`，释放 645MB 构建缓存。剩下的 1.57GB 缓存被现有镜像共用，不能单独删。服务器根盘仍是 83%（约 11G 可用），主要占用是镜像本身。9–10 月的上传文件保留。
   - 失败的分析（10-17、10-19 12:26、10-19 14:46）：Ivy 告诉我 Codex 额度已恢复后，由我在服务器上用 `recover-founder-job-failures`（先 `--preview` 看名单，再用 recovery id `--apply` 重新排队）恢复。Bridge 会用服务器本地的 Codex CLI 和 Ivy 的账号重新分析，Ivy 不需要在 Codex 里手动跑。10-20 03:31 那条是 @ 确认消息，如果出现在名单里要先确认能否排除。
-  - 2026-10-20 Space 上线变更单草案：`docs/2026-10-20-space-sync-rollout-change-sheet.md`。它列出 4 个待 Ivy 决定的问题（谁读 Space、首期范围、原文保留期、作者对应），以及前置代码 C1–C3：展示关闭时不露出 Space 评论观点和动态、Space 来源 90 天到期、预览命令支持 Space。Space 来源目前没有设置原文到期时间。
+  - 2026-10-20 Space 上线变更单草案：`docs/2026-10-20-space-sync-rollout-change-sheet.md`。Ivy 同日决定：
+    - 首期由 Ivy 把 Smart Listing 页面存成 Markdown 发来，由我转换导入；页面有重要更新就要再发一次。
+    - Space 原文长期保留，每次更新都保留历史版本。现有代码已是这样：同内容不重复存，新内容记为新版本。
+    - 评论首期不接：Ivy 常让 ChatGPT bot 评论，作者难分辨，等有评论的页面再看样子决定。
+    - 前置代码为 C1（Markdown 转 envelope）和 C2（预览命令支持 Space）。
+  - 待 Ivy 决定：飞书原文是否也改成长期保留。现在标记 90 天到期，最早约 12-20；脱敏只在手动运行保留期命令时执行。Ivy 的原则是公司要形成长期记忆。
   - 生产 DB 在容器内的路径是 `/app/data/bridge.sqlite`（宿主机 `/opt/feishu-codex/data`）。只读核查可以用 `docker exec … node` 加 better-sqlite3 的 `readonly` + `query_only`，不需要宿主机装 sqlite3。
 
 - 2026-10-19 Ivy 确认工作地图白板的取舍规则。
