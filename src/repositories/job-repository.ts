@@ -429,17 +429,25 @@ export class JobRepository {
     assertLeaseMutation(result.changes, job.key);
   }
 
-  retryFounderStream(job: FounderDurableJob, now: Date, failure?: { stage: string; code: string }): void {
+  /**
+   * Codex rate limiting (HTTP 429) clears in minutes, not seconds, so those retries wait 15 then 30 minutes
+   * instead of 30 seconds; the status is kept as a number only, and a later non-429 failure drops it.
+   */
+  retryFounderStream(job: FounderDurableJob, now: Date, failure?: { stage: string; code: string; status?: number | null }): void {
     const { kind: _kind, key: _key, leaseExpiresAt: _lease, ...payload } = job;
     const attempt = job.attempt + 1;
+    const status = failure?.status ?? null;
+    const delayMs = status === 429 ? rateLimitedRetryDelaysMs[Math.min(attempt, rateLimitedRetryDelaysMs.length) - 1]! : 30_000;
     const result = this.client.prepare(`UPDATE batch_jobs SET status=?,payload=?,updated_at=?
       WHERE stable_key=? AND status='processing' AND updated_at=? AND updated_at>?`)
       .run(attempt >= 3 ? 'failed' : 'retry', JSON.stringify({ ...payload, attempt, failureReason: 'FOUNDER_STREAM_PROCESSING_FAILED',
-          ...(failure ? { failureStage: failure.stage, failureCode: failure.code } : {}) }),
-        new Date(now.getTime() + 30_000).toISOString(), job.key, requireLease(job), now.toISOString());
+          ...(failure ? { failureStage: failure.stage, failureCode: failure.code } : {}), ...(status ? { failureStatus: status } : {}) }),
+        new Date(now.getTime() + delayMs).toISOString(), job.key, requireLease(job), now.toISOString());
     assertLeaseMutation(result.changes, job.key);
   }
 }
+
+const rateLimitedRetryDelaysMs = [15 * 60_000, 30 * 60_000] as const;
 
 interface JobRow {
   type: string;
@@ -538,7 +546,7 @@ function serializeContextJobPayload(
 function normalizeJobRow(row: JobRow): DurableJob | null {
   if(row.type==='capture_founder_attachment'){
     try{
-      const payload=JSON.parse(row.payload),allowed=['chatId','messageId','fileKey','fileName','threadId','occurredAt','authorOpenId','attempt','failureReason','failureStage','failureCode'];
+      const payload=JSON.parse(row.payload),allowed=['chatId','messageId','fileKey','fileName','threadId','occurredAt','authorOpenId','attempt','failureReason','failureStage','failureCode','failureStatus'];
       if(!isRecord(payload)||Object.keys(payload).some(k=>!allowed.includes(k))||typeof payload.chatId!=='string'||!payload.chatId.trim()||
         typeof payload.messageId!=='string'||!payload.messageId.trim()||typeof payload.fileKey!=='string'||!payload.fileKey.trim()||
         typeof payload.fileName!=='string'||!payload.fileName.trim()||typeof payload.occurredAt!=='string'||!Number.isFinite(Date.parse(payload.occurredAt))||
@@ -553,7 +561,7 @@ function normalizeJobRow(row: JobRow): DurableJob | null {
   if (row.type === 'capture_group_message' || row.type === 'analyze_founder_stream_batch') {
     try {
       const payload = JSON.parse(row.payload);
-      const allowed = ['chatId','sourceIds','threadId','windowKey','attempt','failureReason','failureStage','failureCode','since','until'];
+      const allowed = ['chatId','sourceIds','threadId','windowKey','attempt','failureReason','failureStage','failureCode','failureStatus','since','until'];
       if (!isRecord(payload) || Object.keys(payload).some(k => !allowed.includes(k)) || typeof payload.chatId !== 'string' ||
         !payload.chatId.trim() || !isStringArray(payload.sourceIds) || !payload.sourceIds.length ||
         payload.sourceIds.some(id => !id.startsWith('ctxsrc_')) || (payload.attempt !== undefined && !isRetryAttempt(payload.attempt))) return null;
@@ -567,7 +575,7 @@ function normalizeJobRow(row: JobRow): DurableJob | null {
   if (row.type === 'analyze_founder_stream_space_batch') {
     try {
       const payload = JSON.parse(row.payload);
-      const allowed = ['projectKey','sourceIds','windowKey','attempt','failureReason','failureStage','failureCode','since','until'];
+      const allowed = ['projectKey','sourceIds','windowKey','attempt','failureReason','failureStage','failureCode','failureStatus','since','until'];
       if (!isRecord(payload) || Object.keys(payload).some(k => !allowed.includes(k)) || typeof payload.projectKey !== 'string' ||
         !payload.projectKey.trim() || !isStringArray(payload.sourceIds) || !payload.sourceIds.length ||
         payload.sourceIds.some(id => !id.startsWith('ctxsrc_')) || typeof payload.since !== 'string' || typeof payload.until !== 'string' ||

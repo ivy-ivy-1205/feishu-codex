@@ -31,7 +31,7 @@ import type { CurrentTopic, TopicVersion } from '../domain/topic.js';
 import type { FeishuContextGap } from './feishu-context-sync.js';
 import { isSelfMediaProposal, projectFounderWorkMap, type FounderWorkMapClassification } from './founder-work-map-classification.js';
 import { parseFeishuAttachment } from './feishu-attachment-parser.js';
-import { classifyFounderFailure, type FounderFailureStage } from './founder-analysis-failure.js';
+import { classifyFounderFailure, codexFailureStatus, type FounderFailureStage } from './founder-analysis-failure.js';
 import { buildFounderManualQueryMessages, enqueueFounderManualQuery, isConfiguredFounder, parseFounderManualQuery } from './founder-manual-query.js';
 import { FounderWhiteboardPublishError, founderPalettes, type FounderWhiteboardArtifact } from './founder-whiteboard.js';
 import type { FounderBoardView } from './founder-board-view.js';
@@ -443,7 +443,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           saveAttachmentGap(sources,job,'ATTACHMENT_READ_FAILED',stamp);options.jobRepository.markCompleted(job,stamp)}).immediate();return 'completed' as const;}
         catch(failure){if(failure instanceof LeaseLostError)return 'lost_lease' as const;throw failure}
       }
-      try { options.jobRepository.retryFounderStream(job, now(), { stage: failureStage, code: classifyFounderFailure(error) }); } catch (failure) {
+      try { options.jobRepository.retryFounderStream(job, now(), { stage: failureStage, code: classifyFounderFailure(error), status: codexFailureStatus(error) }); } catch (failure) {
         if (failure instanceof LeaseLostError) return 'lost_lease' as const; throw failure;
       }
       return 'retry' as const;

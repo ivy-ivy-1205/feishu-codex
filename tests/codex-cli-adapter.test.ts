@@ -237,6 +237,27 @@ describe('CodexCliAdapter', () => {
       code: 'CODEX_EXECUTION_FAILED'
     });
   });
+
+  it('keeps only the HTTP status Codex reported on stderr, never the stderr text', async () => {
+    const failing = (stderr: string) => new CodexCliAdapter({
+      command: 'codex', workdir: '/tmp/aijia-codex-readonly', timeoutMs: 30_000,
+      runner: { async run(input) {
+        return input.args.join(' ') === 'login status'
+          ? { exitCode: 0, stdout: 'Logged in with ChatGPT', stderr: '' }
+          : { exitCode: 1, stdout: '', stderr };
+      } }
+    }).executeJson({ prompt: 'p', outputSchema: { type: 'object' } });
+
+    const limited = await failing('model: gpt-5.6-sol\nERROR: exceeded retry limit, last status: 429 Too Many Requests\n' +
+      'ERROR: exceeded retry limit, last status: 429 Too Many Requests\n').catch((error: unknown) => error);
+    expect(limited).toBeInstanceOf(CodexCliError);
+    expect(limited).toMatchObject({ code: 'CODEX_EXECUTION_FAILED', statusCode: 429 });
+    expect((limited as Error).message).not.toContain('exceeded');
+    expect((limited as Error).message).not.toContain('gpt-5.6');
+
+    await expect(failing('login expired')).rejects.toMatchObject({ code: 'CODEX_EXECUTION_FAILED', statusCode: null });
+    await expect(failing('ERROR: unexpected status 503 Service Unavailable')).rejects.toMatchObject({ statusCode: 503 });
+  });
 });
 
 describe('NodeCodexProcessRunner', () => {

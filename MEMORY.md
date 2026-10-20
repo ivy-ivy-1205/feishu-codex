@@ -37,7 +37,10 @@
     - worker 每条任务约 2 分钟内重试 3 次就判失败，限流时很快耗尽重试次数。可以考虑遇到 429 时退避更久。
     - 下次恢复前，先在容器里用同样参数跑一次最小 `codex exec` 探针，确认不再返回 429。
     - 13:00 UTC 再试：探针通过，两条又排了一次队，仍然 `codex_execution_failed`。第一次尝试约 100 秒后失败，之后的重试秒失败，像是大请求在 Codex 内部重试后仍被限流。最小探针不能代表真实分析请求。
-    - 适配器只记录退出码、不记录 stderr，`~/.codex/logs_2.sqlite` 也是空的，所以无法确认具体状态码。改进方向：失败时把 stderr 里的状态码（如 429）记进 failureReason；遇到 429 时退避更久。
+    - 适配器只记录退出码、不记录 stderr，`~/.codex/logs_2.sqlite` 也是空的，所以无法确认具体状态码。已在本地修好并合并，尚未上线：
+      - Codex 失败时只把 stderr 里的 HTTP 状态码记进任务 payload 的 `failureStatus`，不保存 stderr 原文；
+      - 遇到 429 时，重试间隔从 30 秒改为 15 分钟、30 分钟，仍是 3 次后判失败。
+      - 妙记处理和 context 抽取的 Codex 重试不在这次范围内。
   - 2026-10-20 Space 上线变更单草案：`docs/2026-10-20-space-sync-rollout-change-sheet.md`。Ivy 同日决定：
     - 首期由 Ivy 把 Smart Listing 页面存成 Markdown 发来，由我转换导入；页面有重要更新就要再发一次。
     - Space 原文长期保留，每次更新都保留历史版本。现有代码已是这样：同内容不重复存，新内容记为新版本。

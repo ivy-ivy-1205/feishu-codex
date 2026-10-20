@@ -24,3 +24,10 @@ export function classifyFounderFailure(error: unknown): FounderFailureCode {
   if (value.code === 'SPACE_DIGEST_OUTPUT_INVALID') return 'space_digest_invalid';
   return 'unknown';
 }
+
+/** The HTTP status a Codex execution failure reported (e.g. 429), or null; never any message text. */
+export function codexFailureStatus(error: unknown): number | null {
+  const value = error && typeof error === 'object' ? error as { code?: unknown; statusCode?: unknown } : {};
+  return value.code === 'CODEX_EXECUTION_FAILED' && typeof value.statusCode === 'number' && Number.isInteger(value.statusCode) &&
+    value.statusCode >= 100 && value.statusCode <= 599 ? value.statusCode : null;
+}
