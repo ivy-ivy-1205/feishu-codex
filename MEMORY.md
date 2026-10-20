@@ -46,7 +46,8 @@
       - 只有这两条反复 429，最小探针和其他分析都能成功，原因未明。
     - 10-19 14:46 那条在隔 15 分钟的重试中分析成功；10-20 03:31（@ 确认指令）仍返回 429，最后一次重试排在 16:39 UTC，失败也无影响。
     - 2026-10-21 按 Ivy 批准删除 candidate-1a8051d / candidate-4970909 标签、构建目录和上传包。保留运行镜像 `:local`（`8a7a3ef7`）和 5 个 rollback 镜像（6 个标签）。
-    - 根盘 86%（约 8.6G 可用）。Docker 镜像 9.7GB，其中可回收 6.4GB，主要是较早的 rollback 镜像；构建缓存 3.3GB，可回收约 0.5GB。删除较早的 rollback 镜像需要另行批准。
+    - 2026-10-21 按 Ivy 批准删除较早的 rollback 镜像：10-15 两个标签、10-19、10-20 mention-tolerance。只保留最近两个回滚点：`rollback-pre-codex-backoff-20261020T154857Z`（1a8051d）和 `rollback-pre-batch-polish-20261020T043715Z`（d3fb118）。
+      - 实际只释放约 1.5GB（根盘 86% → 84%，约 10G 可用），因为镜像层大多共用。`docker system df` 的「可回收」数字会高估，不能当成真实可释放量。
   - 2026-10-20 Space 上线变更单草案：`docs/2026-10-20-space-sync-rollout-change-sheet.md`。Ivy 同日决定：
     - 首期由 Ivy 把 Smart Listing 页面存成 Markdown 发来，由我转换导入；页面有重要更新就要再发一次。
     - Space 原文长期保留，每次更新都保留历史版本。现有代码已是这样：同内容不重复存，新内容记为新版本。
