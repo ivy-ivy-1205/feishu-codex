@@ -41,6 +41,10 @@
       - Codex 失败时只把 stderr 里的 HTTP 状态码记进任务 payload 的 `failureStatus`，不保存 stderr 原文；
       - 遇到 429 时，重试间隔从 30 秒改为 15 分钟、30 分钟，仍是 3 次后判失败。
       - 妙记处理和 context 抽取的 Codex 重试不在这次范围内。
+    - 同日上线为生产 `49709097446bbf0d4fa7ab3d3265b6631b047d42`（PR #16），回滚镜像 `rollback-pre-codex-backoff-20261020T154857Z`。canonical 现为 39。
+      - 剩下两条重跑后仍返回 429，已按新规则排到 15 分钟后重试。
+      - 只有这两条反复 429，最小探针和其他分析都能成功，原因未明。
+    - 服务器上残留：candidate-1a8051d / candidate-4970909 标签、对应构建目录和上传包。清理需要另行批准。
   - 2026-10-20 Space 上线变更单草案：`docs/2026-10-20-space-sync-rollout-change-sheet.md`。Ivy 同日决定：
     - 首期由 Ivy 把 Smart Listing 页面存成 Markdown 发来，由我转换导入；页面有重要更新就要再发一次。
     - Space 原文长期保留，每次更新都保留历史版本。现有代码已是这样：同内容不重复存，新内容记为新版本。
