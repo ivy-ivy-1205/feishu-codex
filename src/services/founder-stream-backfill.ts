@@ -58,7 +58,6 @@ export async function runFounderStreamBackfill(input: FounderStreamBackfillInput
       }, input.now);
       captured.source.metadata = { ...captured.source.metadata, parentId: message.parentId ?? null,
         edited: message.edited ?? false, deleted: message.deleted ?? false };
-      captured.source.rawTextExpiresAt = addDays(input.now, 90);
       if (!dryRun) {
         const saved = sourceRepository!.saveSource(captured.source);
         if (saved.created) {
@@ -83,8 +82,4 @@ export async function runFounderStreamBackfill(input: FounderStreamBackfillInput
     jobsEnqueued = result.created ? 1 : 0;
   }
   return { ...report, dryRun, sourcesCaptured: report.messagesStored, sourcesCreated, jobsEnqueued };
-}
-
-function addDays(value: Date, days: number): Date {
-  return new Date(value.getTime() + days * 24 * 60 * 60 * 1000);
 }

@@ -17,7 +17,7 @@ describe('founder attachment backfill',()=>{
     expect(first).toMatchObject({filesSeen:1,filesParsed:1,sourcesCreated:1,jobsEnqueued:1});
     expect(second).toMatchObject({filesSeen:1,filesParsed:1,sourcesCreated:0,jobsEnqueued:0});
     const source=sources.listSources()[0]!;expect(source).toMatchObject({sourceType:'group_message',contentText:'[附件：brief.md]\n# 目标\n保持双方认知一致\n[分享消息前后上下文]',
-      rawTextExpiresAt:'2026-12-21T00:00:00.000Z',metadata:{attachmentTitle:'brief.md',
+      rawTextExpiresAt:null,metadata:{attachmentTitle:'brief.md',
         messageId:source.externalId,sourceMessageId:'om_file'}});
     expect(JSON.stringify(sources.listSources())).not.toContain('secret_file_key');expect(JSON.stringify(jobs.list())).not.toContain('secret_file_key');db.close();
   });

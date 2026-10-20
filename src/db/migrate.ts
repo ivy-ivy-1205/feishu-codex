@@ -573,6 +573,17 @@ export function migrateDatabase(client: Database.Database): void {
   migrateTodoProjectColumns(client);
   migrateProjectAuthorityColumns(client);
   migrateContextSourceRetentionColumns(client);
+  keepRawTextLongTerm(client);
+}
+
+/**
+ * Raw source text is company memory and is kept long term (Ivy, 2026-10-20). Older code set a 90-day
+ * expiry on Feishu file text and backfilled messages; clear it so nothing still cleartext is ever redacted.
+ * Rows already redacted stay as they are.
+ */
+function keepRawTextLongTerm(client: Database.Database): void {
+  client.prepare(`UPDATE context_sources SET raw_text_expires_at = NULL
+    WHERE raw_text_expires_at IS NOT NULL AND content_state = 'cleartext'`).run();
 }
 
 function migrateContextSourceRetentionColumns(client: Database.Database): void {

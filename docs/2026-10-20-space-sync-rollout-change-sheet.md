@@ -54,6 +54,14 @@
 
 完成标准：每项先写失败测试，typecheck、build、全量测试和 `git diff --check` 全部通过，PR 合并。
 
+**进度（2026-10-21）：** C1–C3 已在本地按 TDD 完成并合并，尚未上线；typecheck、build、1065 项测试和 `git diff --check` 全部通过。
+- **C1：** 新命令 `pnpm space-sync:from-markdown --plan docs/2026-10-19-space-mapping-plan.json --project-key smart-listing --markdown <文件> --out <envelope.json>`。只输出统计，不输出正文；输出文件不覆盖已有文件，权限 600。
+  - 用 Ivy 发来的 Smart Listing 页面试过：96 段、约 1 万字，更新时间识别为 2026-10-19（UTC+8），覆盖情况标「评论未同步」。
+  - 在内存数据库里走正式导入流程也通过了。
+- **C2：** `current-founder-work-map --preview --with-space` 会按展示开关打开后的样子，把已登记页面的摘要合进地图，并单独列出每个项目页的文字，方便对照。只能用于预览。
+- **C3：** 新记录不再设到期时间。每次启动都会清掉仍是原文状态的记录上遗留的到期时间，已经脱敏的记录不变。
+- **S0 前要注意：** `import-space-sync` 导入后不会给 Space 分析排队（它没有接入任务队列）。在副本上生成页面摘要，需要另写一段隔离脚本，在副本里排队并运行一次 Space 分析。
+
 ## 上线步骤
 
 ### S0｜真实页面只读试点（不改生产）
