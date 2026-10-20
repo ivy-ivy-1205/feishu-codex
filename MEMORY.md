@@ -10,6 +10,20 @@
     - `知识库` 和 `企业微信` 的最近动态都是 10-14 的批量纠正，所以仍算活跃，约 11-13 才会自动转入长期无动态。待 Ivy 决定。
   - 服务器上传链路很慢，scp 3.6MB 会断线。改为只打包构建所需文件，用 xz 压缩（约 200KB）后经 `ssh 'cat > file'` 流式上传，再核对 SHA-256。
   - `Fontconfig error: Cannot load default config file` 是生产镜像原本就有的提示，不影响中文渲染。
+  - Ivy 对名单的决定：官网接受“长期无动态”提示；知识库标暂停、等 Jimmy 反馈；企业微信结束（尝试导出微信消息导致 Ivy 被管理员移出群，暂不研究）。由此新增规则：暂停的条目立即进入“暂停 / 长期无动态”提醒区（PR #5，`2d00845`，即新候选；P2 重做通过）。
+  - 群内纠正的格式要求：
+    - 必须回复一张最新的工作地图卡片；旧卡片上记录的版本过期后，纠正会被当成过期反馈拒绝。
+    - 单行纠正只认两种固定写法：“暂停第N项”“第N项改为已结束”。
+    - 批量纠正每行要带 `#N`，关闭只认 `close`、不认“结束”；先生成草稿，回复“确认修正 feedbackdraft_…”后才写入。
+  - 生产实时群消息分析在 10-17、10-19 12:26、10-19 14:46 三次因 `codex_execution_failed` 失败，原因未查，可能是 ChatGPT/Codex 额度问题（Ivy 本地 Codex 当时也没有额度），需要单独诊断。
+  - **P3 已完成（UTC 2026-10-19T14:54Z）：生产现在是 revision `2d00845e9376e342e7853c36e5593dac66ba4ce1`，image `sha256:8508d797…`。**
+    - 5 张 Space 新表已建、均为空；Space 仍关闭。
+    - 回滚资产：rollback 镜像 `rollback-pre-workmap-activity-20261019T145406Z`（`83d27463`）、checkpoint 和数据库备份（同时间戳，SHA-256 `162f04e0…`）。
+    - 第一次运行因队列里有任务，在停机前中止，没有造成影响。
+    - 切换方式：`docker compose -p deploy -f /opt/feishu-codex/app/deploy/docker-compose.production.yml up -d --no-build bridge`，事先把候选镜像打上 `:local` 标签，旧 app 目录改名保留、不删除。
+  - 2026-10-20 生产升级到 `d3fb1185bb3d5c6b74be0f480a71b486b0389e90`（PR #6）：飞书命令可以带 @ 机器人，也接受自然写法（编号后带条目名、附原因、写“结束”、`#N`、回复草稿“确认”）。Ivy 的要求是系统必须容错，不能规定她怎么回复。回滚镜像 `rollback-pre-mention-tolerance-20261020T035731Z`。
+  - `recover-founder-batch-correction` 只能在草稿回复还没发出时使用。在生产上直接调用写库函数会被权限策略拦截，所以已发出的草稿必须由 Ivy 在群里确认。
+  - 2026-10-20 群内验收通过：带 @ 的确认和单条纠正都已生效，知识库进入提醒区，企业微信已结束。工作地图活跃规则这次上线到此收尾。遗留的小瑕疵：批量纠正写入的当前方向标点被转成半角，暂停条目的当前方向重复了“暂停,”前缀。
   - 生产 DB 在容器内的路径是 `/app/data/bridge.sqlite`（宿主机 `/opt/feishu-codex/data`）。只读核查可以用 `docker exec … node` 加 better-sqlite3 的 `readonly` + `query_only`，不需要宿主机装 sqlite3。
 
 - 2026-10-19 Ivy 确认工作地图白板的取舍规则。
