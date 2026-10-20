@@ -73,6 +73,41 @@ describe('founder stream durable wiring', () => {
     expect(JSON.parse(payload)).toMatchObject({failureStage:'semantic_classification',failureCode:'codex_execution_failed'});
     expect(payload).not.toContain('private stderr');await h.app.close();h.db.close();
   });
+  it('records the Codex HTTP status and waits much longer before retrying a rate-limited analysis', async () => {
+    const h=harness();const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_rate_limited',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'知识库',occurredAt:start.toISOString()},start).source).source;
+    let clock=start;const minutes=(n:number)=>new Date(start.getTime()+n*60_000);
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>clock,
+      analyzer:{async analyze(){throw new CodexCliError('CODEX_EXECUTION_FAILED','Codex CLI exited with status 1.',429)}}});
+    const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[source.id],capturedAt:start});
+    const row=()=>h.db.client.prepare('SELECT status,payload,updated_at FROM batch_jobs WHERE stable_key=?').get(queued.key) as {status:string;payload:string;updated_at:string};
+    await runtime.runOnce();
+    expect(row()).toMatchObject({status:'retry',updated_at:minutes(15).toISOString()});
+    expect(JSON.parse(row().payload)).toMatchObject({attempt:1,failureStage:'topic_analysis',failureCode:'codex_execution_failed',failureStatus:429});
+    clock=minutes(14);await runtime.runOnce();expect(JSON.parse(row().payload).attempt).toBe(1);
+    clock=minutes(15);await runtime.runOnce();
+    expect(row()).toMatchObject({status:'retry',updated_at:minutes(45).toISOString()});
+    expect(JSON.parse(row().payload)).toMatchObject({attempt:2,failureStatus:429});
+    await h.app.close();h.db.close();
+  });
+  it('keeps the short retry and drops a stale HTTP status when the next failure is not rate limiting', async () => {
+    const h=harness();const source=h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId:'om_not_limited',threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text:'知识库',occurredAt:start.toISOString()},start).source).source;
+    let failure=new CodexCliError('CODEX_EXECUTION_FAILED','Codex CLI exited with status 1.',429),clock=start;
+    const runtime=createFounderStreamRuntime({client:h.db.client,jobRepository:h.jobs,
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},approvedChatIds:[chat],ivyPrivateChatId:'oc_private',now:()=>clock,
+      analyzer:{async analyze(){throw failure}}});
+    const queued=h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:[source.id],capturedAt:start});
+    const row=()=>h.db.client.prepare('SELECT status,payload,updated_at FROM batch_jobs WHERE stable_key=?').get(queued.key) as {status:string;payload:string;updated_at:string};
+    await runtime.runOnce();
+    failure=new CodexCliError('CODEX_EXECUTION_FAILED','Codex CLI exited with status 2.',null);clock=new Date(start.getTime()+15*60_000);
+    await runtime.runOnce();
+    expect(row()).toMatchObject({status:'retry',updated_at:new Date(clock.getTime()+30_000).toISOString()});
+    const payload=JSON.parse(row().payload);expect(payload).toMatchObject({attempt:2,failureCode:'codex_execution_failed'});
+    expect(payload).not.toHaveProperty('failureStatus');
+    await h.app.close();h.db.close();
+  });
   it('separates evidence preparation failures from pure topic reconciliation',async()=>{
     const h=harness();const saved=h.sources.saveSource({sourceSystem:'feishu',sourceType:'group_message',externalId:'om_bad_locator',
       logicalKey:'bad-locator',occurredAt:start.toISOString(),capturedAt:start,authors:[],locatorUri:null,contentFormat:'text/plain',

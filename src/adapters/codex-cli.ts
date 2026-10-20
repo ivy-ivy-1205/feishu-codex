@@ -113,9 +113,13 @@ export type CodexCliErrorCode =
   | 'CODEX_EXECUTION_FAILED';
 
 export class CodexCliError extends Error {
-  constructor(readonly code: CodexCliErrorCode, message: string) {
+  /** HTTP status Codex reported on stderr (e.g. 429); the stderr text itself is never kept. */
+  readonly statusCode: number | null;
+
+  constructor(readonly code: CodexCliErrorCode, message: string, statusCode: number | null = null) {
     super(message);
     this.name = 'CodexCliError';
+    this.statusCode = statusCode;
   }
 }
 
@@ -185,9 +189,11 @@ export class CodexCliAdapter {
     }
 
     if (result.exitCode !== 0) {
+      const statusCode = reportedHttpStatus(result.stderr);
       throw new CodexCliError(
         'CODEX_EXECUTION_FAILED',
-        `Codex CLI exited with status ${result.exitCode}.`
+        `Codex CLI exited with status ${result.exitCode}${statusCode ? ` (HTTP ${statusCode})` : ''}.`,
+        statusCode
       );
     }
 
@@ -247,6 +253,13 @@ function sanitizeEnv(env: Record<string, string | undefined>): Record<string, st
     Object.entries(env)
       .filter(([key, value]) => value !== undefined && !disallowedApiEnvKeys.has(key))
   ) as Record<string, string>;
+}
+
+/** The last HTTP status Codex printed, e.g. "last status: 429 Too Many Requests". */
+function reportedHttpStatus(stderr: string): number | null {
+  const matches = [...stderr.matchAll(/\bstatus:?\s+([1-5]\d\d)\b/giu)];
+  const last = matches.at(-1)?.[1];
+  return last ? Number(last) : null;
 }
 
 function isChatGptLoginStatus(stdout: string): boolean {
