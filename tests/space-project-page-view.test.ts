@@ -8,6 +8,8 @@ import { SpaceProjectDigestRepository } from '../src/repositories/space-project-
 import { SpaceSyncRepository } from '../src/repositories/space-sync-repository.js';
 import { TopicRepository } from '../src/repositories/topic-repository.js';
 import { buildFounderManualQueryMessages } from '../src/services/founder-manual-query.js';
+import { JobRepository } from '../src/repositories/job-repository.js';
+import { createFounderStreamRuntime } from '../src/services/founder-stream-worker.js';
 import { loadSpaceProjectPageView, renderSpaceProjectPageLines, spaceBoardSummary } from '../src/services/space-project-page-view.js';
 
 const at = new Date('2026-10-21T02:00:00.000Z');
@@ -94,15 +96,56 @@ describe('Space project-page block', () => {
     expect(lines).toContain('项目页摘要：最新版本摘要生成中，暂不展示旧摘要');
   });
 
+  it('stays out of every founder view until SPACE_SYNC_WORKMAP_ENABLED turns it on', () => {
+    const h = setup();
+    h.digests.saveReady({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h.page.id, pageSourceVersion: 1,
+      pageUpdatedAt: h.page.occurredAt, generatedAt: at, changeBasis: 'version_diff', digest });
+    const messages = buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'work_map' },
+      queryMessageId: 'om_map_off', chatId, approvedChatIds: [chatId], now: at });
+    const map = JSON.stringify(messages.map((m) => m.card));
+    expect(map).not.toContain('本周进展：27 Cecil Street 页面上线');
+    expect(map).not.toContain('项目页（Space');
+    expect(map).not.toContain('Space 页面');
+    const board = messages.flatMap((m) => 'boardView' in m ? m.boardView.topics : []);
+    expect(board.some((topic) => 'space' in topic)).toBe(false);
+    const progress = JSON.stringify(buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'project_progress', topicName: 'Smart Listing' },
+      queryMessageId: 'om_progress_off', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
+    expect(progress).not.toContain('当前重点：把 27 Cecil Street 买家空间做成可复用模板');
+    expect(progress).not.toContain('Space 页面');
+    const on = JSON.stringify(buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'work_map' },
+      queryMessageId: 'om_map_on', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true }).map((m) => m.card));
+    expect(on).toContain('本周进展：27 Cecil Street 页面上线');
+  });
+
+  it('follows the worker flag when a founder asks 查看工作地图 in the group', () => {
+    for (const spaceWorkMapEnabled of [false, true]) {
+      const h = setup();
+      h.digests.saveReady({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h.page.id, pageSourceVersion: 1,
+        pageUpdatedAt: h.page.occurredAt, generatedAt: at, changeBasis: 'version_diff', digest });
+      new AlignmentRepository(h.db.client).configureFounderIdentity({ founder: 'ivy', sourceSystem: 'feishu', externalAuthorId: 'ou_ivy', configuredAt: at });
+      const runtime = createFounderStreamRuntime({ client: h.db.client, jobRepository: new JobRepository(h.db.client),
+        flags: { captureEnabled: true, analysisEnabled: true, groupDeliveryEnabled: false, manualQueryEnabled: true },
+        approvedChatIds: [chatId], ivyPrivateChatId: 'oc_private', now: () => at, spaceWorkMapEnabled,
+        analyzer: { async analyze() { return { topics: [] }; } } });
+      expect(runtime.route.ingest({ header: { event_id: 'evt_q', create_time: String(at.getTime()) }, event: {
+        sender: { sender_type: 'user', sender_id: { open_id: 'ou_ivy' } }, message: { message_id: 'om_q', chat_id: chatId,
+          message_type: 'text', content: JSON.stringify({ text: '@_user_1 查看工作地图' }), create_time: String(at.getTime()) } } }))
+        .toMatchObject({ status: 'manual_query_queued' });
+      const payloads = (h.db.client.prepare('SELECT payload FROM outbox').all() as { payload: string }[]).map((row) => row.payload).join('\n');
+      expect(payloads.includes('本周进展：27 Cecil Street 页面上线')).toBe(spaceWorkMapEnabled);
+      h.db.close();
+    }
+  });
+
   it('appears in 查看工作地图 under the project card and in 查看项目进展', () => {
     const h = setup();
     h.digests.saveReady({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h.page.id, pageSourceVersion: 1,
       pageUpdatedAt: h.page.occurredAt, generatedAt: at, changeBasis: 'version_diff', digest });
     const map = JSON.stringify(buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'work_map' },
-      queryMessageId: 'om_map', chatId, approvedChatIds: [chatId], now: at }).map((m) => m.card));
+      queryMessageId: 'om_map', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true }).map((m) => m.card));
     expect(map).toContain('本周进展：27 Cecil Street 页面上线');
     const progress = JSON.stringify(buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'project_progress', topicName: 'Smart Listing' },
-      queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
+      queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card);
     expect(progress).toContain('当前重点：把 27 Cecil Street 买家空间做成可复用模板');
   });
 

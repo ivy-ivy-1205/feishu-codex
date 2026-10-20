@@ -45,8 +45,10 @@ export function isConfiguredFounder(client:Database.Database,openId:string):bool
 }
 
 export function buildFounderManualQueryMessages(input:{client:Database.Database;query:FounderManualQuery;
-  queryMessageId:string;chatId:string;approvedChatIds:readonly string[];now:Date;spaceStaleAfterMinutes?:number}):FounderManualQueryMessage[]{
-  const status=processingStatus(input.client,input.chatId);
+  queryMessageId:string;chatId:string;approvedChatIds:readonly string[];now:Date;spaceStaleAfterMinutes?:number;
+  /** SPACE_SYNC_WORKMAP_ENABLED: Space page summaries and status stay out of every founder view until this is on. */
+  spaceWorkMapEnabled?:boolean}):FounderManualQueryMessage[]{
+  const status=processingStatus(input.client,input.chatId,input.spaceWorkMapEnabled===true);
   if(input.query.kind==='work_map'){
     const result=buildWorkMap(input);
     if(result)return result.cards.map(item=>({...item,mapId:result.mapId,targetChatId:input.chatId,boardView:result.boardView,
@@ -60,7 +62,7 @@ export function buildFounderManualQueryMessages(input:{client:Database.Database;
     totalPages:cards.length,targetChatId:input.chatId,card:withProcessingStatus(card,status)}));
 }
 
-function buildProjectProgress(input:{client:Database.Database;now:Date;spaceStaleAfterMinutes?:number},name:string):Record<string,unknown>{
+function buildProjectProgress(input:{client:Database.Database;now:Date;spaceStaleAfterMinutes?:number;spaceWorkMapEnabled?:boolean},name:string):Record<string,unknown>{
   const topics=new TopicRepository(input.client).listCanonicalTopics();
   const wanted=normalize(name),matches=topics.filter(topic=>normalize(topic.displayName)===wanted);
   if(matches.length!==1)return founderCard('项目进展',[
@@ -81,7 +83,7 @@ function buildProjectProgress(input:{client:Database.Database;now:Date;spaceStal
     '当前资料没有明确标注下一步；需要结合最新项目表达确认。';
   const blockers=issues.length?issues.slice(0,6).map(issue=>`- ${founderText(issue.ivy.statement,120)} ↔ ${founderText(issue.james.statement,120)}`).join('\n'):
     '当前没有满足“双方向不同且影响行动”条件的卡点记录；这不代表没有依赖。';
-  const spacePage=loadSpaceProjectPageView(input.client,topic.id,input.now,input.spaceStaleAfterMinutes??defaultSpaceStaleAfterMinutes);
+  const spacePage=input.spaceWorkMapEnabled?loadSpaceProjectPageView(input.client,topic.id,input.now,input.spaceStaleAfterMinutes??defaultSpaceStaleAfterMinutes):null;
   return founderCard(`项目进展 · ${founderText(topic.displayName,100)}`,[
     `当前方向：${topic.outcome?founderText(topic.outcome,500):'尚未形成明确目标。'}`,
     ...(spacePage?[renderSpaceProjectPageLines(spacePage).join('\n')]:[]),
@@ -105,11 +107,12 @@ export function enqueueFounderManualQuery(client:Database.Database,messages:read
   return created;
 }
 
-function buildWorkMap(input:{client:Database.Database;chatId:string;approvedChatIds:readonly string[];now:Date;spaceStaleAfterMinutes?:number}):
+function buildWorkMap(input:{client:Database.Database;chatId:string;approvedChatIds:readonly string[];now:Date;spaceStaleAfterMinutes?:number;spaceWorkMapEnabled?:boolean}):
   {mapId:string;cards:FounderWorkMapCard[];boardView:FounderBoardView}|null {
   const topics=new TopicRepository(input.client).listCanonicalTopics();
   if(topics.length===0)return null;
   const spacePageByTopicId=new Map(topics.flatMap(topic=>{
+    if(!input.spaceWorkMapEnabled)return[];
     const view=loadSpaceProjectPageView(input.client,topic.id,input.now,input.spaceStaleAfterMinutes??defaultSpaceStaleAfterMinutes);
     return view?[[topic.id,view] as const]:[];
   }));
@@ -171,7 +174,7 @@ function buildOpenAlignment(input:{client:Database.Database}):Record<string,unkn
   return founderCard('待对齐总览',lines,open.length?'orange':'blue');
 }
 
-function processingStatus(client:Database.Database,chatId:string):string{
+function processingStatus(client:Database.Database,chatId:string,spaceWorkMapEnabled:boolean):string{
   const received=client.prepare("SELECT MAX(received_at) value FROM founder_stream_events WHERE chat_id=? AND disposition IN ('captured','skipped_media')").get(chatId) as {value:string|null};
   const rows=client.prepare("SELECT type,status,payload,updated_at FROM batch_jobs WHERE type IN ('capture_group_message','capture_founder_attachment','analyze_founder_stream_batch')")
     .all() as {type:string;status:string;payload:string;updated_at:string}[];
@@ -191,7 +194,7 @@ function processingStatus(client:Database.Database,chatId:string):string{
   const audit=latestCoverageAudit(client,chatId);
   const failureStatus=[`未补偿分析来源：${unresolvedSources.size}`,...(invalidAnalysisJobs?[`分析异常任务：${invalidAnalysisJobs}`]:[]),
     `采集失败任务：${failedCaptureJobs}`].join('；');
-  return `处理状态\n最后收到：${received.value??'尚无记录'}\n最后完成分析：${analyzedAt??'尚无完成记录'}\n最新已分析语料：${analyzedSourceAt??'尚无完成记录'}\n最后防漏复核：${audit??'尚无记录'}\n待处理：${pending}；${failureStatus}；不可读/跳过缺口：${gaps}\n“待处理为 0”只证明已入库任务没有积压；缺口会单独显示，不把未读取内容算作已覆盖。${spaceProcessingStatusLine(client)}`;
+  return `处理状态\n最后收到：${received.value??'尚无记录'}\n最后完成分析：${analyzedAt??'尚无完成记录'}\n最新已分析语料：${analyzedSourceAt??'尚无完成记录'}\n最后防漏复核：${audit??'尚无记录'}\n待处理：${pending}；${failureStatus}；不可读/跳过缺口：${gaps}\n“待处理为 0”只证明已入库任务没有积压；缺口会单独显示，不把未读取内容算作已覆盖。${spaceWorkMapEnabled?spaceProcessingStatusLine(client):''}`;
 }
 
 /** Aggregate, read-only summary over already-stored bindings/runs — never contacts Space itself. */
