@@ -35,7 +35,9 @@
     - Space 原文长期保留，每次更新都保留历史版本。现有代码已是这样：同内容不重复存，新内容记为新版本。
     - 评论首期不接：Ivy 常让 ChatGPT bot 评论，作者难分辨，等有评论的页面再看样子决定。
     - 前置代码为 C1（Markdown 转 envelope）和 C2（预览命令支持 Space）。
-  - 待 Ivy 决定：飞书原文是否也改成长期保留。现在标记 90 天到期，最早约 12-20；脱敏只在手动运行保留期命令时执行。Ivy 的原则是公司要形成长期记忆。
+  - 2026-10-20 Ivy 决定飞书原文也长期保留（变更单 D5/C3），理由是项目目标是公司长期记忆。目前文件正文和 9-21 补录的历史消息带 90 天到期，最早约 12-20；脱敏从未执行，没有原文丢失。
+  - Ivy 常在群里发 PDF、视频、音频、md 和飞书文档。现有代码只提取 md/txt/html/docx/xlsx 的文字，PDF、语音和飞书文档内容都只记缺口。是否补上，待 Ivy 决定。
+  - Ivy 的 Smart Listing 页面 Markdown 在 `~/Downloads/AiJia Smart Listing 与买家空间项目总览.md`，页首写着「更新于 2026 年 10 月 19 日」，页面没有评论。不要复制进仓库。
   - 生产 DB 在容器内的路径是 `/app/data/bridge.sqlite`（宿主机 `/opt/feishu-codex/data`）。只读核查可以用 `docker exec … node` 加 better-sqlite3 的 `readonly` + `query_only`，不需要宿主机装 sqlite3。
 
 - 2026-10-19 Ivy 确认工作地图白板的取舍规则。
