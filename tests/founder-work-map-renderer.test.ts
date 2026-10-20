@@ -205,7 +205,7 @@ describe('founder work map cards', () => {
     const body = JSON.stringify(page!.card);
     expect(body).not.toContain('agent：已更新配套信息');
     expect(body).not.toContain('来源：待补充');
-    expect(body).toContain('项目页（Space · 页面更新于 2026-09-19T11:00:00.000Z');
+    expect(body).toContain('项目页（Space · 页面更新于 09-19');
   });
 
   it('moves dormant topics into a numbered 长期无动态 section at the end of the text card', () => {

@@ -11,6 +11,8 @@ import { buildFounderManualQueryMessages } from '../src/services/founder-manual-
 import { JobRepository } from '../src/repositories/job-repository.js';
 import { createFounderStreamRuntime } from '../src/services/founder-stream-worker.js';
 import { loadSpaceProjectPageView, renderSpaceProjectPageLines, spaceBoardSummary } from '../src/services/space-project-page-view.js';
+import { buildSpaceMarkdownEnvelope } from '../src/services/space-markdown-envelope.js';
+import { ingestSpaceSyncEnvelope } from '../src/services/space-sync-ingestion.js';
 
 const at = new Date('2026-10-21T02:00:00.000Z');
 const chatId = 'oc_a84d5b6ca478220d0a37964b50776edb';
@@ -57,7 +59,7 @@ describe('Space project-page block', () => {
     h.comment('m1', 'u_ivy', 'open'); h.comment('m2', 'u_james', 'open'); h.comment('m3', 'agent', 'open'); h.comment('m4', 'u_ivy', 'resolved');
     const lines = renderSpaceProjectPageLines(loadSpaceProjectPageView(h.db.client, h.topic.id, at, 30)!);
     expect(lines).toEqual([
-      '项目页（Space · 页面更新于 2026-10-21T01:00:00.000Z · 同步于 2026-10-21T02:00:00.000Z）',
+      '项目页（Space · 页面更新于 10-21 · 同步于 10-21 10:00）',
       '本周进展：27 Cecil Street 页面上线；补齐户型图',
       '今日：补齐周边配套',
       '当前重点：把 27 Cecil Street 买家空间做成可复用模板',
@@ -164,7 +166,7 @@ describe('Space project-page block', () => {
     expect(nextDay.some((line) => line.startsWith('今日'))).toBe(false);
     // 2026-10-27 is the following week.
     const nextWeek = renderSpaceProjectPageLines(loadSpaceProjectPageView(h.db.client, h.topic.id, new Date('2026-10-27T02:00:00.000Z'), 100_000)!);
-    expect(nextWeek).toContain('本周页面无更新；上次更新的进展（2026-10-21T02:00:00.000Z）：27 Cecil Street 页面上线；补齐户型图');
+    expect(nextWeek).toContain('本周页面无更新；上次更新的进展（10-21）：27 Cecil Street 页面上线；补齐户型图');
     expect(nextWeek.some((line) => line.startsWith('本周进展'))).toBe(false);
   });
 
@@ -201,5 +203,30 @@ describe('Space project-page block', () => {
       pageUpdatedAt: h2.page.occurredAt, generatedAt: at, changeBasis: 'first_snapshot', digest: { ...digest, todayProgress: [] } });
     expect(spaceBoardSummary(loadSpaceProjectPageView(h2.db.client, h2.topic.id, at, 1440)!).weekLine)
       .toBe('页面记载：27 Cecil Street 页面上线；补齐户型图');
+  });
+  it('shows Beijing dates and says plainly which part a Markdown import did not cover', () => {
+    const h = setup();
+    const synced = new Date('2026-10-20T16:54:24.994Z');
+    ingestSpaceSyncEnvelope(buildSpaceMarkdownEnvelope({ markdown: '更新于 2026 年 10 月 19 日。页面', projectKey: 'smart-listing',
+      page: { pageId: 'page_1', url: 'https://chatgpt.com/space/page_1' }, title: 'Smart Listing', capturedAt: synced }),
+    { client: h.db.client, spaceSyncRepository: new SpaceSyncRepository(h.db.client), contextSourceRepository: new ContextSourceRepository(h.db.client),
+      limits: { maxBlocks: 500, maxComments: 2000 }, now: () => synced });
+    const lines = renderSpaceProjectPageLines(loadSpaceProjectPageView(h.db.client, h.topic.id, synced, 24 * 60)!);
+    expect(lines[0]).toBe('项目页（Space · 页面更新于 10-19 · 同步于 10-21 00:54）');
+    expect(lines).toContain('同步缺口：评论未同步（本次只导入了页面正文），评论里的看法暂未计入');
+    expect(lines.join('\n')).not.toMatch(/\d{4}-\d{2}-\d{2}T/u);
+  });
+
+  it('names an unknown page date and falls back to plain wording when the gap codes are not stored', () => {
+    const h = setup();
+    const synced = new Date('2026-10-21T02:00:00.000Z');
+    ingestSpaceSyncEnvelope(buildSpaceMarkdownEnvelope({ markdown: '页面', projectKey: 'smart-listing',
+      page: { pageId: 'page_1', url: 'https://chatgpt.com/space/page_1' }, title: 'Smart Listing', capturedAt: synced }),
+    { client: h.db.client, spaceSyncRepository: new SpaceSyncRepository(h.db.client), contextSourceRepository: new ContextSourceRepository(h.db.client),
+      limits: { maxBlocks: 500, maxComments: 2000 }, now: () => synced });
+    const view = loadSpaceProjectPageView(h.db.client, h.topic.id, synced, 24 * 60)!;
+    expect(renderSpaceProjectPageLines(view)).toContain('同步缺口：评论未同步（本次只导入了页面正文），评论里的看法暂未计入；页面更新时间未知');
+    const legacy = { ...view, syncGaps: undefined, freshness: { ...view.freshness, coverageIncomplete: true, gapCount: 2 } };
+    expect(renderSpaceProjectPageLines(legacy)).toContain('同步缺口：有 2 处内容未同步，未同步的部分不计入进展');
   });
 });
