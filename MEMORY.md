@@ -29,7 +29,13 @@
     - `SPACE_SYNC_WORKMAP_ENABLED` 现在控制所有 Space 展示（工作地图上的页面摘要与本周进展、查看项目进展、处理状态里的 Space 行），默认关闭。
     - 仍未覆盖：如果开了 Space 分析、但没开工作地图展示，Space 评论分析出的观点仍可能作为条目观点或来源出现。Space 上线变更单里应把分析和展示一起打开，或者另行过滤。
   - 2026-10-20 已清理 11b7651/2d00845/d3fb118 三个旧候选的镜像标签、构建目录和上传包；保留当前镜像、全部 rollback 镜像、备份、checkpoint 和切换脚本。同日按 Ivy 批准删除 `/opt/feishu-codex/uploads` 中 7–8 月的 67 个历史上传包和一次性脚本（Phase 1C–1E，共 16MB，无 cron/systemd/挂载引用），并执行 `docker builder prune -f`，释放 645MB 构建缓存。剩下的 1.57GB 缓存被现有镜像共用，不能单独删。服务器根盘仍是 83%（约 11G 可用），主要占用是镜像本身。9–10 月的上传文件保留。
-  - 失败的分析（10-17、10-19 12:26、10-19 14:46）：Ivy 告诉我 Codex 额度已恢复后，由我在服务器上用 `recover-founder-job-failures`（先 `--preview` 看名单，再用 recovery id `--apply` 重新排队）恢复。Bridge 会用服务器本地的 Codex CLI 和 Ivy 的账号重新分析，Ivy 不需要在 Codex 里手动跑。10-20 03:31 那条是 @ 确认消息，如果出现在名单里要先确认能否排除。
+  - 2026-10-20 Ivy 说 Codex 额度已恢复后，用 `recover-founder-job-failures` 恢复失败的分析：
+    - 恢复前备份 `/opt/feishu-codex/backups/bridge-pre-job-recovery-20261020T075433Z.sqlite`。
+    - 10-17 和 10-19 12:26 已分析成功，08:44 新进来的一批 11 条也成功了。
+    - 10-19 14:46（27 字）和 10-20 03:31（@ 确认指令）仍失败。原因是服务器 Codex 返回 `429 Too Many Requests`：每次只跑成一两条就被限流，最小探针也一样。
+    - 工具只能整批恢复，03:31 那条无法单独排除；它只是确认指令，重新分析无害。
+    - worker 每条任务约 2 分钟内重试 3 次就判失败，限流时很快耗尽重试次数。可以考虑遇到 429 时退避更久。
+    - 下次恢复前，先在容器里用同样参数跑一次最小 `codex exec` 探针，确认不再返回 429。
   - 2026-10-20 Space 上线变更单草案：`docs/2026-10-20-space-sync-rollout-change-sheet.md`。Ivy 同日决定：
     - 首期由 Ivy 把 Smart Listing 页面存成 Markdown 发来，由我转换导入；页面有重要更新就要再发一次。
     - Space 原文长期保留，每次更新都保留历史版本。现有代码已是这样：同内容不重复存，新内容记为新版本。
