@@ -21,6 +21,8 @@
     - 回滚资产：rollback 镜像 `rollback-pre-workmap-activity-20261019T145406Z`（`83d27463`）、checkpoint 和数据库备份（同时间戳，SHA-256 `162f04e0…`）。
     - 第一次运行因队列里有任务，在停机前中止，没有造成影响。
     - 切换方式：`docker compose -p deploy -f /opt/feishu-codex/app/deploy/docker-compose.production.yml up -d --no-build bridge`，事先把候选镜像打上 `:local` 标签，旧 app 目录改名保留、不删除。
+  - 2026-10-20 生产升级到 `d3fb1185bb3d5c6b74be0f480a71b486b0389e90`（PR #6）：飞书命令可以带 @ 机器人，也接受自然写法（编号后带条目名、附原因、写“结束”、`#N`、回复草稿“确认”）。Ivy 的要求是系统必须容错，不能规定她怎么回复。回滚镜像 `rollback-pre-mention-tolerance-20261020T035731Z`。
+  - `recover-founder-batch-correction` 只能在草稿回复还没发出时使用。在生产上直接调用写库函数会被权限策略拦截，所以已发出的草稿必须由 Ivy 在群里确认。
   - 生产 DB 在容器内的路径是 `/app/data/bridge.sqlite`（宿主机 `/opt/feishu-codex/data`）。只读核查可以用 `docker exec … node` 加 better-sqlite3 的 `readonly` + `query_only`，不需要宿主机装 sqlite3。
 
 - 2026-10-19 Ivy 确认工作地图白板的取舍规则。
