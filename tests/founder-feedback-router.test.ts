@@ -251,6 +251,28 @@ describe('founder feedback routing', () => {
     expect(stageOf(4)).toBeUndefined();
     h.db.client.close();
   });
+  it('keeps the founder\'s own punctuation in batch outcomes and does not repeat the stage word', () => {
+    const h = feedbackHarness();
+    const text = ['@_user_1 #2 暂停，等待 Jimmy 反馈', '#3 第一期 Killara 篇已发布；系列继续制作，下一期选题待定',
+      '#4 改为已结束：已经尝试过多种方式，暂不研究'].join('\n');
+    expect(routeFounderFeedback({ ...h.input, text }, h.dependencies).kind).toBe('drafted');
+    const operations = JSON.parse((h.db.client.prepare('SELECT operations_json FROM founder_feedback_drafts').get() as { operations_json: string }).operations_json);
+    const op = (number: number) => operations.find((operation: { topic?: { id: string } }) => operation.topic?.id === h.topicAt(number).id);
+    expect(op(2)).toMatchObject({ stage: 'paused', outcome: '等待 Jimmy 反馈' });
+    expect(op(3)).toMatchObject({ outcome: '第一期 Killara 篇已发布；系列继续制作，下一期选题待定' });
+    expect(op(3).stage).toBeUndefined();
+    expect(op(4)).toMatchObject({ stage: 'closed', outcome: '已经尝试过多种方式，暂不研究' });
+    h.db.client.close();
+  });
+  it('keeps the previous outcome when a batch line only says 暂停', () => {
+    const h = feedbackHarness();
+    expect(routeFounderFeedback({ ...h.input, text: '#2 暂停\n#3 第一期已发布' }, h.dependencies).kind).toBe('drafted');
+    const operations = JSON.parse((h.db.client.prepare('SELECT operations_json FROM founder_feedback_drafts').get() as { operations_json: string }).operations_json);
+    const paused = operations.find((operation: { topic?: { id: string } }) => operation.topic?.id === h.topicAt(2).id);
+    expect(paused).toMatchObject({ stage: 'paused' });
+    expect(paused.outcome).toBeUndefined();
+    h.db.client.close();
+  });
   it('does not accept a pending card or a delivered row without delivered_at', () => {
     for (const delivered of [false, true]) {
       const h = feedbackHarness(4, delivered);
