@@ -4,6 +4,8 @@ import { applyTopicCorrection, findFeedbackReplay, founderFeedbackInputSchema, s
   type FounderFeedbackDecision, type FounderFeedbackDependencies, type TopicCorrection } from './topic-correction-service.js';
 import type { TopicStage } from '../domain/topic.js';
 import { confirmFounderBatchCorrection, draftFounderBatchCorrection } from './founder-batch-correction.js';
+import { founderCommandText } from './founder-command-text.js';
+import { TopicRepository } from '../repositories/topic-repository.js';
 
 export type { FounderFeedbackDecision, FounderFeedbackDependencies } from './topic-correction-service.js';
 
@@ -17,16 +19,23 @@ export function routeFounderFeedback(raw: unknown, dependencies: FounderFeedback
     return { kind: 'reject', reason: 'unknown_founder' };
   }
   const replay = findFeedbackReplay(input, dependencies.client); if (replay) return replay;
-  const confirmation=input.text.normalize('NFKC').trim().match(/^确认修正\s+(feedbackdraft_[a-f0-9]{32})$/u);
-  if(confirmation)return confirmFounderBatchCorrection(input,confirmation[1]!,dependencies);
+  const text = founderCommandText(input.text), outbox = new OutboxRepository(dependencies.client);
+  // A draft is confirmed by its id, or by a plain 确认 replying to the message that proposed it; never by a bare 确认.
+  const confirmation = text.match(/^确认(?:修正)?\s*(feedbackdraft_[a-f0-9]{32})?$/u);
+  const draftId = confirmation ? confirmation[1] ?? (input.replyTo ? outbox.findDeliveredFeedbackDraftId(input.chatId, input.replyTo) : null) : null;
+  if (draftId) return confirmFounderBatchCorrection(input, draftId, dependencies);
   if (!input.replyTo) return { kind: 'clarify', reason: 'missing_reply_context', text: '请在对应工作地图或对齐问题卡片下回复，方便确认你指的是哪件事。' };
-  const binding = new OutboxRepository(dependencies.client).findDeliveredFounderMessage(input.chatId, input.replyTo);
+  const binding = outbox.findDeliveredFounderMessage(input.chatId, input.replyTo);
   if (!binding) return { kind: 'reject', reason: 'unrelated_message' };
-  const text = input.text.normalize('NFKC').trim().replace(/[。!！]$/u, '');
   let correction: TopicCorrection | null = null;
   if (binding.kind === 'founder_work_map') {
     const batch=draftFounderBatchCorrection(input,binding,dependencies);if(batch)return batch;
-    correction = parseTopicCorrection(text, binding);
+    const names = new Map(new TopicRepository(dependencies.client).listCurrentTopics().map((topic) => [topic.id, topic.displayName]));
+    // Match on normalized text but keep a written reason in the founder's own punctuation.
+    const original = founderCommandText(input.text, false);
+    const verbatim = (value: string) => { const tail = original.slice(original.length - value.length);
+      return tail.normalize('NFKC') === value ? tail : value; };
+    correction = parseTopicCorrection(text, binding, (id) => names.get(id), verbatim);
   }
   else {
     const issue = new AlignmentIssueRepository(dependencies.client).get(binding.issueId);
@@ -52,7 +61,13 @@ function isExplicitSupportWithdrawal(text: string): boolean {
     /^(?:我)?(?:不同意|不赞成|不再支持|不再同意|不要|不能|不应)(?:按.+(?:推进|执行|实施|处理|做)|[^，,;；]{0,80}(?:方案|提案|决定|观点))$/u.test(text);
 }
 
-function parseTopicCorrection(text: string, binding: FounderWorkMapMessage): TopicCorrection | null {
+/**
+ * One numbered item per message. Founders write naturally, so the item's own name may be echoed after the
+ * number and a short reason may follow a pause or close; anything naming another item or asking a question
+ * stays a clarification.
+ */
+function parseTopicCorrection(text: string, binding: FounderWorkMapMessage, nameOf: (id: string) => string | undefined,
+  verbatim: (value: string) => string = (value) => value): TopicCorrection | null {
   const refs = binding.itemRefs.filter((item) => item.kind === 'topic');
   const ref = (number: string | undefined) => {
     const item = number ? refs.find((r) => r.displayedNumber === Number(number)) : refs.length === 1 ? refs[0] : undefined;
@@ -60,20 +75,37 @@ function parseTopicCorrection(text: string, binding: FounderWorkMapMessage): Top
   };
   const merge = text.match(/^(?:第\s*)?([1-9]\d*)\s*(?:项)?\s*(?:和|与|、)\s*(?:第\s*)?([1-9]\d*)\s*(?:项)?\s*是同一个(?:项目|话题)$/u);
   if (merge) { const a = ref(merge[1]), b = ref(merge[2]); return a && b && a.id !== b.id ? { kind: 'merge_topics', topics: [a, b] } : null; }
-  const single = text.match(/^(?:(?:第\s*)?([1-9]\d*)\s*项\s*|这个)(.+)$/u);
-  if (single) {
-    const target = ref(single[1]); if (!target) return null;
-    const command = single[2]!;
-    if (/^(?:只是想法[，,]?\s*(?:还不是项目)?|只是想法)$/u.test(command)) return { kind: 'reclassify_stage', topic: target, stage: 'idea' };
-    const stage = command.match(/^改为(想法|探索中|候选项目|正在推进|已结束)$/u)?.[1];
-    const stages: Record<string, TopicStage> = { 想法: 'idea', 探索中: 'exploring', 候选项目: 'project_candidate', 正在推进: 'active_project', 已结束: 'closed' };
-    if (stage) return { kind: 'reclassify_stage', topic: target, stage: stages[stage]! };
-    const rename = command.match(/^改名为\s*(.{1,80})$/u)?.[1]?.trim();
-    if (rename) return { kind: 'rename_topic', topic: target, name: rename };
-    const split = command.match(/^拆分为\s*(.{1,80}?)\s+和\s+(.{1,80})$/u);
-    if (split && split[1]!.trim() !== split[2]!.trim()) return { kind: 'split_topic', topic: target, names: [split[1]!.trim(), split[2]!.trim()] };
+  const separators = /^[\s·|｜:：，,、;；-]+/u;
+  const withoutName = (rest: string, id: string) => {
+    let value = rest.replace(separators, '');
+    const name = nameOf(id)?.trim();
+    if (name && value.startsWith(name)) value = value.slice(name.length);
+    return value.replace(separators, '').trim();
+  };
+  const ambiguous = (value: string) => /(?:第\s*\d+\s*项|#\s*\d+|^[和与及]|[?？]|吗$)/u.test(value);
+  const pauseFirst = text.match(/^暂停\s*(?:第\s*|#\s*)?([1-9]\d*)\s*项?([\s\S]*)$/u);
+  if (pauseFirst) {
+    const target = ref(pauseFirst[1]); if (!target) return null;
+    const reason = withoutName(pauseFirst[2]!, target.id);
+    if (ambiguous(reason)) return null;
+    return { kind: 'pause_topic', topic: target, ...(reason ? { outcome: verbatim(reason).slice(0, 800) } : {}) };
   }
-  const pause = text.match(/^暂停(?:第\s*)?([1-9]\d*)\s*项$/u);
-  const target = pause ? ref(pause[1]) : null;
-  return target ? { kind: 'pause_topic', topic: target } : null;
+  const single = text.match(/^(?:(?:第\s*)?([1-9]\d*)\s*项|#\s*([1-9]\d*)|这个)([\s\S]+)$/u);
+  if (!single) return null;
+  const target = ref(single[1] ?? single[2]); if (!target) return null;
+  const command = withoutName(single[3]!, target.id);
+  if (/^(?:只是想法[，,]?\s*(?:还不是项目)?|只是想法)$/u.test(command)) return { kind: 'reclassify_stage', topic: target, stage: 'idea' };
+  const stage = command.match(/^改为(想法|探索中|候选项目|正在推进)$/u)?.[1];
+  const stages: Record<string, TopicStage> = { 想法: 'idea', 探索中: 'exploring', 候选项目: 'project_candidate', 正在推进: 'active_project' };
+  if (stage) return { kind: 'reclassify_stage', topic: target, stage: stages[stage]! };
+  const rename = command.match(/^改名为\s*(.{1,80})$/u)?.[1]?.trim();
+  if (rename) return { kind: 'rename_topic', topic: target, name: rename };
+  const split = command.match(/^拆分为\s*(.{1,80}?)\s+和\s+(.{1,80})$/u);
+  if (split && split[1]!.trim() !== split[2]!.trim()) return { kind: 'split_topic', topic: target, names: [split[1]!.trim(), split[2]!.trim()] };
+  if (ambiguous(command)) return null;
+  const close = command.match(/^(?:(?:改为|标注为|标为|设为)\s*)?已?(?:结束|关闭)(?:[，,。；;:：\s]+([\s\S]+))?$/u);
+  if (close) return { kind: 'reclassify_stage', topic: target, stage: 'closed', ...(close[1]?.trim() ? { outcome: verbatim(close[1].trim()).slice(0, 800) } : {}) };
+  const pause = command.match(/^(?:(?:改为|标注为|标为|设为)\s*)?暂停(?:[，,。；;:：\s]+([\s\S]+))?$/u);
+  if (pause) return { kind: 'pause_topic', topic: target, ...(pause[1]?.trim() ? { outcome: verbatim(pause[1].trim()).slice(0, 800) } : {}) };
+  return null;
 }

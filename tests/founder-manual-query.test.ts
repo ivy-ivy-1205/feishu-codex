@@ -32,6 +32,10 @@ describe('founder manual queries',()=>{
     expect(parseFounderManualQuery('查看对齐: AI 选房经验与知识库')).toEqual({kind:'topic_alignment',topicName:'AI 选房经验与知识库'});
     expect(parseFounderManualQuery('查看待对齐')).toEqual({kind:'open_alignment'});
     expect(parseFounderManualQuery('请查看工作地图')).toBeNull();
+    // Mentioning the bot is the natural way to ask; the placeholder and a trailing full stop are ignored.
+    expect(parseFounderManualQuery('@_user_1 查看工作地图')).toEqual({kind:'work_map'});
+    expect(parseFounderManualQuery('@_user_1 查看工作地图。')).toEqual({kind:'work_map'});
+    expect(parseFounderManualQuery('@_user_1 查看对齐：Smart Listing')).toEqual({kind:'topic_alignment',topicName:'Smart Listing'});
     expect(parseFounderManualQuery('查看对齐：')).toBeNull();
     expect(parseFounderManualQuery('查看项目进展：')).toBeNull();
   });
@@ -44,6 +48,7 @@ describe('founder manual queries',()=>{
       approvedChatIds:[chatId],ivyPrivateChatId:'oc_private',now:()=>at,
       analyzer:{async analyze(){return{topics:[]}}}});
     expect(runtime.route.ingest(event('查看工作地图','ou_james','om_james_query'))).toMatchObject({status:'manual_query_queued'});
+    expect(runtime.route.ingest(event('@_user_1 查看工作地图','ou_james','om_james_mention'))).toMatchObject({status:'manual_query_queued'});
     db.close();
   });
 

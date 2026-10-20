@@ -24,9 +24,9 @@ const issueRef = z.object({ id: z.string().min(1), expectedStatus: z.literal('as
 export const topicCorrectionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('merge_topics'), topics: z.array(topicRef).min(2).max(12) }).strict(),
   z.object({ kind: z.literal('split_topic'), topic: topicRef, names: z.array(z.string().trim().min(1).max(80)).min(2).max(6) }).strict(),
-  z.object({ kind: z.literal('reclassify_stage'), topic: topicRef, stage: topicStageSchema }).strict(),
+  z.object({ kind: z.literal('reclassify_stage'), topic: topicRef, stage: topicStageSchema, outcome: z.string().trim().min(1).max(800).optional() }).strict(),
   z.object({ kind: z.literal('rename_topic'), topic: topicRef, name: z.string().trim().min(1).max(80) }).strict(),
-  z.object({ kind: z.literal('pause_topic'), topic: topicRef }).strict(),
+  z.object({ kind: z.literal('pause_topic'), topic: topicRef, outcome: z.string().trim().min(1).max(800).optional() }).strict(),
   z.object({ kind: z.literal('dismiss_alignment'), issue: issueRef }).strict(),
   z.object({ kind: z.literal('resolve_alignment'), issue: issueRef, statement: z.string().trim().min(1).max(1000),
     speechAct: z.enum(['decision_proposal', 'explicit_agreement', 'explicit_disagreement']) }).strict()
@@ -93,7 +93,7 @@ export function applyTopicCorrection(rawInput: FounderFeedbackInput, rawCorrecti
         locator: { ...captured.messageLocator, threadId: typeof source.metadata.threadId === 'string' ? source.metadata.threadId : null,
           sourceVersion: source.sourceVersion, contentHash: source.contentHash },
         evidenceLevel: 'primary_statement', capturedAt: now }).evidence;
-      const append = (t: CurrentTopic, changes: Partial<Pick<CurrentTopic, 'displayName' | 'stage'>> = {}) => topics.appendVersion({
+      const append = (t: CurrentTopic, changes: Partial<Pick<CurrentTopic, 'displayName' | 'stage' | 'outcome'>> = {}) => topics.appendVersion({
         topicId: t.id, expectedVersion: t.currentVersion, displayName: t.displayName, stage: t.stage, outcome: t.outcome,
         rationale: `群内人工纠正：${correction.kind}`, evidenceIds: [...t.evidenceIds, evidence.id], changedAt: now, ...changes
       });
@@ -110,8 +110,8 @@ export function applyTopicCorrection(rawInput: FounderFeedbackInput, rawCorrecti
           topics.addRelation({ fromTopicId: child.id, toTopicId: parent.id, relationType: 'split_from', rationale: '群内明确拆分', createdAt: now });
         }
       } else if (correction.kind === 'rename_topic') append(targets[0]!, { displayName: correction.name });
-      else if (correction.kind === 'reclassify_stage') append(targets[0]!, { stage: correction.stage });
-      else if (correction.kind === 'pause_topic') append(targets[0]!, { stage: 'paused' });
+      else if (correction.kind === 'reclassify_stage') append(targets[0]!, { stage: correction.stage, ...(correction.outcome ? { outcome: correction.outcome } : {}) });
+      else if (correction.kind === 'pause_topic') append(targets[0]!, { stage: 'paused', ...(correction.outcome ? { outcome: correction.outcome } : {}) });
       else if (issue) {
         let closeStatus: 'resolved' | 'dismissed' | null = correction.kind === 'dismiss_alignment' ? 'dismissed' : null;
         if (correction.kind === 'resolve_alignment') {
