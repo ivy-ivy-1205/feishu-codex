@@ -10,6 +10,7 @@ import { computeSpaceFreshness, type SpaceFreshnessSummary } from './space-sync-
 import { founderCard, founderText } from './founder-card.js';
 import type { FounderWorkMapCard } from './founder-work-map-renderer.js';
 import type { FounderBoardView } from './founder-board-view.js';
+import { founderCommandText } from './founder-command-text.js';
 
 const defaultSpaceStaleAfterMinutes = 24 * 60;
 
@@ -30,7 +31,7 @@ export type FounderManualQueryMessage=FounderManualCardQueryMessage|(FounderWork
 const baselineSince='2026-08-31T00:00:00.000Z';
 
 export function parseFounderManualQuery(value:string):FounderManualQuery|null{
-  const text=value.normalize('NFKC').trim();
+  const text=founderCommandText(value);
   if(text==='查看工作地图')return{kind:'work_map'};
   if(text==='查看待对齐'||text==='查看分歧')return{kind:'open_alignment'};
   const progress=/^查看项目进展\s*[:：]\s*(.{1,100})$/u.exec(text);

@@ -178,6 +178,79 @@ describe('founder feedback routing', () => {
     expect(h.db.client.prepare('SELECT count(*) AS n FROM founder_feedback_corrections').get()).toEqual({ n: 0 });
     h.db.client.close();
   });
+  it('accepts single-item corrections that mention the bot, echo the item name or end with punctuation', () => {
+    const h = feedbackHarness();
+    const route = (messageId: string, text: string) => routeFounderFeedback({ ...h.input, messageId, text }, h.dependencies);
+    expect(route('om_a', `@_user_1 暂停第3项${h.topicAt(3).displayName}`)).toMatchObject({ kind: 'corrected', correctionKind: 'pause_topic' });
+    expect(h.topicAt(3).stage).toBe('paused');
+    expect(route('om_b', '@_user_1 第4项改为已结束。')).toMatchObject({ kind: 'corrected', correctionKind: 'reclassify_stage' });
+    expect(h.topicAt(4).stage).toBe('closed');
+    expect(route('om_c', `第2项 ${h.topicAt(2).displayName} 已结束`)).toMatchObject({ kind: 'corrected', correctionKind: 'reclassify_stage' });
+    expect(h.topicAt(2).stage).toBe('closed');
+    expect(route('om_d', '#1 暂停')).toMatchObject({ kind: 'corrected', correctionKind: 'pause_topic' });
+    expect(h.topicAt(1).stage).toBe('paused');
+    h.db.client.close();
+  });
+  it('keeps a reason written after a single-item pause or close as the current direction', () => {
+    const h = feedbackHarness();
+    expect(routeFounderFeedback({ ...h.input, messageId: 'om_r1', text: '@_user_1 暂停第3项，等 Jimmy 回复后再说' }, h.dependencies))
+      .toMatchObject({ kind: 'corrected', correctionKind: 'pause_topic' });
+    expect(h.topicAt(3)).toMatchObject({ stage: 'paused', outcome: '等 Jimmy 回复后再说' });
+    expect(routeFounderFeedback({ ...h.input, messageId: 'om_r2', text: '第4项改为已结束：已经尝试过多种方式，暂不研究' }, h.dependencies))
+      .toMatchObject({ kind: 'corrected', correctionKind: 'reclassify_stage' });
+    expect(h.topicAt(4)).toMatchObject({ stage: 'closed', outcome: '已经尝试过多种方式，暂不研究' });
+    h.db.client.close();
+  });
+  it('still asks for clarification when the words name another item or ask a question', () => {
+    const h = feedbackHarness();
+    for (const [messageId, text] of [['om_x', '暂停第3项和第4项'], ['om_y', '第2项结束了吗'], ['om_z', '暂停第3项？']]) {
+      expect(routeFounderFeedback({ ...h.input, messageId, text }, h.dependencies)).toMatchObject({ kind: 'clarify' });
+    }
+    expect(h.topics.listCurrentTopics().every((topic) => topic.stage === 'active_project')).toBe(true);
+    h.db.client.close();
+  });
+  it('confirms a batch draft through a mention, trailing punctuation or a plain 确认 reply to the draft message', () => {
+    const batch = '#2 暂停，等待 Jimmy 反馈\n#3 第一期已发布，系列继续制作';
+    const deliverDraftReply = (h: ReturnType<typeof feedbackHarness>, draftId: string, messageId: string) => {
+      h.db.client.prepare(`INSERT INTO outbox(id,destination,payload,idempotency_key,status,created_at,delivered_at,delivered_message_id)
+        VALUES(?,?,?,?,'delivered',?,?,?)`).run(`fb_${messageId}`, h.input.chatId, JSON.stringify({ kind: 'founder_feedback',
+        targetChatId: h.input.chatId, text: `已整理为 2 项修正草稿，尚未写入。确认无误后回复“确认修正 ${draftId}”` }),
+        `fb_${messageId}`, h.input.occurredAt, h.input.occurredAt, messageId);
+    };
+    for (const confirm of ['mention', 'reply'] as const) {
+      const h = feedbackHarness();
+      const draft = routeFounderFeedback({ ...h.input, text: batch }, h.dependencies);
+      if (draft.kind !== 'drafted') throw new Error('expected draft');
+      deliverDraftReply(h, draft.draftId, 'om_draft_reply');
+      const text = confirm === 'mention' ? `@_user_1 确认修正 ${draft.draftId}。` : '@_user_1 确认';
+      const replyTo = confirm === 'mention' ? null : 'om_draft_reply';
+      expect(routeFounderFeedback({ ...h.input, messageId: 'om_confirm', replyTo, text }, h.dependencies))
+        .toMatchObject({ kind: 'corrected', correctionKind: 'batch_correction', status: 'applied' });
+      expect(h.topicAt(2).stage).toBe('paused');
+      h.db.client.close();
+    }
+  });
+  it('does not treat a bare 确认 as consent unless it replies to a pending draft message', () => {
+    const h = feedbackHarness();
+    const draft = routeFounderFeedback({ ...h.input, text: '#2 暂停\n#3 第一期已发布' }, h.dependencies);
+    if (draft.kind !== 'drafted') throw new Error('expected draft');
+    expect(routeFounderFeedback({ ...h.input, messageId: 'om_bare', replyTo: null, text: '确认' }, h.dependencies).kind).not.toBe('corrected');
+    expect(routeFounderFeedback({ ...h.input, messageId: 'om_map_reply', replyTo: 'om_map', text: '确认' }, h.dependencies)).toMatchObject({ kind: 'clarify' });
+    expect(h.db.client.prepare('SELECT status FROM founder_feedback_drafts').get()).toEqual({ status: 'pending' });
+    h.db.client.close();
+  });
+  it('closes an item in a batch when a line explicitly changes it to 结束', () => {
+    const h = feedbackHarness();
+    const text = ['#2 企业微信接入 → 结束', '#3 改为已结束，已经尝试过多种方式', '#4 第一期 Killara 篇已发布，系列继续制作'].join('\n');
+    const draft = routeFounderFeedback({ ...h.input, text }, h.dependencies);
+    expect(draft.kind).toBe('drafted');
+    const operations = JSON.parse((h.db.client.prepare('SELECT operations_json FROM founder_feedback_drafts').get() as { operations_json: string }).operations_json);
+    const stageOf = (number: number) => operations.find((operation: { topic?: { id: string } }) => operation.topic?.id === h.topicAt(number).id)?.stage;
+    expect(stageOf(2)).toBe('closed');
+    expect(stageOf(3)).toBe('closed');
+    expect(stageOf(4)).toBeUndefined();
+    h.db.client.close();
+  });
   it('does not accept a pending card or a delivered row without delivered_at', () => {
     for (const delivered of [false, true]) {
       const h = feedbackHarness(4, delivered);

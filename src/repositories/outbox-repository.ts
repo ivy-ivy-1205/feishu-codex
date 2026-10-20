@@ -89,6 +89,19 @@ export class OutboxRepository {
     }).immediate();
   }
 
+  /** The pending batch draft a delivered feedback message asked the founder to confirm, if that message is one. */
+  findDeliveredFeedbackDraftId(chatId: string, messageId: string): string | null {
+    const row = this.client.prepare(`SELECT payload FROM outbox WHERE destination = ? AND delivered_message_id = ?
+      AND status = 'delivered' AND delivered_at IS NOT NULL`).get(chatId, messageId) as { payload: string } | undefined;
+    if (!row) return null;
+    try {
+      const message = JSON.parse(row.payload) as { kind?: unknown; targetChatId?: unknown; text?: unknown };
+      if (message.kind !== 'founder_feedback' || message.targetChatId !== chatId || typeof message.text !== 'string') return null;
+      const ids = [...new Set(message.text.match(/feedbackdraft_[a-f0-9]{32}/gu) ?? [])];
+      return ids.length === 1 ? ids[0]! : null;
+    } catch { return null; }
+  }
+
   findDeliveredFounderMessage(chatId: string, messageId: string): FounderWorkMapMessage | AlignmentQuestionMessage | null {
     const row = this.client.prepare(`SELECT payload FROM outbox WHERE destination = ? AND delivered_message_id = ?
       AND status = 'delivered' AND delivered_at IS NOT NULL`).get(chatId, messageId) as { payload: string } | undefined;

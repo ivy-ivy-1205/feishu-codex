@@ -13,6 +13,7 @@ import { AlignmentRepository } from '../repositories/alignment-repository.js';
 import { AlignmentIssueRepository } from '../repositories/alignment-issue-repository.js';
 import { AlignmentNotificationPolicy } from './alignment-notification-policy.js';
 import { routeFounderFeedback } from './founder-feedback-router.js';
+import { founderCommandText } from './founder-command-text.js';
 import { captureGroupMessageSource } from './group-message-source-capture.js';
 import { DurableJobConsumer } from './job-consumer.js';
 import { reconcileTopics } from './topic-reconciler.js';
@@ -102,7 +103,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
     return options.client.transaction(() => {
       if (options.client.prepare('SELECT 1 FROM founder_stream_events WHERE event_id=? OR message_id=?').get(header.event_id, message.message_id)) return { status: 'duplicate' };
       const stamp = now(), text = messageText(message.message_type, message.content);
-      const manualQuery=text?parseFounderManualQuery(text):null;
+      const commandText=text?founderCommandText(text):null;
+      const manualQuery=commandText?parseFounderManualQuery(commandText):null;
       if(manualQuery){
         if(!options.flags.manualQueryEnabled)return{status:'ignored',reason:'manual_query_disabled'};
         const openId=event.sender.sender_id.open_id??'';
@@ -137,8 +139,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
       }
       if (disposition === 'captured') {
         const replyTo = message.parent_id || message.root_id || null;
-        const correctionLike = /^(?:第\s*\d+\s*项(?:改|只是|拆)|\d+\s*(?:和|与)\s*\d+\s*是同一个|这个(?:只是想法|改名为|改为|拆分为)|暂停\s*\d+\s*项|确认修正\s+feedbackdraft_[a-f0-9]{32})/u.test(text!);
-        if ((replyTo && outbox.findDeliveredFounderMessage(chatId, replyTo)) || correctionLike) {
+        const correctionLike = /^(?:第\s*\d+\s*项|#\s*\d+|\d+\s*(?:和|与)\s*\d+\s*是同一个|这个(?:只是想法|改名为|改为|拆分为)|暂停\s*(?:第\s*|#\s*)?\d+|确认(?:修正)?\s*feedbackdraft_[a-f0-9]{32})/u.test(commandText!);
+        if ((replyTo && (outbox.findDeliveredFounderMessage(chatId, replyTo) || outbox.findDeliveredFeedbackDraftId(chatId, replyTo))) || correctionLike) {
           decision = routeFounderFeedback({ chatId, openId: event.sender.sender_id.open_id ?? '', messageId: message.message_id,
             replyTo, text, occurredAt: at, threadId: message.thread_id || null, rootId: message.root_id || null },
           { client: options.client, approvedChatIds: [chatId], now });

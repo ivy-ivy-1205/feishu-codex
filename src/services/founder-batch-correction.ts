@@ -155,9 +155,11 @@ export function parseFounderBatchCorrection(text:string,binding:FounderWorkMapMe
       let stage:typeof topic.stage|undefined;
       if(/(?:不能作为独立项目|只是观点|只是想法)/u.test(line))stage='idea';
       else if(/(?:暂停|暂且不再投入精力)/u.test(line))stage='paused';
-      else if(/(?:close|已完成未发布|标注为已完成)/iu.test(line))stage='closed';
+      else if(/(?:close|已完成未发布|标注为已完成|(?:改为|标注为|标为|设为)\s*已?(?:结束|关闭)|(?:→|->|>)\s*已?(?:结束|关闭))/iu.test(line))stage='closed';
       else if(/(?:继续保持|正在实现|当前正在)/u.test(line)&&topic.stage!=='active_project')stage='active_project';
-      const outcome=cleanOutcome(line,numbers[0]!,topic.displayName);
+      let outcome=cleanOutcome(line,numbers[0]!,topic.displayName);
+      // "→ 结束" / "改为已结束，原因…" only change the stage; keep any reason after it as the current direction.
+      if(stage==='closed')outcome=outcome.replace(/^(?:(?:→|->|>)\s*)?(?:(?:改为|标注为|标为|设为)\s*)?已?(?:结束|关闭)[，,。；;:：\s]*/u,'').trim();
       if(stage===topic.stage&&/(?:已经是|无需重复)/u.test(line))continue;
       if(!stage&&!outcome)continue;
       operations.push({kind:'update_topic',topic:ref,...(stage?{stage}:{}),...(outcome?{outcome}:{})});continue;
