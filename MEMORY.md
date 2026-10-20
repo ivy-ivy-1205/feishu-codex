@@ -55,6 +55,8 @@
     - 前置代码为 C1（Markdown 转 envelope）和 C2（预览命令支持 Space）。
   - 2026-10-20 Ivy 决定飞书原文也长期保留（变更单 D5/C3），理由是项目目标是公司长期记忆。目前文件正文和 9-21 补录的历史消息带 90 天到期，最早约 12-20；脱敏从未执行，没有原文丢失。
   - 2026-10-21 C1–C3 已在本地合并，未上线。详见变更单「进度」。C3 会在启动迁移时清掉遗留的到期时间，下次发版后生效。S0 还需要一段隔离脚本，在副本里排队并运行 Space 分析，因为 `import-space-sync` 本身不排队。
+  - 2026-10-21 S0 完成（Ivy 批准）：在生产副本上登记、导入、分析 Smart Listing 页面，只多出 Smart Listing 的项目页区块，其余地图不变。待修：文字卡时间显示为 UTC 原始格式，缺口提示未说明是评论未同步。副本已删除，`candidate-dabd10d` 镜像仍在服务器。
+    - 在容器里跑放在 `/work` 下的脚本时，用 `createRequire('/app/package.json')` 加载 better-sqlite3，否则找不到包。
   - Ivy 常在群里发 PDF、视频、音频、md 和飞书文档。现有代码只提取 md/txt/html/docx/xlsx 的文字，PDF、语音和飞书文档内容都只记缺口。是否补上，待 Ivy 决定。
   - Ivy 的 Smart Listing 页面 Markdown 在 `~/Downloads/AiJia Smart Listing 与买家空间项目总览.md`，页首写着「更新于 2026 年 10 月 19 日」，页面没有评论。不要复制进仓库。
   - 生产 DB 在容器内的路径是 `/app/data/bridge.sqlite`（宿主机 `/opt/feishu-codex/data`）。只读核查可以用 `docker exec … node` 加 better-sqlite3 的 `readonly` + `query_only`，不需要宿主机装 sqlite3。
