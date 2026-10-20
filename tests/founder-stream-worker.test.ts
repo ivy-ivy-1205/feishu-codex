@@ -424,7 +424,7 @@ describe('founder stream durable wiring', () => {
     expect(diag.body).not.toContain('om_media');expect(JSON.stringify(sources)).not.toContain('secret_file_key');
     await h.runtime.runOnce();expect(h.calls()).toBe(0);expect(h.jobs.list()).toHaveLength(0);await h.app.close();h.db.close();
   });
-  it('queues a file resource during webhook handling and persists only parsed text with 90-day retention in the worker',async()=>{
+  it('queues a file resource during webhook handling and persists only parsed text, kept long term, in the worker',async()=>{
     let reads=0;const h=harness(undefined,{async read(input){reads++;expect(input).toEqual({messageId:'om_file',fileKey:'secret_file_key',fileName:'brief.md'});
       return{body:Buffer.from('# 方案\n合伙人对齐室'),mimeType:'text/markdown'}}});
     const payload=event('om_file');Object.assign(payload.event.message,{message_type:'file',content:JSON.stringify({file_key:'secret_file_key',file_name:'brief.md'})});
@@ -434,7 +434,7 @@ describe('founder stream durable wiring', () => {
     await h.runtime.runOnce();expect(reads).toBe(1);
     const parsed=h.sources.listSources().find(source=>source.externalId==='om_file:file');
     expect(parsed).toMatchObject({sourceType:'group_message',contentText:'# 方案\n合伙人对齐室',availabilityStatus:'available',
-      rawTextExpiresAt:'2026-12-20T00:00:00.000Z',metadata:{chatId:chat,messageId:'om_file:file',sourceMessageId:'om_file',
+      rawTextExpiresAt:null,metadata:{chatId:chat,messageId:'om_file:file',sourceMessageId:'om_file',
         messageType:'file',senderType:'user',attachmentTitle:'brief.md'}});
     expect(JSON.stringify(h.sources.listSources())).not.toContain('secret_file_key');
     expect(h.jobs.list()).toEqual(expect.arrayContaining([expect.objectContaining({kind:'capture_group_message',sourceIds:[parsed!.id]})]));

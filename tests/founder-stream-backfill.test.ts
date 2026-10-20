@@ -129,9 +129,8 @@ describe('founder stream backfill', () => {
     expect(requests.every((value) => (value as { since: Date }).since.toISOString() === since)).toBe(true);
     const sources = deps.sourceRepository.listSources().filter((source) => source.sourceType === 'group_message');
     expect(sources).toHaveLength(5);
-    expect(sources.map((source) => source.rawTextExpiresAt)).toEqual(
-      Array(5).fill('2026-12-19T00:00:00.000Z')
-    );
+    // Raw text is kept long term (Ivy, 2026-10-20): no expiry is set.
+    expect(sources.map((source) => source.rawTextExpiresAt)).toEqual(Array(5).fill(null));
     expect(deps.sourceRepository.listSources()
       .filter((source) => source.sourceType.startsWith('feishu_sync_'))
       .every((source) => source.rawTextExpiresAt === null)).toBe(true);

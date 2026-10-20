@@ -23,6 +23,7 @@
     "context-source-retention:migrate": "node --import tsx src/cli/migrate-context-source-retention.ts",
     "context-source:retention": "node --import tsx src/cli/context-source-retention.ts",
     "space-sync:import": "node --import tsx src/cli/import-space-sync.ts",
+    "space-sync:from-markdown": "node --import tsx src/cli/space-markdown-envelope.ts",
     "dev": "node --env-file=.env --import tsx src/server.ts"
   },
   "dependencies": {
