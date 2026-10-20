@@ -127,6 +127,7 @@ const founderWhiteboardGateway = config.founderStream.whiteboardEnabled
 const founderRuntime = createFounderStreamRuntime({
   client: database.client, jobRepository, flags: config.founderStream,
   approvedChatIds: config.projectContext.approvedChatIds, ivyPrivateChatId: config.feishu.ivyPrivateChatId,
+  spaceWorkMapEnabled: config.spaceSync.workmapEnabled,
   intervalMs: config.worker.pollIntervalMs, delivery: feishuIntegration.delivery,attachmentReader:feishuIntegration.attachmentReader,
   ...(config.founderStream.dailyReconciliationEnabled?{dailyReconciliation:{
     bootstrapSince:config.founderStream.reconciliationBootstrapSince!,async run(window:{since:string;until:string;now:Date}){

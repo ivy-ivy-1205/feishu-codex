@@ -140,7 +140,7 @@ export function parseFounderBatchCorrection(text:string,binding:FounderWorkMapMe
   const byNumber=new Map(topicRefs.map(ref=>[ref.displayedNumber,{id:ref.id,expectedVersion:ref.expectedVersion}]));
   const repository=new TopicRepository(client),current=repository.listCurrentTopics(),byId=new Map(current.map(topic=>[topic.id,topic]));
   const operations:FounderBatchOperation[]=[];
-  for(const rawLine of text.normalize('NFKC').split(/\n+/u)){const line=rawLine.trim();if(!line)continue;
+  for(const original of text.split(/\n+/u)){const line=original.normalize('NFKC').trim();if(!line)continue;
     const numbers=[...line.matchAll(/#\s*([1-9]\d*)/gu)].map(match=>Number(match[1]));
     const refs=[...new Map(numbers.flatMap(number=>{const ref=byNumber.get(number);return ref?[[ref.id,ref] as const]:[]})).values()];
     if(refs.length>=2&&/(?:同一个|同一工作流)/u.test(line)){
@@ -158,8 +158,12 @@ export function parseFounderBatchCorrection(text:string,binding:FounderWorkMapMe
       else if(/(?:close|已完成未发布|标注为已完成|(?:改为|标注为|标为|设为)\s*已?(?:结束|关闭)|(?:→|->|>)\s*已?(?:结束|关闭))/iu.test(line))stage='closed';
       else if(/(?:继续保持|正在实现|当前正在)/u.test(line)&&topic.stage!=='active_project')stage='active_project';
       let outcome=cleanOutcome(line,numbers[0]!,topic.displayName);
-      // "→ 结束" / "改为已结束，原因…" only change the stage; keep any reason after it as the current direction.
+      // "→ 结束" / "暂停，原因…" only change the stage; keep any reason after it as the current direction.
       if(stage==='closed')outcome=outcome.replace(/^(?:(?:→|->|>)\s*)?(?:(?:改为|标注为|标为|设为)\s*)?已?(?:结束|关闭)[，,。；;:：\s]*/u,'').trim();
+      if(stage==='paused')outcome=outcome.replace(/^(?:(?:→|->|>)\s*)?(?:(?:改为|标注为|标为|设为)\s*)?暂停[，,。；;:：\s]*/u,'').trim();
+      // Matching runs on NFKC text; the stored direction keeps the founder's own full-width punctuation.
+      const tail=original.trim().slice(original.trim().length-outcome.length);
+      if(outcome&&tail.normalize('NFKC')===outcome)outcome=tail;
       if(stage===topic.stage&&/(?:已经是|无需重复)/u.test(line))continue;
       if(!stage&&!outcome)continue;
       operations.push({kind:'update_topic',topic:ref,...(stage?{stage}:{}),...(outcome?{outcome}:{})});continue;

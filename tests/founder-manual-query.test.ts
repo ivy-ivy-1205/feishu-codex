@@ -375,7 +375,7 @@ describe('founder manual queries',()=>{
     new FounderTopicProjectBindingRepository(db.client).recordHumanConfirmed({ topicId: topic.id, projectKey: 'smart_listing',
       role: 'canonical', at });
     const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'work_map' },
-      queryMessageId: 'om_space_freshness', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
+      queryMessageId: 'om_space_freshness', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card);
     expect(body).toContain('项目页（Space');
     expect(body).toContain('Space 内容可能滞后');
     db.close();
@@ -395,7 +395,7 @@ describe('founder manual queries',()=>{
     new FounderTopicProjectBindingRepository(db.client).recordHumanConfirmed({ topicId: topic.id, projectKey: 'smart_listing',
       role: 'canonical', at });
     const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'work_map' },
-      queryMessageId: 'om_space_fresh_day', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
+      queryMessageId: 'om_space_fresh_day', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card);
     expect(body).toContain('项目页（Space');
     expect(body).not.toContain('可能滞后');
     db.close();
@@ -420,7 +420,7 @@ describe('founder manual queries',()=>{
       pageUrl: 'https://chatgpt.com/space/page_1', managementMode: 'space', syncMode: 'manual', createdAt: at });
     spaceSync.recordSuccessfulSync({ bindingId: binding.id, pageSequence: 1, pageUpdatedAt: at.toISOString(), syncedAt: at });
     const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'project_progress',
-      topicName: 'whatever' }, queryMessageId: 'om_global_space', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
+      topicName: 'whatever' }, queryMessageId: 'om_global_space', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card);
     expect(body).toContain('Space 页面');
     expect(body).toContain('已绑定项目：1');
   });

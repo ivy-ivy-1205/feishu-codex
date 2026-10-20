@@ -59,6 +59,8 @@ export interface FounderStreamOptions {
   spaceDigestAnalyzer?: SpaceProjectDigestAnalyzer;
   /** SPACE_SYNC_STALE_AFTER_MINUTES; the manual-query default (24h) applies when omitted. */
   spaceStaleAfterMinutes?: number;
+  /** SPACE_SYNC_WORKMAP_ENABLED; Space page content stays out of founder views until it is true. */
+  spaceWorkMapEnabled?: boolean;
   policy?: Pick<AlignmentNotificationPolicy, 'reconcilePending'>;
   dailyReconciliation?:{bootstrapSince:string;run(input:{since:string;until:string;now:Date}):Promise<unknown>};
   whiteboardPublisher?:{publish(input:{title:string;chatId:string;cards:readonly Record<string,unknown>[];
@@ -111,7 +113,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         if(event.sender.sender_type!=='user'||!isConfiguredFounder(options.client,openId))return{status:'rejected',reason:'founder_identity_required'};
         const messages=buildFounderManualQueryMessages({client:options.client,query:manualQuery,queryMessageId:message.message_id,
           chatId,approvedChatIds:options.approvedChatIds,now:stamp,
-          ...(options.spaceStaleAfterMinutes?{spaceStaleAfterMinutes:options.spaceStaleAfterMinutes}:{})});
+          ...(options.spaceStaleAfterMinutes?{spaceStaleAfterMinutes:options.spaceStaleAfterMinutes}:{}),
+          spaceWorkMapEnabled:options.spaceWorkMapEnabled===true});
         enqueueFounderManualQuery(options.client,messages,stamp);
         options.client.prepare('INSERT INTO founder_stream_events(event_id,message_id,chat_id,disposition,received_at) VALUES(?,?,?,?,?)')
           .run(header.event_id,message.message_id,chatId,'feedback',stamp.toISOString());
