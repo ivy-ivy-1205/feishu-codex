@@ -124,6 +124,17 @@
   - Space 分析任务 0，待发消息 0。写入前后工作地图预览的哈希一致（`5e48c53a…`）。
 - **服务器上的临时文件：** 已删除。候选镜像 `candidate-dabd10d`、`candidate-9ce5afa` 及对应构建目录、上传包仍在，清理需要另行批准。
 
+### 开关接线（2026-10-21，本地已合并，未上线）
+
+- 新增 `src/composition/space-sync.ts`，`server.ts` 改为通过它接上三个 Space 开关：
+  - `SPACE_SYNC_ANALYSIS_ENABLED`：worker 开始处理 Space 分析任务，导入后会自动排队分析；Codex 适配器在飞书分析或 Space 分析任一打开时创建。
+  - `SPACE_SYNC_INGEST_ENABLED`：注册带签名的接收入口。
+    - 密钥文件在任何后台任务启动前读取。少于 32 个字符或文件缺失时，服务直接拒绝启动。
+  - `SPACE_SYNC_STALE_AFTER_MINUTES` 也传给了 worker。
+- 三个开关都关闭时，行为与之前完全一致：没有接收入口，不读密钥，worker 不处理 Space 任务。
+- TDD 新增 4 个测试；typecheck、build、1071 项测试和 `git diff --check` 全部通过。
+- **S2 的实际做法：** 先发版带上这次接线，再只打开 `SPACE_SYNC_ANALYSIS_ENABLED`。分析开关的前提是接收开关也打开（配置会校验），所以还要生成 HMAC 密钥文件；接收入口只能从本机访问，上线时核对 nginx 没有转发它。
+
 ### S2｜开启分析（生产，影子阶段）
 
 1. 等 Codex 额度恢复后，设置 `SPACE_SYNC_ANALYSIS_ENABLED=true`，重启 Bridge。

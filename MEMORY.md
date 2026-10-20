@@ -58,7 +58,7 @@
   - 2026-10-21 S0 完成（Ivy 批准）：在生产副本上登记、导入、分析 Smart Listing 页面，只多出 Smart Listing 的项目页区块，其余地图不变。Ivy 确认摘要准确。文字卡时间和缺口说明两处显示问题已在本地修好（北京时间日期，写明「评论未同步」），未上线。副本已删除，`candidate-dabd10d` 镜像仍在服务器。
     - 在容器里跑放在 `/work` 下的脚本时，用 `createRequire('/app/package.json')` 加载 better-sqlite3，否则找不到包。
   - 2026-10-21 S1 完成：生产 `9ce5afa`（回滚镜像 `rollback-pre-space-s1-20261020T172100Z`）。Smart Listing 已登记，页面已导入（来源 376 条），三个 Space 开关仍关闭，工作地图不变。
-    - **重要：** `server.ts` 没有接上 `SPACE_SYNC_INGEST_ENABLED`（接收入口不会注册）和 `SPACE_SYNC_ANALYSIS_ENABLED`（worker 不会跑 Space 分析）。S2 之前必须先接线。
+    - `server.ts` 原先没有接上 `SPACE_SYNC_INGEST_ENABLED` 和 `SPACE_SYNC_ANALYSIS_ENABLED`。2026-10-21 已在本地接好并合并（`src/composition/space-sync.ts`），未上线；开关关闭时行为不变。S2 要先发版带上这次接线。
     - 服务器宿主机没有 node；脚本里解析 JSON 要用 `docker exec -i <容器> node`。`docker cp` 拷进容器的文件属于 root，要用 `docker exec -u 0` 改权限后，容器里的 node 用户才能读。
   - Ivy 常在群里发 PDF、视频、音频、md 和飞书文档。现有代码只提取 md/txt/html/docx/xlsx 的文字，PDF、语音和飞书文档内容都只记缺口。是否补上，待 Ivy 决定。
   - Ivy 的 Smart Listing 页面 Markdown 在 `~/Downloads/AiJia Smart Listing 与买家空间项目总览.md`，页首写着「更新于 2026 年 10 月 19 日」，页面没有评论。不要复制进仓库。
