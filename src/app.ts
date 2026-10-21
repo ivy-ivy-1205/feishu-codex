@@ -61,6 +61,7 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
   const app = fastify({
     logger: safeLoggerOptions(dependencies.logger)
   });
+  guardInternalRoutes(app);
 
   registerHealthRoutes(app, dependencies.readiness);
   registerFeishuEventRoutes(app, {
@@ -100,6 +101,20 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
   }
 
   return app;
+}
+
+const proxyHeaders = ['x-forwarded-for', 'x-real-ip', 'forwarded'] as const;
+
+/**
+ * `/internal/*` routes are for callers on the server itself. nginx forwards every path on the
+ * public host and always adds X-Forwarded-For, so a relayed request gets the plain not-found
+ * reply. Matching on the route pattern, not the raw URL, also covers percent-encoded paths.
+ */
+function guardInternalRoutes(app: FastifyInstance): void {
+  app.addHook('onRequest', async (request, reply) => {
+    if (!request.routeOptions.url?.startsWith('/internal/')) return;
+    if (proxyHeaders.some((header) => request.headers[header] !== undefined)) return reply.callNotFound();
+  });
 }
 
 function safeLoggerOptions(logger: LoggerOption): LoggerOption {
