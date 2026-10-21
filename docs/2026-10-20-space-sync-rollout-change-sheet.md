@@ -145,7 +145,7 @@
 - 摘要的每一条都能在原文里逐字找到；
 - 工作地图、项目进展和处理状态的输出与开启前完全一致。
 
-### S2 进度（2026-10-21，发版完成，开关未开）
+### S2 进度（2026-10-21，接收已开，分析待修复后再开）
 
 - **发版：** 生产 `128038a`（镜像 `sha256:3f1eab26…`），回滚镜像 `rollback-pre-space-s2-code-20261021T045213Z`，停机备份 `backups/bridge-pre-space-s2-code-20261021T045213Z.sqlite`。
   - 隔离预检：话题 39，文字卡和摘要与生产完全一致，副本未被改动。
@@ -153,9 +153,25 @@
 - **停在打开开关之前：** nginx 把 `feishu-codex.aijia.ai` 下的所有路径（包括 `/internal/`）都转发给 Bridge。
   - 公网 POST `/internal/space-sync/v1/ingest` 现在返回的是 Bridge 自己的 404，说明请求已经到了应用。
   - 打开接收开关后，这个入口在公网就能访问（虽然有签名校验）。不满足「只在本机」的门禁，所以没有生成密钥，也没有改 `bridge.env`。
-- **待 Ivy 选择堵住方式：**
-  - A. 在应用里拒绝经 nginx 转来的 `/internal/*` 请求（带 `X-Forwarded-For` 头即返回 404）。本地 TDD 后再发一版，不碰共享的 nginx。
-  - B. 在 nginx 的 `feishu-codex.aijia.ai` 443 段加 `location /internal/ { return 404; }`。配置文件是 RealAgent 仓库的 `/root/RealAgentAI_cc/nginx.conf`，与 RealAgent 生产站点共用，需要 `nginx -t` 后热加载。
+- **Ivy 选了 A（2026-10-21）：** 应用拒绝经 nginx 转来的 `/internal/*` 请求，不碰共享的 nginx（PR #26）。
+  - 只要带 `X-Forwarded-For`、`X-Real-IP` 或 `Forwarded` 头，就返回和「路由不存在」一样的 404。
+  - 按匹配到的路由判断，所以 `/%69nternal/...` 这类编码路径也挡得住。
+  - 另一个方案 B 是改 nginx：配置在 RealAgent 仓库的 `/root/RealAgentAI_cc/nginx.conf`，与 RealAgent 生产站点共用。没有采用。
+- **发版 `421ff0c`：** 回滚镜像 `rollback-pre-space-s2-guard-20261021T071203Z`。隔离预检和切换门禁全部通过，结果与上面相同。
+- **打开开关（07:16 UTC）：**
+  - 密钥文件 `secrets/space-sync-hmac`：root:lighthouse 640，容器可读，值没有输出过。
+  - `bridge.env` 加了三行（INGEST、ANALYSIS、HMAC_SECRET_FILE）。备份在 `secrets/bridge.env.pre-space-s2-20261021T071643Z`，库备份在 `backups/bridge-pre-space-s2-flags-20261021T071643Z.sqlite`。
+  - 本机不带签名请求返回 400。带转发头的请求、公网请求、公网编码路径都返回 404。公网 `/health` 200。
+  - Codex 用 ChatGPT 登录，无 API Key，群发仍为关。重启前后工作地图哈希相同（`88c8efcc…`，39/2/18）。
+- **摘要门禁未通过：** Smart Listing 的 Space 分析任务一直没处理。
+  - 原因：`src/composition/worker-runtime.ts` 的分发只列了三种飞书任务。共用 worker 领到 Space 任务后立刻报 `Unsupported job`，11 分钟租期一到又重新领，一直循环。
+  - 影响：没调用 Codex，没写任何结果，工作地图不变。
+  - S0 在副本里直接调用 founder runtime，没经过这层分发，所以当时没发现。
+- **处理（07:46 UTC）：**
+  - 只关回分析开关，接收开关和密钥保留（它们的门禁都通过了，和 S1 原计划一致）。`bridge.env` 备份在 `secrets/bridge.env.pre-analysis-off-20261021T074629Z`。
+  - 关回后健康 200/200，本机 400、公网 404，工作地图哈希与开启前相同。
+  - 那条任务停在 processing。下次打开分析开关后会被重新领取，不会重复排队。
+- **修复：** 分发补上 Space 任务，TDD 新增 1 个测试，1076 项全过（PR 待合并）。合并、发版、重新打开分析开关需要 Ivy 批准。
 
 ### S3｜开启展示（生产）
 
