@@ -80,6 +80,8 @@
     - 超级个体页面挂到已有条目「超级个体与超级团队」，放到 B 线下。暂不放 C 线；「飞书合伙人对齐」由 Ivy 之后在飞书更新。
     - 页面没写更新日期时，按 Ivy 的意思用创建日期：超级个体取页面最早事件 2026-10-09。Family First 用页面写的 10-20（悉尼）。
     - 已在某条线下的条目，登记时不会被移到别的线，整份登记会被拒绝。
+    - 2026-10-21 已上线并接入：生产 `345d65d`，回滚镜像 `rollback-pre-space-more-pages-20261021T150107Z`。三个页面的摘要都已生成，工作地图条目 40，显示 20。
+    - 页面最后更新早于本周时，唯一的版本会被当作本周的对比基准，显示「本周页面无进展类更新」，不会显示「首次同步」。
     - 两个页面的 Markdown 在 `~/Downloads/`（「Family First 项目大本营与看房展示.md」「超级个体到超级团队 视频项目与候选口播.md」），不要复制进仓库。
   - Ivy 的 Smart Listing 页面 Markdown 在 `~/Downloads/AiJia Smart Listing 与买家空间项目总览.md`，页首写着「更新于 2026 年 10 月 19 日」，页面没有评论。不要复制进仓库。
   - 生产 DB 在容器内的路径是 `/app/data/bridge.sqlite`（宿主机 `/opt/feishu-codex/data`）。只读核查可以用 `docker exec … node` 加 better-sqlite3 的 `readonly` + `query_only`，不需要宿主机装 sqlite3。
