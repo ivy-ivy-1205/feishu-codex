@@ -145,6 +145,18 @@
 - 摘要的每一条都能在原文里逐字找到；
 - 工作地图、项目进展和处理状态的输出与开启前完全一致。
 
+### S2 进度（2026-10-21，发版完成，开关未开）
+
+- **发版：** 生产 `128038a`（镜像 `sha256:3f1eab26…`），回滚镜像 `rollback-pre-space-s2-code-20261021T045213Z`，停机备份 `backups/bridge-pre-space-s2-code-20261021T045213Z.sqlite`。
+  - 隔离预检：话题 39，文字卡和摘要与生产完全一致，副本未被改动。
+  - 切换门禁全部通过：健康 200/200，Codex 用 ChatGPT 登录，无 API Key，开关未变，来源 376/376 且无到期时间，地图 39/2/18（当前 10、提醒 2、已结束 6）。
+- **停在打开开关之前：** nginx 把 `feishu-codex.aijia.ai` 下的所有路径（包括 `/internal/`）都转发给 Bridge。
+  - 公网 POST `/internal/space-sync/v1/ingest` 现在返回的是 Bridge 自己的 404，说明请求已经到了应用。
+  - 打开接收开关后，这个入口在公网就能访问（虽然有签名校验）。不满足「只在本机」的门禁，所以没有生成密钥，也没有改 `bridge.env`。
+- **待 Ivy 选择堵住方式：**
+  - A. 在应用里拒绝经 nginx 转来的 `/internal/*` 请求（带 `X-Forwarded-For` 头即返回 404）。本地 TDD 后再发一版，不碰共享的 nginx。
+  - B. 在 nginx 的 `feishu-codex.aijia.ai` 443 段加 `location /internal/ { return 404; }`。配置文件是 RealAgent 仓库的 `/root/RealAgentAI_cc/nginx.conf`，与 RealAgent 生产站点共用，需要 `nginx -t` 后热加载。
+
 ### S3｜开启展示（生产）
 
 1. 设置 `SPACE_SYNC_WORKMAP_ENABLED=true`，重启 Bridge。
