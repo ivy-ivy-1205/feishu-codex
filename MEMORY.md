@@ -59,10 +59,10 @@
     - 在容器里跑放在 `/work` 下的脚本时，用 `createRequire('/app/package.json')` 加载 better-sqlite3，否则找不到包。
   - 2026-10-21 S1 完成：生产 `9ce5afa`（回滚镜像 `rollback-pre-space-s1-20261020T172100Z`）。Smart Listing 已登记，页面已导入（来源 376 条），三个 Space 开关仍关闭，工作地图不变。
     - `server.ts` 原先没有接上 `SPACE_SYNC_INGEST_ENABLED` 和 `SPACE_SYNC_ANALYSIS_ENABLED`。2026-10-21 已在本地接好并合并（`src/composition/space-sync.ts`），未上线；开关关闭时行为不变。S2 要先发版带上这次接线。
-    - 2026-10-21 S2：生产 `421ff0c`（回滚镜像 `rollback-pre-space-s2-guard-20261021T071203Z`）。
+    - 2026-10-21 S2 完成：生产 `e422b05`（回滚镜像 `rollback-pre-space-s2-dispatch-20261021T084805Z`），接收和分析已开，展示未开。Smart Listing 摘要已生成，工作地图不变。
       - nginx 会把 `/internal/` 转发出去，应用现在对带转发头的 `/internal/*` 请求返回 404（Ivy 选的方案 A）。
       - 接收开关已开，密钥在 `secrets/space-sync-hmac`（root:lighthouse 640）。
-      - 分析开关开过又关回：`worker-runtime.ts` 的分发漏了 Space 任务，任务一直被拒绝、反复领取。修复待合并发版。
+      - 中途分析开关开过又关回：`worker-runtime.ts` 的分发漏了 Space 任务，任务一直被拒绝、反复领取。`e422b05` 已修复。
       - 以后新增任务类型时，要同时加到 `founder.supportedKinds` 和 `worker-runtime.ts` 的分发里，并走一遍共用 worker 的测试。
       - nginx 配置在 `/root/RealAgentAI_cc/nginx.conf`，与 RealAgent 生产站点共用。
     - 服务器宿主机没有 node；脚本里解析 JSON 要用 `docker exec -i <容器> node`。`docker cp` 拷进容器的文件属于 root，要用 `docker exec -u 0` 改权限后，容器里的 node 用户才能读。
