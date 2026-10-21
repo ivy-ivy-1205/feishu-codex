@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { founderBeijingTime } from './founder-time.js';
 import { AlignmentIssueRepository } from '../repositories/alignment-issue-repository.js';
 import { AlignmentRepository } from '../repositories/alignment-repository.js';
 import { loadSpaceProjectPageView, renderSpaceProjectPageLines } from './space-project-page-view.js';
@@ -72,9 +73,7 @@ function buildProjectProgress(input:{client:Database.Database;now:Date;spaceStal
   const issues=new AlignmentIssueRepository(input.client).listForTopic(topic.id)
     .filter(item=>['candidate','ready','asked'].includes(item.status));
   const stageLabels={idea:'想法',exploring:'探索中',project_candidate:'候选项目',active_project:'正在推进',paused:'暂停',closed:'已结束'} as const;
-  const statements=perspectives.map(item=>item.statement);
-  const completedStatements=statements.filter(item=>/(?:已|已经|完成|上线|发布|交付|验收|解决)/u.test(item));
-  const nextStatements=statements.filter(item=>/(?:下一步|待|计划|准备|推进|需要|将|本周|本月)/u.test(item));
+  const {completed:completedStatements,next:nextStatements}=classifyFounderProgressStatements(perspectives.map(item=>item.statement));
   const completed=topic.stage==='closed'||topic.stage==='paused'
     ?`项目状态为${stageLabels[topic.stage]}；具体完成成果仍以来源记录为准。`
     :completedStatements.length?completedStatements.slice(0,6).map(item=>`- ${founderText(item,180)}`).join('\n'):
@@ -87,12 +86,24 @@ function buildProjectProgress(input:{client:Database.Database;now:Date;spaceStal
   return founderCard(`项目进展 · ${founderText(topic.displayName,100)}`,[
     `当前方向：${topic.outcome?founderText(topic.outcome,500):'尚未形成明确目标。'}`,
     ...(spacePage?[renderSpaceProjectPageLines(spacePage).join('\n')]:[]),
-    `01 当前阶段\n${stageLabels[topic.stage]}；本版本更新时间 ${new Date(input.now).toISOString()}。`,
+    `01 当前阶段\n${stageLabels[topic.stage]}；本版本更新于 ${founderBeijingTime(topic.changedAt)}（北京时间）。`,
     `02 已完成\n${completed}`,
     `03 待推进\n${next}`,
     `04 卡点与依赖\n${blockers}`,
     `来源边界：当前观点关联 ${new Set(perspectives.flatMap(item=>item.evidenceIds)).size} 条证据；未读取内容不计入已完成。`
   ],issues.length?'orange':'blue');
+}
+
+const plannedProgress=/(?:下一步|待|计划|准备|打算|推进|需要|将|目标|希望|预计|本周|本月)/u;
+const reportedDone=/(?:已|完成|上线|发布|交付|验收|解决)/u;
+/**
+ * Splits founder statements into completed and to-do by their wording. A statement that speaks of a plan
+ * ("计划是上线…") is to-do even when it names a completion verb, so a plan is never shown as done and no
+ * statement appears under both headings.
+ */
+export function classifyFounderProgressStatements(statements:readonly string[]):{completed:string[];next:string[]}{
+  const next=statements.filter(item=>plannedProgress.test(item));
+  return{completed:statements.filter(item=>!plannedProgress.test(item)&&reportedDone.test(item)),next};
 }
 
 export function enqueueFounderManualQuery(client:Database.Database,messages:readonly FounderManualQueryMessage[],at:Date):number{
@@ -194,7 +205,7 @@ function processingStatus(client:Database.Database,chatId:string,spaceWorkMapEna
   const audit=latestCoverageAudit(client,chatId);
   const failureStatus=[`未补偿分析来源：${unresolvedSources.size}`,...(invalidAnalysisJobs?[`分析异常任务：${invalidAnalysisJobs}`]:[]),
     `采集失败任务：${failedCaptureJobs}`].join('；');
-  return `处理状态\n最后收到：${received.value??'尚无记录'}\n最后完成分析：${analyzedAt??'尚无完成记录'}\n最新已分析语料：${analyzedSourceAt??'尚无完成记录'}\n最后防漏复核：${audit??'尚无记录'}\n待处理：${pending}；${failureStatus}；不可读/跳过缺口：${gaps}\n“待处理为 0”只证明已入库任务没有积压；缺口会单独显示，不把未读取内容算作已覆盖。${spaceWorkMapEnabled?spaceProcessingStatusLine(client):''}`;
+  return `处理状态（北京时间）\n最后收到：${received.value?founderBeijingTime(received.value):'尚无记录'}\n最后完成分析：${analyzedAt?founderBeijingTime(analyzedAt):'尚无完成记录'}\n最新已分析语料：${analyzedSourceAt?founderBeijingTime(analyzedSourceAt):'尚无完成记录'}\n最后防漏复核：${audit?founderBeijingTime(audit):'尚无记录'}\n待处理：${pending}；${failureStatus}；不可读/跳过缺口：${gaps}\n“待处理为 0”只证明已入库任务没有积压；缺口会单独显示，不把未读取内容算作已覆盖。${spaceWorkMapEnabled?spaceProcessingStatusLine(client):''}`;
 }
 
 /** Aggregate, read-only summary over already-stored bindings/runs — never contacts Space itself. */
@@ -206,7 +217,7 @@ function spaceProcessingStatusLine(client:Database.Database):string{
   const permissionLost=bindings.filter(b=>b.status==='permission_lost').length;
   const latestSync=bindings.map(b=>b.lastSuccessfulSyncAt).filter((v):v is string=>Boolean(v)).sort().at(-1)??null;
   const gapCount=bindings.reduce((sum,b)=>sum+(spaceSync.getLatestRunForBinding(b.id)?.gapCount??0),0);
-  return `\nSpace 页面\n已绑定项目：${bindings.length}；活跃：${active}；权限缺失：${permissionLost}\n最后成功同步：${latestSync??'尚无记录'}\n缺口：${gapCount}`;
+  return `\nSpace 页面\n已绑定项目：${bindings.length}；活跃：${active}；权限缺失：${permissionLost}\n最后成功同步：${latestSync?founderBeijingTime(latestSync):'尚无记录'}\n缺口：${gapCount}`;
 }
 
 function latestSourceOccurredAt(client:Database.Database,sourceIds:readonly string[]):string|null{

@@ -501,6 +501,25 @@ describe('founder stream durable wiring', () => {
     expect(h.db.client.prepare("SELECT count(*) n FROM batch_jobs WHERE type='analyze_founder_stream_batch'").get()).toEqual({n:1});
     await h.app.close();h.db.close();
   });
+  it('never analyzes founder commands that the daily history audit stored as ordinary messages',async()=>{
+    const h=harness();
+    const save=(messageId:string,text:string)=>h.sources.saveSource(captureGroupMessageSource({chatId:chat,messageId,threadId:null,rootId:null,
+      author:{openId:'ou_ivy',displayName:null},senderType:'user',messageType:'text',text,occurredAt:start.toISOString()},start).source).source;
+    const content=save('om_content','知识库');
+    const commands=[save('om_map','查看工作地图'),save('om_progress','@_user_1 查看项目进展：Smart Listing'),
+      save('om_confirm',`@_user_1 确认修正 feedbackdraft_${'a'.repeat(32)}`),save('om_live_feedback','第 1 项只是想法')];
+    // Live delivery already handled this reply as a correction; the audit later re-read it from history.
+    h.db.client.prepare("INSERT INTO founder_stream_events(event_id,message_id,chat_id,disposition,received_at) VALUES('evt_live','om_live_feedback',?,'feedback',?)")
+      .run(chat,start.toISOString());
+    h.setNow(new Date(start.getTime()+600_000));await h.runtime.afterTick();await h.runtime.runOnce();await h.runtime.runOnce();
+    expect(h.calls()).toBe(1);expect(h.inputs[0]!.sources.map(s=>s.id)).toEqual([content.id]);
+    // A batch the audit queued directly still never hands a command to the model.
+    h.jobs.enqueueFounderStreamBatch({chatId:chat,since:start.toISOString(),until:start.toISOString(),sourceIds:commands.map(c=>c.id),capturedAt:new Date(start.getTime()+600_000)});
+    await h.runtime.runOnce();
+    expect(h.calls()).toBe(1);
+    expect(h.db.client.prepare("SELECT count(*) n FROM batch_jobs WHERE type='analyze_founder_stream_batch' AND status<>'completed'").get()).toEqual({n:0});
+    await h.app.close();h.db.close();
+  });
   it('keeps a trusted founder rename in the next model current-topic window', async () => {
     const h=harness();new AlignmentRepository(h.db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:start});
     const topic=h.topics.createTopic({displayName:'旧名称',stage:'idea',createdAt:start});

@@ -6,7 +6,7 @@ import { JobRepository } from '../src/repositories/job-repository.js';
 import { AlignmentRepository } from '../src/repositories/alignment-repository.js';
 import { createFounderStreamRuntime } from '../src/services/founder-stream-worker.js';
 import { parseFounderManualQuery } from '../src/services/founder-manual-query.js';
-import { buildFounderManualQueryMessages } from '../src/services/founder-manual-query.js';
+import { buildFounderManualQueryMessages, classifyFounderProgressStatements } from '../src/services/founder-manual-query.js';
 import { TopicRepository } from '../src/repositories/topic-repository.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
 import { captureGroupMessageSource } from '../src/services/group-message-source-capture.js';
@@ -64,6 +64,28 @@ describe('founder manual queries',()=>{
     expect(body).toContain('待推进');
     expect(body).toContain('卡点与依赖');
     expect(body).toContain('没有明确标注');
+    db.close();
+  });
+
+  it('never counts a plan as completed, and lists each statement under one heading only',()=>{
+    const result=classifyFounderProgressStatements(['目前计划是上线两个房源','Amy Agent Core V2 的 Task 1–9 已完成',
+      '下一步完成 Task 10 验收','EP00 已经发布','准备上线照片笔记','这个项目值得长期做']);
+    expect(result.completed).toEqual(['Amy Agent Core V2 的 Task 1–9 已完成','EP00 已经发布']);
+    expect(result.next).toEqual(['目前计划是上线两个房源','下一步完成 Task 10 验收','准备上线照片笔记']);
+  });
+
+  it('shows when the project last changed, not when it was queried, and every status time in Beijing time',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    new TopicRepository(db.client).createTopic({displayName:'Smart Listing',stage:'active_project',outcome:'验证房源服务',
+      createdAt:new Date('2026-10-14T08:18:40.206Z')});
+    db.client.prepare("INSERT INTO founder_stream_events(event_id,message_id,chat_id,disposition,received_at) VALUES('evt_1','om_1',?,'captured','2026-10-20T03:31:59.829Z')").run(chatId);
+    const card=JSON.stringify(buildFounderManualQueryMessages({client:db.client,query:{kind:'project_progress',topicName:'Smart Listing'},
+      queryMessageId:'om_progress',chatId,approvedChatIds:[chatId],now:new Date('2026-10-21T09:47:37.611Z')})[0]!.card);
+    expect(card).toContain('本版本更新于 2026-10-14 16:18（北京时间）');
+    expect(card).not.toContain('2026-10-21');
+    expect(card).toContain('处理状态（北京时间）');
+    expect(card).toContain('最后收到：2026-10-20 11:31');
+    expect(card).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/u);
     db.close();
   });
 
@@ -330,7 +352,7 @@ describe('founder manual queries',()=>{
     const body=JSON.stringify(message.card);
     expect(Buffer.byteLength(body,'utf8')).toBeLessThanOrEqual(28_000);
     expect(body).toContain('不可读/跳过缺口：1');
-    expect(body).toContain('最后防漏复核：2026-09-10T00:00:00.000Z');
+    expect(body).toContain('最后防漏复核：2026-09-10 08:00');
     expect(body).toContain('仅展示前');
     db.close();
   });
@@ -355,7 +377,7 @@ describe('founder manual queries',()=>{
     insert('attachment_failed','capture_founder_attachment','failed',{chatId,messageId:'om_file',attempt:3},'2026-09-25T04:00:00.000Z');
     const body=JSON.stringify(buildFounderManualQueryMessages({client:db.client,query:{kind:'work_map'},queryMessageId:'om_status',
       chatId,approvedChatIds:[chatId],now:at})[0]!.card);
-    expect(body).toContain('最新已分析语料：2026-09-23T00:00:00.000Z');
+    expect(body).toContain('最新已分析语料：2026-09-23 08:00');
     expect(body).toContain('未补偿分析来源：1；采集失败任务：1');
     expect(body).not.toContain('未补偿失败：');
     db.close();

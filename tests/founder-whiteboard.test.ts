@@ -17,6 +17,34 @@ describe('founder whiteboard',()=>{
     expect(text).toContain('当前方向：验证房源服务');
   });
 
+  it('wraps every project-progress paragraph inside its box without dropping any text',()=>{
+    const direction='当前方向：目前已创建 Space 页面「AiJia Smart Listing 与买家空间项目总览」,地址链接是https://chatgpt.com/space/page_f095a79b4bb48191b797811f8f53862d,具体的项目进展和实施计划都会通过该页面更新,目前计划是上线两个房源';
+    const space=['项目页（Space · 页面更新于 10-19 · 同步于 10-21 01:24）','同步缺口：评论未同步（本次只导入了页面正文），评论里的看法暂未计入',
+      '页面记载进展（首次同步，未区分本周）：Amy Agent Core V2 的 Task 1–9 已完成；照片位置笔记已上线，支持文字、语音及 Amy 代记；L008 家庭共享已上线，支持共同记录与独立署名',
+      '下一步/卡点：下一步 完成 Task 10 验收、生产切换、回滚演练和观察；卡点 家庭数据读取后的最终回复失败，原因仍在排查'].join('\n');
+    const status=['处理状态（北京时间）','最后收到：2026-10-20 11:31','最后完成分析：2026-10-21 00:40','最新已分析语料：2026-10-20 12:08',
+      '最后防漏复核：2026-10-21 16:44','待处理：0；未补偿分析来源：0；采集失败任务：0；不可读/跳过缺口：99',
+      '“待处理为 0”只证明已入库任务没有积压；缺口会单独显示，不把未读取内容算作已覆盖。','Space 页面','已绑定项目：1；活跃：1；权限缺失：0',
+      '最后成功同步：2026-10-21 01:24','缺口：1'].join('\n');
+    const board=buildFounderWhiteboard({title:'项目进展 · Smart Listing',paletteId:'grove-block',cards:[{header:{title:{content:'项目进展 · Smart Listing'}},
+      elements:[direction,space,status].map(content=>({text:{content}}))}]});
+    const ems=(line:string)=>Array.from(line).reduce((sum,char)=>sum+(/[\p{Script=Han}\u3000-\u303F\uFF00-\uFFEF“”（）]/u.test(char)?1:0.62),0);
+    const boxes=board.nodes.filter(node=>node.type==='composite_shape'&&node.x!==0);
+    const bodies=board.nodes.filter(node=>node.type==='text_shape'&&(node.y??0)>=150);
+    expect(bodies).toHaveLength(4);
+    for(const node of bodies){
+      const font=node.text!.font_size!,lines=node.text!.text!.split('\n');
+      for(const line of lines)expect(ems(line)*font).toBeLessThanOrEqual(node.width!);
+      expect(node.height!).toBeGreaterThanOrEqual(lines.length*Math.round(font*1.38));
+      const box=boxes.find(b=>b.x!<=node.x!&&b.y!<=node.y!&&node.x!+node.width!<=b.x!+b.width!&&node.y!<b.y!+b.height!);
+      expect(box).toBeDefined();
+      expect(node.y!+node.height!).toBeLessThanOrEqual(box!.y!+box!.height!);
+    }
+    const flat=(value:string)=>value.replace(/\s+/gu,'');
+    const shown=flat(bodies.map(node=>node.text!.text!).join(''));
+    for(const original of [direction,space,status])expect(shown).toContain(flat(original));
+  });
+
   it('emits text nodes in the official OpenAPI shape without transparent style colors',()=>{
     const result=buildFounderWhiteboard({title:'工作地图',paletteId:'coral',cards:[{
       header:{title:{content:'工作地图 · 1/1'}},elements:[{text:{content:'当前阶段\n正在推进'}}]
