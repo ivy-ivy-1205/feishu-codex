@@ -60,7 +60,8 @@
   - 2026-10-21 S1 完成：生产 `9ce5afa`（回滚镜像 `rollback-pre-space-s1-20261020T172100Z`）。Smart Listing 已登记，页面已导入（来源 376 条），三个 Space 开关仍关闭，工作地图不变。
     - `server.ts` 原先没有接上 `SPACE_SYNC_INGEST_ENABLED` 和 `SPACE_SYNC_ANALYSIS_ENABLED`。2026-10-21 已在本地接好并合并（`src/composition/space-sync.ts`），未上线；开关关闭时行为不变。S2 要先发版带上这次接线。
     - 2026-10-21 S2 完成：生产 `e422b05`（回滚镜像 `rollback-pre-space-s2-dispatch-20261021T084805Z`），接收和分析已开，展示未开。Smart Listing 摘要已生成，工作地图不变。
-    - 2026-10-21 S3：`SPACE_SYNC_WORKMAP_ENABLED` 已开（09:16 UTC），三个 Space 开关都已打开，群发仍为关。只影响 Ivy 主动查询时的回复，不会自动推送。待 Ivy 用「查看工作地图」「查看项目进展：Smart Listing」验收。
+    - 2026-10-21 S3 完成，Ivy 验收通过：三个 Space 开关都已打开，群发仍为关。只影响 Ivy 主动查询时的回复，不会自动推送。
+      - 首次同步只显示「页面记载进展（首次同步，未区分本周）」。Ivy 选择保持这样，等下次导出页面、对比两版后再出本周进展；不按页面里的日期推断本周。
       - nginx 会把 `/internal/` 转发出去，应用现在对带转发头的 `/internal/*` 请求返回 404（Ivy 选的方案 A）。
       - 接收开关已开，密钥在 `secrets/space-sync-hmac`（root:lighthouse 640）。
       - 中途分析开关开过又关回：`worker-runtime.ts` 的分发漏了 Space 任务，任务一直被拒绝、反复领取。`e422b05` 已修复。
