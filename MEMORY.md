@@ -61,6 +61,11 @@
     - `server.ts` 原先没有接上 `SPACE_SYNC_INGEST_ENABLED` 和 `SPACE_SYNC_ANALYSIS_ENABLED`。2026-10-21 已在本地接好并合并（`src/composition/space-sync.ts`），未上线；开关关闭时行为不变。S2 要先发版带上这次接线。
     - 2026-10-21 S2 完成：生产 `e422b05`（回滚镜像 `rollback-pre-space-s2-dispatch-20261021T084805Z`），接收和分析已开，展示未开。Smart Listing 摘要已生成，工作地图不变。
     - 2026-10-21 S3 完成，Ivy 验收通过：三个 Space 开关都已打开，群发仍为关。只影响 Ivy 主动查询时的回复，不会自动推送。
+    - 2026-10-21 S3 验收后的修复已在本地合并，未上线：
+      - 防漏复核补录的指令不再送去分析（判断函数是 `isFounderControlMessage`；纠正回复仍可作为证据）。
+      - 项目进展里，含计划类词的句子不再算已完成；版本时间改为项目最后变化的时间。
+      - 处理状态改用北京时间；项目进展白板的文字会按框宽换行。
+      - Space 内容要不要进入「已完成 / 待推进 / 卡点」三栏，待 Ivy 决定。
       - 首次同步只显示「页面记载进展（首次同步，未区分本周）」。Ivy 选择保持这样，等下次导出页面、对比两版后再出本周进展；不按页面里的日期推断本周。
       - nginx 会把 `/internal/` 转发出去，应用现在对带转发头的 `/internal/*` 请求返回 404（Ivy 选的方案 A）。
       - 接收开关已开，密钥在 `secrets/space-sync-hmac`（root:lighthouse 640）。

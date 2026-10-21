@@ -91,8 +91,12 @@ export async function publishFounderWhiteboard(input:{title:string;paletteId:str
 }
 
 function buildGenericBoard(title:string,palette:FounderPalette,cards:readonly Record<string,unknown>[]):BuiltFounderWhiteboard{
-  const lines=cards.flatMap(card=>cardLines(card)),width=1680,columnWidth=760,startY=180;
-  const blocks=lines.map((value,index)=>({value,index,height:Math.max(96,64+Math.ceil(Array.from(value).length/38)*34)}));
+  const lines=cards.flatMap(card=>cardLines(card)),width=1680,columnWidth=760,startY=180,fontSize=24,lineHeight=Math.round(fontSize*1.38);
+  // Each paragraph is wrapped to the box width here; the board and its PNG preview do not wrap text on their own,
+  // and the box height follows the wrapped line count so long and many-line blocks stay inside their box.
+  const units=textUnits(columnWidth-52,fontSize);
+  const blocks=lines.map((raw,index)=>{const value=raw.split('\n').map(line=>line.trim()?wrapText(line,units,200):'').join('\n');
+    return{value,index,height:Math.max(96,44+value.split('\n').length*lineHeight)};});
   const columns:[typeof blocks,typeof blocks]=[[],[]];const heights=[startY,startY];
   for(const block of blocks){const column=heights[0]!<=heights[1]!?0:1;columns[column]!.push(block);heights[column]!+=block.height+28;}
   const height=Math.max(720,...heights)+80,nodes:FounderWhiteboardNode[]=[];
@@ -101,7 +105,7 @@ function buildGenericBoard(title:string,palette:FounderPalette,cards:readonly Re
   nodes.push(textNode(1320,52,300,52,palette.name,22,palette.ink,'regular','right'));
   columns.forEach((column,columnIndex)=>{let y=startY;for(const block of column){const x=40+columnIndex*(columnWidth+80);
     nodes.push(shape(x,y,columnWidth,block.height,palette.surface,palette.accent));
-    nodes.push(textNode(x+26,y+22,columnWidth-52,block.height-40,block.value,24,palette.ink,block.index===0?'bold':'regular'));
+    nodes.push(textNode(x+26,y+22,columnWidth-52,block.height-40,block.value,fontSize,palette.ink,block.index===0?'bold':'regular'));
     y+=block.height+28;
   }});
   return{palette,width,height,nodes};

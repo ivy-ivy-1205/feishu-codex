@@ -149,6 +149,9 @@ describe('Space project-page block', () => {
     const progress = JSON.stringify(buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'project_progress', topicName: 'Smart Listing' },
       queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card);
     expect(progress).toContain('当前重点：把 27 Cecil Street 买家空间做成可复用模板');
+    // The Space status line follows the rest of the processing status: Beijing time, no raw ISO stamps.
+    expect(map).toContain('最后成功同步：2026-10-21 10:00');
+    expect(map).not.toContain('最后成功同步：2026-10-21T');
   });
 
   it('says the digest is being generated when a snapshot exists but no digest is stored yet', () => {

@@ -516,7 +516,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         source.metadata.senderType === 'user' && source.contentText.trim() && !claimed.has(source.id) &&
         latestArrival.get(threadOf(source))! + 300_000 <= stamp.getTime() &&
         !options.client.prepare("SELECT 1 FROM outbox WHERE delivered_message_id=? AND status='delivered'").get(source.externalId) &&
-        !options.client.prepare('SELECT 1 FROM founder_feedback_corrections WHERE chat_id=? AND source_message_id=?').get(approvedGroup,source.externalId))
+        !options.client.prepare('SELECT 1 FROM founder_feedback_corrections WHERE chat_id=? AND source_message_id=?').get(approvedGroup,source.externalId) &&
+        !isFounderControlMessage(options.client,source))
         .sort((a,b)=>a.occurredAt.localeCompare(b.occurredAt)||a.id.localeCompare(b.id));
       for (const thread of new Set(pending.map(threadOf))) {
         const threadSources=pending.filter(s=>threadOf(s)===thread);
@@ -676,6 +677,19 @@ function withWhiteboardPreviewOnly(card:Record<string,unknown>,previewImageKey:s
   ]};
 }
 
+/**
+ * A founder's command to the bot (a manual query, a correction confirmation, or any message live
+ * delivery already routed as feedback) is an instruction, not project context. Live delivery never
+ * stores these as sources, but the daily history audit re-reads them as ordinary messages, so the
+ * analysis side must recognise them too. The stored source itself is kept unchanged.
+ */
+export function isFounderControlMessage(client: Database.Database, source: ContextSourceRecord): boolean {
+  if (source.sourceType !== 'group_message') return false;
+  const command = founderCommandText(source.contentText);
+  if (parseFounderManualQuery(command) || /^确认(?:修正)?\s*feedbackdraft_[a-f0-9]{32}$/u.test(command)) return true;
+  return Boolean(client.prepare("SELECT 1 FROM founder_stream_events WHERE message_id=? AND disposition='feedback'").get(source.externalId));
+}
+
 export function buildFounderStreamInput(sources: ContextSourceRepository, topics: TopicRepository, sourceIds: readonly string[], chatId: string): FounderStreamInput {
   const selected = new Map<string, ContextSourceRecord>();
   const trustedSource = (id: string) => {
@@ -697,7 +711,9 @@ export function buildFounderStreamInput(sources: ContextSourceRepository, topics
     const source=sources.getSource(id);if(!source)throw new Error('FOUNDER_SOURCE_UNAVAILABLE');
     if(source.contentState !== 'cleartext')throw new Error('FOUNDER_SOURCE_UNAVAILABLE');
     if(source.sourceType==='group_message' && (source.metadata.senderType!=='user' ||
-      sources.client.prepare("SELECT 1 FROM outbox WHERE delivered_message_id=? AND status='delivered'").get(source.externalId))) continue;
+      sources.client.prepare("SELECT 1 FROM outbox WHERE delivered_message_id=? AND status='delivered'").get(source.externalId) ||
+      // Commands are never analysed as new content; a correction reply stays valid as the evidence of its correction.
+      isFounderControlMessage(sources.client,source))) continue;
     if(!include(id))throw new Error('FOUNDER_SOURCE_UNAVAILABLE');
   }
   if(selected.size===0)return {sources:[],currentTopics:[]};
