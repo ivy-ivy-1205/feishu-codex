@@ -75,6 +75,12 @@
       - nginx 配置在 `/root/RealAgentAI_cc/nginx.conf`，与 RealAgent 生产站点共用。
     - 服务器宿主机没有 node；脚本里解析 JSON 要用 `docker exec -i <容器> node`。`docker cp` 拷进容器的文件属于 root，要用 `docker exec -u 0` 改权限后，容器里的 node 用户才能读。
   - Ivy 常在群里发 PDF、视频、音频、md 和飞书文档。现有代码只提取 md/txt/html/docx/xlsx 的文字，PDF、语音和飞书文档内容都只记缺口。是否补上，待 Ivy 决定。
+  - 2026-10-21 Ivy 决定接入另外两个 Space 页面（登记计划 `docs/2026-10-21-space-mapping-plan.json`，代码已合并 PR #34 `c02445b`，未上线）：
+    - Family First 在 A 线下新建条目「Family First」。飞书里早期的相关条目先不合并。
+    - 超级个体页面挂到已有条目「超级个体与超级团队」，放到 B 线下。暂不放 C 线；「飞书合伙人对齐」由 Ivy 之后在飞书更新。
+    - 页面没写更新日期时，按 Ivy 的意思用创建日期：超级个体取页面最早事件 2026-10-09。Family First 用页面写的 10-20（悉尼）。
+    - 已在某条线下的条目，登记时不会被移到别的线，整份登记会被拒绝。
+    - 两个页面的 Markdown 在 `~/Downloads/`（「Family First 项目大本营与看房展示.md」「超级个体到超级团队 视频项目与候选口播.md」），不要复制进仓库。
   - Ivy 的 Smart Listing 页面 Markdown 在 `~/Downloads/AiJia Smart Listing 与买家空间项目总览.md`，页首写着「更新于 2026 年 10 月 19 日」，页面没有评论。不要复制进仓库。
   - 生产 DB 在容器内的路径是 `/app/data/bridge.sqlite`（宿主机 `/opt/feishu-codex/data`）。只读核查可以用 `docker exec … node` 加 better-sqlite3 的 `readonly` + `query_only`，不需要宿主机装 sqlite3。
 
