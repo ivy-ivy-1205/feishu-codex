@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { founderBeijingTime } from './founder-time.js';
 import { AlignmentIssueRepository } from '../repositories/alignment-issue-repository.js';
 import { AlignmentRepository } from '../repositories/alignment-repository.js';
-import { loadSpaceProjectPageView, renderSpaceProjectPageLines } from './space-project-page-view.js';
+import { loadSpaceProjectPageView, renderSpaceProjectPageLines, spaceProgressSections } from './space-project-page-view.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
 import { FounderTopicProjectBindingRepository } from '../repositories/founder-topic-project-binding-repository.js';
@@ -83,13 +83,18 @@ function buildProjectProgress(input:{client:Database.Database;now:Date;spaceStal
   const blockers=issues.length?issues.slice(0,6).map(issue=>`- ${founderText(issue.ivy.statement,120)} ↔ ${founderText(issue.james.statement,120)}`).join('\n'):
     '当前没有满足“双方向不同且影响行动”条件的卡点记录；这不代表没有依赖。';
   const spacePage=input.spaceWorkMapEnabled?loadSpaceProjectPageView(input.client,topic.id,input.now,input.spaceStaleAfterMinutes??defaultSpaceStaleAfterMinutes):null;
+  const space=spacePage?spaceProgressSections(spacePage):null;
+  // Page items lead each section under the page's own label; the group-chat reading follows, so neither is mistaken for the other.
+  const section=(heading:string,pageItems:readonly string[],chat:string)=>space&&pageItems.length
+    ?`${heading}\n${space.label}：\n${pageItems.map(item=>`- ${item}`).join('\n')}\n群聊记录：${chat.startsWith('- ')?`\n${chat}`:chat}`
+    :`${heading}\n${chat}`;
   return founderCard(`项目进展 · ${founderText(topic.displayName,100)}`,[
     `当前方向：${topic.outcome?founderText(topic.outcome,500):'尚未形成明确目标。'}`,
-    ...(spacePage?[renderSpaceProjectPageLines(spacePage).join('\n')]:[]),
+    ...(spacePage?[(space?space.lines:renderSpaceProjectPageLines(spacePage)).join('\n')]:[]),
     `01 当前阶段\n${stageLabels[topic.stage]}；本版本更新于 ${founderBeijingTime(topic.changedAt)}（北京时间）。`,
-    `02 已完成\n${completed}`,
-    `03 待推进\n${next}`,
-    `04 卡点与依赖\n${blockers}`,
+    section('02 已完成',space?.completed??[],completed),
+    section('03 待推进',space?.next??[],next),
+    section('04 卡点与依赖',space?.blockers??[],blockers),
     `来源边界：当前观点关联 ${new Set(perspectives.flatMap(item=>item.evidenceIds)).size} 条证据；未读取内容不计入已完成。`
   ],issues.length?'orange':'blue');
 }

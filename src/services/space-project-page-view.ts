@@ -82,6 +82,28 @@ export function loadSpaceProjectPageView(client: Database.Database, topicId: str
 
 /** One compact block per project: page-recorded status, never attributed to a person, never the page rewritten. */
 export function renderSpaceProjectPageLines(view: SpaceProjectPageView): string[] {
+  return [...spacePageStatusLines(view), ...spaceDigestLines(view), ...spaceCommentLines(view)];
+}
+
+/**
+ * 查看项目进展 puts the page's own progress, focus/next steps and blockers into its 已完成 / 待推进 / 卡点 sections,
+ * labelled as the page's, so the block above them keeps only the page status and comments. Null until a digest is
+ * ready; the card then shows the full block, which says why there is no summary.
+ */
+export function spaceProgressSections(view: SpaceProjectPageView):
+  { lines: string[]; label: string; completed: string[]; next: string[]; blockers: string[] } | null {
+  const digest = view.digest;
+  if (!digest || digest.status !== 'ready' || !digest.digest) return null;
+  const d = digest.digest, text = (value: string) => founderText(value, 120);
+  const completed = [...new Set([...d.weekProgress, ...d.todayProgress].map((item) => text(item.text)))];
+  return { lines: [...spacePageStatusLines(view), ...spaceCommentLines(view)],
+    label: `Space 页面（${view.pageUpdatedAt ? founderMonthDay(view.pageUpdatedAt) : '更新时间未知'} 更新）`, completed,
+    next: [...(d.currentFocus ? [`当前重点：${text(d.currentFocus.text)}`] : []),
+      ...d.nextSteps.filter((item) => item.kind !== 'blocker').map((item) => text(item.text))],
+    blockers: d.nextSteps.filter((item) => item.kind === 'blocker').map((item) => text(item.text)) };
+}
+
+function spacePageStatusLines(view: SpaceProjectPageView): string[] {
   const { freshness } = view;
   const synced = freshness.lastSuccessfulSyncAt ? founderMonthDayTime(freshness.lastSuccessfulSyncAt) : '尚无成功同步';
   const updated = view.pageUpdatedAt ? founderMonthDay(view.pageUpdatedAt) : '未知';
@@ -92,6 +114,11 @@ export function renderSpaceProjectPageLines(view: SpaceProjectPageView): string[
   else if (freshness.coverageIncomplete || freshness.gapCount > 0) {
     lines.push(`同步缺口：有 ${Math.max(freshness.gapCount, 1)} 处内容未同步，未同步的部分不计入进展`);
   }
+  return lines;
+}
+
+function spaceDigestLines(view: SpaceProjectPageView): string[] {
+  const lines: string[] = [];
   const digest = view.digest;
   if (!digest) lines.push(view.pageUpdatedAt ? '项目页摘要：生成中' : '项目页摘要：尚无页面快照');
   else if (digest.status === 'failed' || !digest.digest) {
@@ -111,6 +138,11 @@ export function renderSpaceProjectPageLines(view: SpaceProjectPageView): string[
     if (d.nextSteps.length) lines.push(`下一步/卡点：${d.nextSteps.map((item) =>
       `${item.kind === 'blocker' ? '卡点' : '下一步'} ${founderText(item.text, 80)}`).join('；')}`);
   }
+  return lines;
+}
+
+function spaceCommentLines(view: SpaceProjectPageView): string[] {
+  const lines: string[] = [];
   const c = view.comments;
   if (c.open || c.resolved) {
     const authors = [['Ivy', c.ivy], ['James', c.james], ['其他', c.other]].filter(([, n]) => n).map(([who, n]) => `${who} ${n}`).join('、');
