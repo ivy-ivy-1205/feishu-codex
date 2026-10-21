@@ -23,6 +23,21 @@ describe('createWorkerRuntime', () => {
     await runtime.runOnce();expect(database.client.prepare('SELECT status FROM batch_jobs').get()).toEqual({status:'completed'});
     database.close();
   });
+  it('hands every founder job kind to the founder runtime, including Space analysis', async () => {
+    const database=createSqliteDatabase(':memory:');migrateDatabase(database.client);
+    const jobs=new JobRepository(database.client);const now=new Date('2026-10-21T07:16:49Z');
+    jobs.enqueueSpaceStreamBatch({projectKey:'smart-listing',since:now.toISOString(),until:now.toISOString(),sourceIds:['ctxsrc_page'],capturedAt:now});
+    const founder=createFounderStreamRuntime({client:database.client,jobRepository:jobs,flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false},
+      approvedChatIds:['oc_a84d5b6ca478220d0a37964b50776edb'],ivyPrivateChatId:'oc_private',now:()=>now,spaceAnalysisEnabled:true});
+    const handed:string[]=[];const errors:unknown[]=[];
+    const runtime=createWorkerRuntime({enabled:true,jobRepository:jobs,meetingRepository:new MeetingRepository(database.client),outboxRepository:new OutboxRepository(database.client),
+      targetChatId:'oc_private',reader:fakeReader(),summarizer:fakeSummarizer(),delivery:new FeishuMessageDeliveryAdapter({getMinuteBasicInfo:async()=>({}),exportMinuteTranscript:async()=>[],sendTextMessage:async()=>{throw new Error('unexpected')}}),
+      now:()=>now,onError:(error)=>errors.push(error),founder:{...founder,process:async(job)=>{handed.push(job.kind);return founder.process(job);}}});
+    await runtime.runOnce();
+    expect(handed).toEqual(['analyze_founder_stream_space_batch']);
+    expect(errors.map(String)).not.toContain('Error: Unsupported job');
+    database.close();
+  });
   it('keeps the production worker disabled by default', async () => {
     let leased = false;
     const runtime = createWorkerRuntime({

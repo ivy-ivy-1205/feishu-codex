@@ -65,7 +65,10 @@ export function createWorkerRuntime(
         ...(options.founder?.supportedKinds ?? [])]
     ),
     process: async (job) => {
-      if (job.kind === 'capture_group_message' || job.kind === 'capture_founder_attachment' || job.kind === 'analyze_founder_stream_batch') {
+      // Must list every kind in founder.supportedKinds: a kind leased above but missing here is
+      // rejected as unsupported and re-leased forever (the Space batch was, until 2026-10-21).
+      if (job.kind === 'capture_group_message' || job.kind === 'capture_founder_attachment' || job.kind === 'analyze_founder_stream_batch' ||
+        job.kind === 'analyze_founder_stream_space_batch') {
         if (!options.founder) throw new Error('Founder job leased without runtime');
         return options.founder.process(job);
       }
