@@ -10,9 +10,12 @@ import { stableId } from './canonical-json.js';
 const text = (max: number) => z.string().trim().min(1).max(max);
 const lineRoots = { A: 'AiJia AI Native 房产业务', B: '自媒体生产线', C: '公司协作基础设施' } as const;
 
+// `line` on an existing entry files it under that line when it sits under none yet (an unfiled active entry is hidden
+// from the work map); an entry already under another line is never moved.
+const lineSchema = z.enum(['A', 'B', 'C']);
 const topicTargetSchema = z.union([
-  z.object({ existingTopicId: text(256) }).strict(),
-  z.object({ existingDisplayName: text(200) }).strict(),
+  z.object({ existingTopicId: text(256), line: lineSchema.optional() }).strict(),
+  z.object({ existingDisplayName: text(200), line: lineSchema.optional() }).strict(),
   z.object({ create: z.object({ displayName: text(200), stage: topicStageSchema, line: z.enum(['A', 'B', 'C']) }).strict() }).strict()
 ]);
 
@@ -34,7 +37,7 @@ export const spaceMappingPlanSchema = z.object({
 });
 export type SpaceMappingPlan = z.input<typeof spaceMappingPlanSchema>;
 
-export type MappingStep = 'project' | 'page_binding' | 'topic' | 'topic_binding' | 'author';
+export type MappingStep = 'project' | 'page_binding' | 'topic' | 'topic_line' | 'topic_binding' | 'author';
 export interface MappingAction {
   step: MappingStep;
   subject: string;
@@ -47,7 +50,7 @@ export class SpaceMappingRejectedError extends Error {
   constructor(readonly preview: SpaceMappingPreview) { super('SPACE_MAPPING_REJECTED'); this.name = 'SpaceMappingRejectedError'; }
 }
 
-interface Resolved { preview: SpaceMappingPreview; plan: z.output<typeof spaceMappingPlanSchema>;
+interface Resolved { preview: SpaceMappingPreview; plan: z.output<typeof spaceMappingPlanSchema>; lineRootIds: Map<string, string>;
   topicIds: Map<string, string | { create: { displayName: string; stage: z.infer<typeof topicStageSchema>; line: 'A' | 'B' | 'C' }; rootId: string }> }
 
 /** Read-only: shows exactly what an apply would write, and refuses on any conflict or unresolved target. */
@@ -63,7 +66,7 @@ function resolve(client: Database.Database, rawPlan: unknown): Resolved {
   const bindings = new FounderTopicProjectBindingRepository(client);
   const canonicalTopics = topics.listCanonicalTopics();
   const byName = (name: string) => canonicalTopics.filter((topic) => topic.displayName.trim() === name.trim());
-  const topicIds: Resolved['topicIds'] = new Map();
+  const topicIds: Resolved['topicIds'] = new Map(), lineRootIds: Resolved['lineRootIds'] = new Map();
   for (const project of plan.projects) {
     const key = project.projectKey;
     const existingProject = client.prepare('SELECT display_name FROM projects WHERE project_key = ?').get(key) as { display_name: string } | undefined;
@@ -109,6 +112,19 @@ function resolve(client: Database.Database, rawPlan: unknown): Resolved {
         push({ step: 'topic', subject: key, status: 'will_create', detail: `在 ${target.create.line} 线下新建条目：${target.create.displayName}（${target.create.stage}）` }); }
     }
     if (topicId) topicIds.set(key, topicId);
+    if (topicId && !('create' in target) && target.line) {
+      const line = target.line, rootName = lineRoots[line], roots = byName(rootName);
+      const parents = topics.listRelations(topicId).filter((relation) => relation.relationType === 'part_of' && relation.fromTopicId === topicId)
+        .map((relation) => relation.toTopicId);
+      const nameOf = (id: string) => canonicalTopics.find((topic) => topic.id === id)?.displayName ?? id;
+      if (roots.length !== 1) push({ step: 'topic_line', subject: key, status: roots.length ? 'ambiguous' : 'not_found',
+        detail: `${line} 线根条目“${rootName}”${roots.length ? '不唯一' : '不存在'}` });
+      else if (parents.includes(roots[0]!.id)) push({ step: 'topic_line', subject: key, status: 'unchanged', detail: `已在 ${line} 线（${rootName}）下` });
+      else if (parents.length) push({ step: 'topic_line', subject: key, status: 'conflict',
+        detail: `条目已在其他线下（${parents.map(nameOf).join('、')}），不会移动` });
+      else { lineRootIds.set(key, roots[0]!.id);
+        push({ step: 'topic_line', subject: key, status: 'will_create', detail: `把条目放到 ${line} 线（${rootName}）下：${nameOf(topicId)}` }); }
+    }
 
     const canonical = bindings.getCanonicalBindingForProject(key);
     if (canonical && topicId && canonical.topicId === topicId && canonical.source !== 'analysis')
@@ -125,7 +141,7 @@ function resolve(client: Database.Database, rawPlan: unknown): Resolved {
       : row.founder === author.founder ? { step: 'author', subject: author.spaceAuthorId, status: 'unchanged', detail: `已对应 ${row.founder}` }
         : { step: 'author', subject: author.spaceAuthorId, status: 'conflict', detail: `已对应 ${row.founder}，不会改写` });
   }
-  return { plan, topicIds, preview: { ok: actions.every((action) => ['unchanged', 'will_create'].includes(action.status)), actions } };
+  return { plan, topicIds, lineRootIds, preview: { ok: actions.every((action) => ['unchanged', 'will_create'].includes(action.status)), actions } };
 }
 
 /** Writes the previewed plan in one transaction; any conflict rejects the whole plan with nothing written. */
@@ -133,7 +149,7 @@ export function applySpaceMapping(client: Database.Database, rawPlan: unknown, i
   const changeReference = input.changeReference.trim();
   if (!changeReference) throw new Error('SPACE_MAPPING_CHANGE_REFERENCE_REQUIRED');
   return client.transaction(() => {
-    const { plan, preview, topicIds } = resolve(client, rawPlan);
+    const { plan, preview, topicIds, lineRootIds } = resolve(client, rawPlan);
     if (!preview.ok) throw new SpaceMappingRejectedError(preview);
     const at = input.at.toISOString();
     const topics = new TopicRepository(client), spaceSync = new SpaceSyncRepository(client);
@@ -148,8 +164,12 @@ export function applySpaceMapping(client: Database.Database, rawPlan: unknown, i
         projectKey: project.projectKey, spaceId: null, pageId: project.page.pageId, pageUrl: project.page.pageUrl,
         managementMode: project.page.managementMode, syncMode: project.page.syncMode, createdAt: input.at });
       let topicId: string;
-      if (typeof target === 'string') topicId = target;
-      else {
+      if (typeof target === 'string') {
+        topicId = target;
+        const rootId = lineRootIds.get(project.projectKey);
+        if (rootId) topics.addRelation({ fromTopicId: topicId, toTopicId: rootId, relationType: 'part_of',
+          rationale: `Ivy filed ${project.projectKey} under its line (${changeReference})`, createdAt: input.at });
+      } else {
         const created = topics.createTopic({ displayName: target.create.displayName, stage: target.create.stage, createdAt: input.at,
           rationale: JSON.stringify({ origin: 'space_mapping_registration', changeReference, projectKey: project.projectKey }) });
         topics.addRelation({ fromTopicId: created.id, toTopicId: target.rootId, relationType: 'part_of',
