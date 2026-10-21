@@ -60,6 +60,50 @@ describe('Space mapping registration', () => {
     expect(counts(h.db)).toEqual(before);
   });
 
+  it('files an existing entry that sits under no line under the line the plan names, once', () => {
+    const h = setup();
+    const orphan = h.topics.createTopic({ displayName: '超级个体与超级团队', stage: 'active_project', createdAt: at });
+    const linePlan = { projects: [{ projectKey: 'super-individual-to-team', displayName: '超级个体到超级团队', aliases: [],
+      page: { pageId: 'page_99af645338808191b63c00a4ba33b031', pageUrl: 'https://chatgpt.com/space/page_99af645338808191b63c00a4ba33b031' },
+      topic: { existingDisplayName: '超级个体与超级团队', line: 'B' } }] };
+    const before = counts(h.db);
+    const preview = previewSpaceMapping(h.db.client, linePlan);
+    expect(preview.ok).toBe(true);
+    expect(preview.actions.find((a) => a.step === 'topic_line')).toEqual({ step: 'topic_line', subject: 'super-individual-to-team',
+      status: 'will_create', detail: '把条目放到 B 线（自媒体生产线）下：超级个体与超级团队' });
+    expect(counts(h.db)).toEqual(before);
+    applySpaceMapping(h.db.client, linePlan, { changeReference: 'CHG-SPACE-MAP-2', at });
+    expect(h.topics.listRelations(orphan.id)).toEqual([expect.objectContaining({ fromTopicId: orphan.id, toTopicId: h.b.id, relationType: 'part_of' })]);
+    expect(new FounderTopicProjectBindingRepository(h.db.client).getCanonicalBindingForProject('super-individual-to-team'))
+      .toMatchObject({ topicId: orphan.id, source: 'human_confirmed' });
+    const again = previewSpaceMapping(h.db.client, linePlan);
+    expect(again.actions.every((a) => a.status === 'unchanged')).toBe(true);
+    expect(again.actions.find((a) => a.step === 'topic_line')?.detail).toBe('已在 B 线（自媒体生产线）下');
+  });
+
+  it('previews the 2026-10-21 plan: Family First new under A, 超级个体 filed under B, Smart Listing as registered', () => {
+    const h = setup();
+    h.topics.createTopic({ displayName: '超级个体与超级团队', stage: 'active_project', createdAt: at });
+    const latest = JSON.parse(readFileSync(new URL('../docs/2026-10-21-space-mapping-plan.json', import.meta.url), 'utf8'));
+    const preview = previewSpaceMapping(h.db.client, latest);
+    expect(preview.ok).toBe(true);
+    expect(preview.actions.filter((a) => a.step === 'topic' || a.step === 'topic_line').map((a) => `${a.subject}:${a.status}`)).toEqual([
+      'smart-listing:unchanged', 'family-first-ai-os:will_create', 'super-individual-to-team:unchanged', 'super-individual-to-team:will_create']);
+  });
+
+  it('never moves an existing entry that already sits under a different line', () => {
+    const h = setup();
+    const linePlan = { projects: [{ projectKey: 'smart-listing', displayName: 'Smart Listing', aliases: [],
+      page: { pageId: 'page_f095a79b4bb48191b797811f8f53862d', pageUrl: 'https://chatgpt.com/space/page_f095a79b4bb48191b797811f8f53862d' },
+      topic: { existingDisplayName: 'Smart Listing', line: 'B' } }] };
+    const before = counts(h.db);
+    expect(previewSpaceMapping(h.db.client, linePlan).actions.find((a) => a.step === 'topic_line')).toMatchObject({ status: 'conflict',
+      detail: '条目已在其他线下（AiJia AI Native 房产业务），不会移动' });
+    expect(() => applySpaceMapping(h.db.client, linePlan, { changeReference: 'CHG', at })).toThrow(SpaceMappingRejectedError);
+    expect(counts(h.db)).toEqual(before);
+    expect(h.topics.listRelations(h.smart.id).filter((r) => r.relationType === 'part_of')).toHaveLength(1);
+  });
+
   it('rejects the whole plan, writing nothing, when any target conflicts', () => {
     const h = setup();
     h.db.client.prepare(`INSERT INTO projects (project_key, display_name, aliases, status, origin, stage, created_at, updated_at)
