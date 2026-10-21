@@ -59,6 +59,7 @@
     - 在容器里跑放在 `/work` 下的脚本时，用 `createRequire('/app/package.json')` 加载 better-sqlite3，否则找不到包。
   - 2026-10-21 S1 完成：生产 `9ce5afa`（回滚镜像 `rollback-pre-space-s1-20261020T172100Z`）。Smart Listing 已登记，页面已导入（来源 376 条），三个 Space 开关仍关闭，工作地图不变。
     - `server.ts` 原先没有接上 `SPACE_SYNC_INGEST_ENABLED` 和 `SPACE_SYNC_ANALYSIS_ENABLED`。2026-10-21 已在本地接好并合并（`src/composition/space-sync.ts`），未上线；开关关闭时行为不变。S2 要先发版带上这次接线。
+    - 2026-10-21 S2 发版完成：生产 `128038a`（回滚镜像 `rollback-pre-space-s2-code-20261021T045213Z`），开关仍全关。打开开关前发现 nginx 把 `feishu-codex.aijia.ai` 的所有路径都转发给 Bridge，`/internal/` 也在内，所以停下，未生成密钥、未改 `bridge.env`。堵住方式待 Ivy 选择。nginx 配置在 `/root/RealAgentAI_cc/nginx.conf`，与 RealAgent 生产站点共用。
     - 服务器宿主机没有 node；脚本里解析 JSON 要用 `docker exec -i <容器> node`。`docker cp` 拷进容器的文件属于 root，要用 `docker exec -u 0` 改权限后，容器里的 node 用户才能读。
   - Ivy 常在群里发 PDF、视频、音频、md 和飞书文档。现有代码只提取 md/txt/html/docx/xlsx 的文字，PDF、语音和飞书文档内容都只记缺口。是否补上，待 Ivy 决定。
   - Ivy 的 Smart Listing 页面 Markdown 在 `~/Downloads/AiJia Smart Listing 与买家空间项目总览.md`，页首写着「更新于 2026 年 10 月 19 日」，页面没有评论。不要复制进仓库。
