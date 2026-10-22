@@ -82,6 +82,11 @@
     - 已在某条线下的条目，登记时不会被移到别的线，整份登记会被拒绝。
     - 2026-10-21 已上线并接入：生产 `345d65d`，回滚镜像 `rollback-pre-space-more-pages-20261021T150107Z`。三个页面的摘要都已生成，工作地图条目 40，显示 20。
     - 页面最后更新早于本周时，唯一的版本会被当作本周的对比基准，显示「本周页面无进展类更新」，不会显示「首次同步」。
+    - 2026-10-22 Ivy 反映 Family First 项目进展卡片顶部没有白板预览图。核查结果：
+      - 服务器端正常：卡片里有图片元素，飞书上能取到这张图，白板也已创建。
+      - Ivy 重新打开消息后图就出来了，是飞书客户端加载慢。
+      - 以后遇到同类问题，先用机器人身份只读查消息和图片，再让 Ivy 重新打开；不要先改代码。
+      - 机器人没有 `board:whiteboard:node:read` 权限，读不到白板节点。不要为排查去申请。
     - 两个页面的 Markdown 在 `~/Downloads/`（「Family First 项目大本营与看房展示.md」「超级个体到超级团队 视频项目与候选口播.md」），不要复制进仓库。
   - Ivy 的 Smart Listing 页面 Markdown 在 `~/Downloads/AiJia Smart Listing 与买家空间项目总览.md`，页首写着「更新于 2026 年 10 月 19 日」，页面没有评论。不要复制进仓库。
   - 生产 DB 在容器内的路径是 `/app/data/bridge.sqlite`（宿主机 `/opt/feishu-codex/data`）。只读核查可以用 `docker exec … node` 加 better-sqlite3 的 `readonly` + `query_only`，不需要宿主机装 sqlite3。
