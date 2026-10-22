@@ -64,7 +64,8 @@ describe('current founder work map CLI',()=>{
       contentText:'页面',metadata:{pageId:'page_1',blocks:[{id:'b1',hash:'a'.repeat(64),markdown:'页面'}]},availabilityStatus:'available',capturedAt:at}).source;
     new SpaceProjectDigestRepository(db.client).saveReady({projectKey:'smart-listing',pageId:'page_1',pageSourceId:page.id,pageSourceVersion:1,
       pageUpdatedAt:page.occurredAt,generatedAt:at,changeBasis:'first_snapshot',digest:{currentFocus:{text:'Amy V2 真实验收',blockId:'b1',excerpt:'页面'},
-        weekProgress:[{text:'Task 1–9 完成',blockId:'b1',excerpt:'页面'}],todayProgress:[],nextSteps:[]}});
+        weekProgress:[{text:'Task 1–9 完成',blockId:'b1',excerpt:'页面'}],todayProgress:[],nextSteps:[],
+        profile:{positioning:null,phases:[],completed:[],inProgress:[],pending:[],problems:[],divergences:[],nextPlan:[]}}});
     const args={chatId:'oc_a84d5b6ca478220d0a37964b50776edb',since:'2026-08-31T00:00:00Z',until:at.toISOString(),expectedCanonicalTopicCount:1};
     const plain=buildCurrentFounderWorkMapPreview(db.client,{...args,withSpace:false});
     const withSpace=buildCurrentFounderWorkMapPreview(db.client,{...args,withSpace:true});

@@ -10,16 +10,39 @@ const promptMarkdownBudget = 120_000;
 const digestItemSchema = z.object({ text: text(80), blockId: text(256), excerpt: text(400) }).strict();
 const nextStepSchema = digestItemSchema.extend({ kind: z.enum(['next', 'blocker']) }).strict();
 
-/** Hard caps keep the work map a glance, not a page rewrite: 1 focus, ≤3 week, ≤2 today, ≤2 next/blockers. */
-export const spaceProjectDigestSchema = z.object({
+const phaseSchema = digestItemSchema.extend({ name: text(30), status: z.enum(['done', 'current', 'upcoming']) }).strict();
+
+/**
+ * The page-level picture behind 查看项目进展: what the project is, its phases as the page divides them, and the page's
+ * own completed / in-progress / pending / problems / divergences / next plan. Not time-windowed, so it never claims
+ * "this week"; every item is grounded in a verbatim excerpt like the rest of the digest.
+ */
+export const spaceProjectProfileSchema = z.object({
+  positioning: digestItemSchema.nullable(),
+  phases: z.array(phaseSchema).max(6),
+  completed: z.array(digestItemSchema).max(5),
+  inProgress: z.array(digestItemSchema).max(3),
+  pending: z.array(digestItemSchema).max(3),
+  problems: z.array(digestItemSchema).max(3),
+  divergences: z.array(digestItemSchema).max(2),
+  nextPlan: z.array(digestItemSchema).max(3)
+}).strict();
+
+const digestFields = {
   currentFocus: digestItemSchema.nullable(),
   weekProgress: z.array(digestItemSchema).max(3),
   todayProgress: z.array(digestItemSchema).max(2),
   nextSteps: z.array(nextStepSchema).max(2)
-}).strict();
+};
+/** Hard caps keep the work map a glance, not a page rewrite: 1 focus, ≤3 week, ≤2 today, ≤2 next/blockers. Every new digest carries a profile. */
+export const spaceProjectDigestSchema = z.object({ ...digestFields, profile: spaceProjectProfileSchema }).strict();
+/** Digests stored before profiles existed are still read; the worker regenerates them once. */
+export const storedSpaceProjectDigestSchema = z.object({ ...digestFields, profile: spaceProjectProfileSchema.optional() }).strict();
 export const spaceProjectDigestJsonSchema = z.toJSONSchema(spaceProjectDigestSchema);
 
 export type SpaceProjectDigest = z.infer<typeof spaceProjectDigestSchema>;
+export type StoredSpaceProjectDigest = z.infer<typeof storedSpaceProjectDigestSchema>;
+export type SpaceProjectProfile = z.infer<typeof spaceProjectProfileSchema>;
 export type SpaceDigestItem = z.infer<typeof digestItemSchema>;
 
 export interface SpaceDigestInputBlock { id: string; markdown: string; changedThisWeek: boolean; changedToday: boolean }
@@ -40,7 +63,7 @@ export interface SpaceProjectDigestAnalyzer {
 }
 
 export type SpaceDigestValidationReason = 'schema_invalid' | 'unknown_block' | 'excerpt_not_verbatim' |
-  'week_item_not_changed_this_week' | 'today_item_not_changed_today' | 'today_without_version_diff';
+  'week_item_not_changed_this_week' | 'today_item_not_changed_today' | 'today_without_version_diff' | 'phase_current_not_unique';
 
 export class SpaceDigestValidationError extends Error {
   readonly code = 'SPACE_DIGEST_OUTPUT_INVALID';
@@ -95,5 +118,9 @@ export function validateSpaceDigest(raw: unknown, input: SpaceProjectDigestInput
   for (const item of digest.todayProgress) {
     if (!grounded(item).changedToday) throw new SpaceDigestValidationError('today_item_not_changed_today');
   }
+  const { positioning, phases, ...sections } = digest.profile;
+  if (positioning) grounded(positioning);
+  for (const item of [...phases, ...Object.values(sections).flat()]) grounded(item);
+  if (phases.filter((phase) => phase.status === 'current').length > 1) throw new SpaceDigestValidationError('phase_current_not_unique');
   return digest;
 }

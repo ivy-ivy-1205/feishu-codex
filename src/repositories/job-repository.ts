@@ -240,12 +240,16 @@ export class JobRepository {
   }
 
   /** Queued for the founder-stream consumer only; scoped by projectKey instead of chatId. */
+  /**
+   * `profileRefresh` re-runs one page whose digest predates profiles; its own key keeps it from colliding with the
+   * page's original (completed) batch, and makes it run once.
+   */
   enqueueSpaceStreamBatch(input: {
-    projectKey: string; since: string; until: string; sourceIds: readonly string[]; capturedAt: Date;
+    projectKey: string; since: string; until: string; sourceIds: readonly string[]; capturedAt: Date; profileRefresh?: boolean;
   }): { created: boolean; key: string } {
     const sourceIds = [...new Set(input.sourceIds)].sort();
     if (sourceIds.length === 0) throw new Error('space stream batch requires sources');
-    const windowKey = `space:${sha256(canonicalJson(sourceIds))}`;
+    const windowKey = `${input.profileRefresh ? 'space-profile' : 'space'}:${sha256(canonicalJson(sourceIds))}`;
     const payload = { projectKey: input.projectKey, since: input.since, until: input.until, sourceIds, windowKey, attempt: 0 };
     const key = `analyze_founder_stream_space_batch:${input.projectKey}:${windowKey}`;
     const timestamp = input.capturedAt.toISOString();

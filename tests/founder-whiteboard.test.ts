@@ -45,6 +45,58 @@ describe('founder whiteboard',()=>{
     for(const original of [direction,space,status])expect(shown).toContain(flat(original));
   });
 
+  it('lays out project progress in Ivy’s reading order: positioning, phases, then sections in pairs, with the title once',()=>{
+    const view={kind:'project_progress' as const,title:'Family First',positioning:'为家庭买家做一套可漫游的看房展示，让客户看懂房子和生活方式',
+      status:'正在推进 · 第 2 阶段：V0.3 生活导览',
+      phases:[{name:'资料核对',tasks:'CDC 合订本与建筑基线核对',status:'done' as const},
+        {name:'V0.3 生活导览',tasks:'两条生活路线、重点站点与体验评审',status:'current' as const},
+        {name:'视频与发布',tasks:'外立面关键帧与视频生成',status:'upcoming' as const}],
+      phasesEmpty:'无',sections:[
+        {title:'已完成',items:['收到 610 页 CDC 合订本并完成建筑基线及外观差异核对','完成外立面四个关键帧及首次视频生成试片']},
+        {title:'正在做',items:['评审 V0.3 两条生活路线的重点站点与体验']},
+        {title:'待推进',items:['确认重点站点修改方向']},
+        {title:'卡点与问题',items:['待澄清地下用途、图纸发行状态及泳池窗标高差异']},
+        {title:'分歧',items:[]},
+        {title:'下一步计划',items:['集中评审 V0.3 表达与体验']}],
+      footer:'资料截至：群聊 10-22 12:13 · Space 页面 10-19 更新（10-21 23:03 同步）\n明细发“查看处理状态”。'};
+    for(const palette of founderPalettes){
+      const board=buildFounderWhiteboard({title:'项目进展 · Family First',paletteId:palette.id,cards:[],view});
+      const texts=board.nodes.filter(node=>node.type==='text_shape'&&node.text?.text);
+      const all=texts.map(node=>node.text!.text!).join('\n');
+      expect(all.split('Family First').length-1,palette.id).toBe(1);
+      const headers=['项目定位','阶段规划','已完成','正在做','待推进','卡点与问题','分歧','下一步计划'].map(title=>
+        texts.find(node=>node.text!.text!.startsWith(title))!);
+      expect(headers.every(Boolean),palette.id).toBe(true);
+      // Reading order: top to bottom, left before right within a row.
+      for(let index=1;index<headers.length;index++){const previous=headers[index-1]!,current=headers[index]!;
+        expect(current.y!>previous.y!||(current.y===previous.y&&current.x!>previous.x!),`${palette.id}: ${current.text!.text}`).toBe(true);}
+      expect(headers[2]!.y).toBe(headers[3]!.y);expect(headers[4]!.y).toBe(headers[5]!.y);expect(headers[6]!.y).toBe(headers[7]!.y);
+      expect(all).toContain('▶ 2 V0.3 生活导览');
+      expect(all).toContain('无');
+      expect(texts.at(-1)!.text!.text).toContain('资料截至');
+      // Every text node stays inside the board and readable on the fill directly behind it.
+      texts.forEach(node=>{
+        expect(node.x!+node.width!).toBeLessThanOrEqual(board.width);expect(node.y!+node.height!).toBeLessThanOrEqual(board.height);
+        const ems=(line:string)=>Array.from(line).reduce((sum,char)=>sum+(/[\p{Script=Han}\u3000-\u303F\uFF00-\uFFEF“”（）•✓▶○]/u.test(char)?1:0.62),0);
+        if(node.text!.horizontal_align!=='right')for(const line of node.text!.text!.split('\n'))expect(ems(line)*node.text!.font_size!,line).toBeLessThanOrEqual(node.width!);
+        expect(node.height!).toBeGreaterThanOrEqual(node.text!.text!.split('\n').length*Math.round(node.text!.font_size!*1.38)-1);
+        const index=board.nodes.indexOf(node);
+        const behind=board.nodes.slice(0,index).filter(candidate=>candidate.type==='composite_shape'&&(candidate.x??0)<=node.x!&&(candidate.y??0)<=node.y!&&
+          (candidate.x??0)+(candidate.width??0)>=node.x!+node.width!&&(candidate.y??0)+(candidate.height??0)>=node.y!+node.height!).at(-1);
+        expect(contrastRatio(node.text!.text_color!,behind!.style!.fill_color!),`${palette.id}: ${node.text!.text}`).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  });
+
+  it('says plainly when a project has no phases, and never falls back to re-flowed card text',()=>{
+    const board=buildFounderWhiteboard({title:'项目进展 · 超级个体与超级团队',paletteId:'macchiato',cards:[{header:{title:{content:'不应出现'}},elements:[]}],
+      view:{kind:'project_progress',title:'超级个体与超级团队',positioning:'无',status:'正在推进',phases:[],phasesEmpty:'无（Space 页面没有划分阶段）',
+        sections:['已完成','正在做','待推进','卡点与问题','分歧','下一步计划'].map(title=>({title,items:[]})),footer:'资料截至：群聊 尚无已分析消息'}});
+    const all=board.nodes.flatMap(node=>node.text?.text?[node.text.text]:[]).join('\n');
+    expect(all).toContain('无（Space 页面没有划分阶段）');
+    expect(all).not.toContain('不应出现');
+  });
+
   it('emits text nodes in the official OpenAPI shape without transparent style colors',()=>{
     const result=buildFounderWhiteboard({title:'工作地图',paletteId:'coral',cards:[{
       header:{title:{content:'工作地图 · 1/1'}},elements:[{text:{content:'当前阶段\n正在推进'}}]
