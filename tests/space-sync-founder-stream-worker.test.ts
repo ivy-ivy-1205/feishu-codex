@@ -15,6 +15,8 @@ import { AlignmentRepository } from '../src/repositories/alignment-repository.js
 import { SpaceProjectDigestRepository } from '../src/repositories/space-project-digest-repository.js';
 import type { SpaceProjectDigestInput } from '../src/services/space-project-digest.js';
 
+const noProfile = { positioning: null, phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], nextPlan: [] };
+
 const start = new Date('2026-10-19T00:00:00.000Z');
 const chat = 'oc_a84d5b6ca478220d0a37964b50776edb';
 
@@ -270,7 +272,7 @@ describe('Space project-page digest per page version', () => {
 
   it('stores a grounded digest for the latest page version without touching the topic', async () => {
     const h = digestHarness(async (input) => ({ currentFocus: { text: '项目总览', blockId: input.blocks[0]!.id, excerpt: '项目总览' },
-      weekProgress: [], todayProgress: [], nextSteps: [] }));
+      weekProgress: [], todayProgress: [], nextSteps: [], profile: noProfile }));
     const topic = canonicalTopic(h);
     const page = spacePageSource(h.sources);
     h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
@@ -280,6 +282,32 @@ describe('Space project-page digest per page version', () => {
     expect(h.digests.getLatestForProject('smart_listing')).toMatchObject({ status: 'ready', pageSourceId: page.id,
       changeBasis: 'first_snapshot', digest: { currentFocus: { excerpt: '项目总览' } } });
     expect(h.topics.listCurrentTopics()[0]).toMatchObject({ id: topic.id, currentVersion: 1 });
+  });
+
+  it('regenerates, once, a ready digest stored before profiles existed so 查看项目进展 gets positioning and phases', async () => {
+    const h = digestHarness(async (input) => ({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [],
+      profile: { ...noProfile, positioning: { text: '项目总览', blockId: input.blocks[0]!.id, excerpt: '项目总览' } } }));
+    canonicalTopic(h);
+    const page = spacePageSource(h.sources);
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [page.id], capturedAt: start });
+    h.db.client.prepare("UPDATE batch_jobs SET status='completed' WHERE type='analyze_founder_stream_space_batch'").run();
+    h.db.client.prepare(`INSERT INTO space_project_digests (id, project_key, page_id, page_source_id, page_source_version, page_updated_at,
+      status, change_basis, digest_json, failure_code, generated_at) VALUES ('legacy', 'smart_listing', 'page_1', ?, 1, ?, 'ready', 'first_snapshot', ?, NULL, ?)`)
+      .run(page.id, page.occurredAt, JSON.stringify({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [] }), start.toISOString());
+    for (let tick = 0; tick < 3; tick += 1) { await h.runtime.afterTick(); await h.runtime.runOnce(); }
+    expect(h.calls).toHaveLength(1);
+    expect(h.digests.getForPageSource(page.id)?.digest?.profile?.positioning).toMatchObject({ excerpt: '项目总览' });
+    expect(h.db.client.prepare("SELECT count(*) n FROM outbox").get()).toEqual({ n: 0 });
+  });
+
+  it('never re-digests a page whose digest already has a profile', async () => {
+    const h = digestHarness(async (input) => ({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [],
+      profile: { ...noProfile, positioning: { text: '项目总览', blockId: input.blocks[0]!.id, excerpt: '项目总览' } } }));
+    canonicalTopic(h);
+    spacePageSource(h.sources);
+    for (let tick = 0; tick < 3; tick += 1) { await h.runtime.afterTick(); await h.runtime.runOnce(); }
+    expect(h.calls).toHaveLength(1);
   });
 
   it('retries a failing digest, then records a visible failure gap and completes', async () => {
@@ -310,7 +338,7 @@ describe('Space project-page digest per page version', () => {
   });
 
   it('skips a superseded page version replayed late', async () => {
-    const h = digestHarness(async () => ({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [] }));
+    const h = digestHarness(async () => ({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile: noProfile }));
     canonicalTopic(h);
     const old = spacePageSource(h.sources, { text: '旧版本' });
     spacePageSource(h.sources, { text: '新版本', occurredAt: new Date(start.getTime() + 1_000).toISOString() });
@@ -400,7 +428,7 @@ describe('Space digest grounding is enforced by the worker, not only by the Code
       flags: { captureEnabled: false, analysisEnabled: false, groupDeliveryEnabled: false },
       approvedChatIds: [], ivyPrivateChatId: 'oc_private', now: () => start, spaceAnalysisEnabled: true,
       spaceDigestAnalyzer: { async digest(input) { return { currentFocus: { text: 'x', blockId: input.blocks[0]!.id, excerpt: '页面没有这句话' },
-        weekProgress: [], todayProgress: [], nextSteps: [] }; } }
+        weekProgress: [], todayProgress: [], nextSteps: [], profile: noProfile }; } }
     });
     canonicalTopic(h);
     const page = spacePageSource(h.sources);

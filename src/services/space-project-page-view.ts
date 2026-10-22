@@ -18,12 +18,16 @@ export interface SpaceProjectPageView {
   comments: { open: number; resolved: number; ivy: number; james: number; other: number; divergenceCandidates: number };
   /** Plain-language names of what the latest sync did not cover; absent when the gap records are unavailable. */
   syncGaps?: string[];
+  /** Short names of the same gaps for one-line footers ("评论未同步"). */
+  syncGapsShort?: string[];
 }
 
 const gapLabels: Record<string, string> = {
   comments_not_exported: '评论未同步（本次只导入了页面正文），评论里的看法暂未计入',
   page_updated_at_unknown: '页面更新时间未知'
 };
+
+const gapShortLabels: Record<string, string> = { comments_not_exported: '评论未同步' };
 
 const failureLabels: Record<string, string> = {
   analyzer_unavailable: '摘要服务未启用', codex_auth_required: '本地 Codex 需要重新登录',
@@ -42,12 +46,14 @@ export function loadSpaceProjectPageView(client: Database.Database, topicId: str
   if (!binding) return null;
   const latestRun = spaceSync.getLatestRunForBinding(binding.id);
   const freshness = computeSpaceFreshness({ binding, latestRun, now, staleAfterMinutes });
-  const syncGaps = latestRun ? (client.prepare(`SELECT content_text, json_extract(metadata_json, '$.gapCode') AS code FROM context_sources
+  const gapRows = latestRun ? client.prepare(`SELECT content_text, json_extract(metadata_json, '$.gapCode') AS code FROM context_sources
     WHERE source_type = 'space_sync_gap' AND json_extract(metadata_json, '$.pageId') = ? AND json_extract(metadata_json, '$.syncId') = ?
-    ORDER BY logical_key`).all(binding.pageId, latestRun.id) as { content_text: string; code: string | null }[])
-    .map((gap) => gapLabels[gap.code ?? ''] ?? founderText(gap.content_text, 60)) : [];
+    ORDER BY logical_key`).all(binding.pageId, latestRun.id) as { content_text: string; code: string | null }[] : [];
+  const syncGaps = gapRows.map((gap) => gapLabels[gap.code ?? ''] ?? founderText(gap.content_text, 60));
+  const syncGapsShort = gapRows.flatMap((gap) => gapShortLabels[gap.code ?? ''] ?? []);
   if (latestRun && !latestRun.coverageCommentsComplete && !syncGaps.some((gap) => gap.startsWith('评论'))) syncGaps.push('评论未读完整');
-  if (latestRun && !latestRun.coveragePageComplete) syncGaps.push('页面正文未读完整');
+  if (latestRun && !latestRun.coverageCommentsComplete && !syncGapsShort.some((gap) => gap.startsWith('评论'))) syncGapsShort.push('评论未读完整');
+  if (latestRun && !latestRun.coveragePageComplete) { syncGaps.push('页面正文未读完整'); syncGapsShort.push('页面正文未读完整'); }
   const latestByKey = new Map<string, ReturnType<ContextSourceRepository['listSources']>[number]>();
   for (const source of new ContextSourceRepository(client).listSpacePageSources(binding.pageId)) latestByKey.set(source.logicalKey, source);
   const latest = [...latestByKey.values()];
@@ -77,7 +83,7 @@ export function loadSpaceProjectPageView(client: Database.Database, topicId: str
     digest: digest ? { status: digest.status, changeBasis: digest.changeBasis, digest: digest.digest, failureCode: digest.failureCode,
       generatedAt: digest.generatedAt, generatedToday: Date.parse(digest.generatedAt) >= Date.parse(windows.todayStart),
       generatedThisWeek: Date.parse(digest.generatedAt) >= Date.parse(windows.weekStart) } : null,
-    comments, syncGaps };
+    comments, syncGaps, syncGapsShort };
 }
 
 /** One compact block per project: page-recorded status, never attributed to a person, never the page rewritten. */
@@ -85,22 +91,49 @@ export function renderSpaceProjectPageLines(view: SpaceProjectPageView): string[
   return [...spacePageStatusLines(view), ...spaceDigestLines(view), ...spaceCommentLines(view)];
 }
 
+export interface SpaceProjectProgress {
+  positioning: string | null;
+  phases: { name: string; tasks: string; status: 'done' | 'current' | 'upcoming' }[];
+  /** Why there are no phases: no digest yet, an old digest, or the page does not divide the work into phases. */
+  phasesEmpty: string;
+  completed: string[]; inProgress: string[]; pending: string[]; problems: string[]; divergences: string[]; nextPlan: string[];
+  /** "Space 页面 10-21 更新（10-21 10:00 同步）" for the 资料截至 footer. */
+  dataLine: string;
+  unread: string[];
+  notes: string[];
+}
+
 /**
- * 查看项目进展 puts the page's own progress, focus/next steps and blockers into its 已完成 / 待推进 / 卡点 sections,
- * labelled as the page's, so the block above them keeps only the page status and comments. Null until a digest is
- * ready; the card then shows the full block, which says why there is no summary.
+ * 查看项目进展's page side: the page profile in Ivy's sections. A digest stored before profiles existed still fills
+ * 已完成 / 正在做 / 卡点 / 下一步 from its glance fields until it is regenerated; a missing or failed digest is one note.
  */
-export function spaceProgressSections(view: SpaceProjectPageView):
-  { lines: string[]; label: string; completed: string[]; next: string[]; blockers: string[] } | null {
-  const digest = view.digest;
-  if (!digest || digest.status !== 'ready' || !digest.digest) return null;
-  const d = digest.digest, text = (value: string) => founderText(value, 120);
-  const completed = [...new Set([...d.weekProgress, ...d.todayProgress].map((item) => text(item.text)))];
-  return { lines: [...spacePageStatusLines(view), ...spaceCommentLines(view)],
-    label: `Space 页面（${view.pageUpdatedAt ? founderMonthDay(view.pageUpdatedAt) : '更新时间未知'} 更新）`, completed,
-    next: [...(d.currentFocus ? [`当前重点：${text(d.currentFocus.text)}`] : []),
-      ...d.nextSteps.filter((item) => item.kind !== 'blocker').map((item) => text(item.text))],
-    blockers: d.nextSteps.filter((item) => item.kind === 'blocker').map((item) => text(item.text)) };
+export function spaceProjectProgress(view: SpaceProjectPageView): SpaceProjectProgress {
+  const text = (value: string) => founderText(value, 120), texts = (items: readonly { text: string }[]) => items.map((item) => text(item.text));
+  const { freshness } = view, digest = view.digest;
+  const synced = freshness.lastSuccessfulSyncAt ? `${founderMonthDayTime(freshness.lastSuccessfulSyncAt)} 同步` : '尚无成功同步';
+  const notes: string[] = [];
+  if (freshness.status === 'permission_lost') notes.push('权限缺失，页面内容停在最后一次成功同步');
+  else if (freshness.status === 'stale') notes.push('页面内容可能滞后，请以最新页面为准');
+  if (view.comments.open) notes.push(`页面评论未解决 ${view.comments.open} 条`);
+  const base = { phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], nextPlan: [], positioning: null,
+    dataLine: `Space 页面 ${view.pageUpdatedAt ? `${founderMonthDay(view.pageUpdatedAt)} 更新` : '更新时间未知'}（${synced}）`,
+    unread: view.syncGapsShort ?? [], notes };
+  if (!digest || digest.failureCode === 'pending_latest_version') {
+    notes.push(digest ? '最新版本的页面摘要生成中，生成后补上页面内容' : '页面摘要生成中，生成后补上页面内容');
+    return { ...base, phasesEmpty: '无（Space 页面摘要生成中）' };
+  }
+  if (digest.status !== 'ready' || !digest.digest) {
+    notes.push(`页面摘要未生成（${failureLabels[digest.failureCode ?? ''] ?? '原因未知'}），以下只有群聊内容`);
+    return { ...base, phasesEmpty: '无（Space 页面摘要未生成）' };
+  }
+  const d = digest.digest, profile = d.profile;
+  if (!profile) return { ...base, phasesEmpty: '无（页面摘要待更新）',
+    completed: [...new Set(texts([...d.weekProgress, ...d.todayProgress]))], inProgress: d.currentFocus ? [text(d.currentFocus.text)] : [],
+    problems: texts(d.nextSteps.filter((item) => item.kind === 'blocker')), nextPlan: texts(d.nextSteps.filter((item) => item.kind !== 'blocker')) };
+  return { ...base, positioning: profile.positioning ? text(profile.positioning.text) : null,
+    phases: profile.phases.map((phase) => ({ name: founderText(phase.name, 30), tasks: text(phase.text), status: phase.status })),
+    phasesEmpty: '无（Space 页面没有划分阶段）', completed: texts(profile.completed), inProgress: texts(profile.inProgress),
+    pending: texts(profile.pending), problems: texts(profile.problems), divergences: texts(profile.divergences), nextPlan: texts(profile.nextPlan) };
 }
 
 function spacePageStatusLines(view: SpaceProjectPageView): string[] {

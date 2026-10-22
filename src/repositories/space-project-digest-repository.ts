@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
 import { stableId } from '../services/canonical-json.js';
-import { spaceProjectDigestSchema, type SpaceProjectDigest } from '../services/space-project-digest.js';
+import {
+  spaceProjectDigestSchema, storedSpaceProjectDigestSchema, type SpaceProjectDigest, type StoredSpaceProjectDigest
+} from '../services/space-project-digest.js';
 
 export interface SpaceProjectDigestRecord {
   projectKey: string;
@@ -10,7 +12,7 @@ export interface SpaceProjectDigestRecord {
   pageUpdatedAt: string;
   status: 'ready' | 'failed';
   changeBasis: 'version_diff' | 'first_snapshot' | null;
-  digest: SpaceProjectDigest | null;
+  digest: StoredSpaceProjectDigest | null;
   failureCode: string | null;
   generatedAt: string;
 }
@@ -18,7 +20,10 @@ export interface SpaceProjectDigestRecord {
 interface SaveBase { projectKey: string; pageId: string; pageSourceId: string; pageSourceVersion: number;
   pageUpdatedAt: string; generatedAt: Date }
 
-/** One digest per stored page version; a ready digest is never replaced by a later failure. */
+/**
+ * One digest per stored page version; a ready digest is never replaced by a later failure. The one exception to
+ * "ready stays": a digest stored before profiles existed is replaced once by a profiled one.
+ */
 export class SpaceProjectDigestRepository {
   constructor(readonly client: Database.Database) {}
 
@@ -30,7 +35,7 @@ export class SpaceProjectDigestRepository {
       VALUES (?, ?, ?, ?, ?, ?, 'ready', ?, ?, NULL, ?)
       ON CONFLICT(page_source_id) DO UPDATE SET status='ready', change_basis=excluded.change_basis,
         digest_json=excluded.digest_json, failure_code=NULL, generated_at=excluded.generated_at
-      WHERE space_project_digests.status <> 'ready'
+      WHERE space_project_digests.status <> 'ready' OR json_extract(space_project_digests.digest_json, '$.profile') IS NULL
     `).run(digestId(input.pageSourceId), input.projectKey, input.pageId, input.pageSourceId, input.pageSourceVersion,
       input.pageUpdatedAt, input.changeBasis, JSON.stringify(digest), input.generatedAt.toISOString());
   }
@@ -70,6 +75,6 @@ interface Row {
 function toRecord(row: Row): SpaceProjectDigestRecord {
   return { projectKey: row.project_key, pageId: row.page_id, pageSourceId: row.page_source_id,
     pageSourceVersion: row.page_source_version, pageUpdatedAt: row.page_updated_at, status: row.status,
-    changeBasis: row.change_basis, digest: row.digest_json ? spaceProjectDigestSchema.parse(JSON.parse(row.digest_json)) : null,
+    changeBasis: row.change_basis, digest: row.digest_json ? storedSpaceProjectDigestSchema.parse(JSON.parse(row.digest_json)) : null,
     failureCode: row.failure_code, generatedAt: row.generated_at };
 }

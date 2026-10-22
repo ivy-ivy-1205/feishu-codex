@@ -35,6 +35,7 @@ function weekInput(): SpaceProjectDigestInput {
 }
 
 const item = (blockId: string, excerpt: string) => ({ text: excerpt.slice(0, 20), blockId, excerpt });
+const noProfile = { positioning: null, phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], nextPlan: [] };
 
 describe('buildSpaceDigestInput', () => {
   it('marks this-week and today changed blocks from stored page versions', () => {
@@ -62,25 +63,45 @@ describe('buildSpaceDigestInput', () => {
 describe('validateSpaceDigest', () => {
   it('accepts a grounded, capped digest', () => {
     const digest = { currentFocus: item('b_old', '上线买家空间'), weekProgress: [item('b_week', '27 Cecil Street 页面已上线')],
-      todayProgress: [item('b_today', '补齐了户型图')], nextSteps: [{ ...item('b_week', '等待 Amy 反馈'), kind: 'blocker' }] };
+      todayProgress: [item('b_today', '补齐了户型图')], nextSteps: [{ ...item('b_week', '等待 Amy 反馈'), kind: 'blocker' }], profile: noProfile };
     expect(validateSpaceDigest(digest, weekInput())).toEqual(digest);
   });
 
   it.each([
-    ['unknown_block', { currentFocus: item('b_missing', '上线'), weekProgress: [], todayProgress: [], nextSteps: [] }],
-    ['excerpt_not_verbatim', { currentFocus: item('b_old', '上线卖家空间'), weekProgress: [], todayProgress: [], nextSteps: [] }],
-    ['week_item_not_changed_this_week', { currentFocus: null, weekProgress: [item('b_old', '上线买家空间')], todayProgress: [], nextSteps: [] }],
-    ['today_item_not_changed_today', { currentFocus: null, weekProgress: [], todayProgress: [item('b_week', '页面已上线')], nextSteps: [] }],
-    ['schema_invalid', { currentFocus: null, weekProgress: [1, 2, 3, 4].map(() => item('b_week', '页面已上线')), todayProgress: [], nextSteps: [] }]
+    ['unknown_block', { currentFocus: item('b_missing', '上线'), weekProgress: [], todayProgress: [], nextSteps: [], profile: noProfile }],
+    ['excerpt_not_verbatim', { currentFocus: item('b_old', '上线卖家空间'), weekProgress: [], todayProgress: [], nextSteps: [], profile: noProfile }],
+    ['week_item_not_changed_this_week', { currentFocus: null, weekProgress: [item('b_old', '上线买家空间')], todayProgress: [], nextSteps: [], profile: noProfile }],
+    ['today_item_not_changed_today', { currentFocus: null, weekProgress: [], todayProgress: [item('b_week', '页面已上线')], nextSteps: [], profile: noProfile }],
+    ['schema_invalid', { currentFocus: null, weekProgress: [1, 2, 3, 4].map(() => item('b_week', '页面已上线')), todayProgress: [], nextSteps: [], profile: noProfile }]
   ])('rejects %s', (reason, digest) => {
+    expect(() => validateSpaceDigest(digest, weekInput())).toThrow(expect.objectContaining({ reason }));
+  });
+
+  it('accepts a grounded project profile: positioning, phases, and each progress section', () => {
+    const profile = { positioning: item('b_old', '上线买家空间'),
+      phases: [{ ...item('b_old', '项目目标'), name: '第一阶段', status: 'done' }, { ...item('b_week', '27 Cecil Street 页面已上线'), name: '样板上线', status: 'current' }],
+      completed: [item('b_week', '27 Cecil Street 页面已上线')], inProgress: [item('b_today', '补齐了户型图')], pending: [],
+      problems: [item('b_week', '等待 Amy 反馈')], divergences: [], nextPlan: [item('b_week', '等待 Amy 反馈')] };
+    const digest = { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile };
+    expect(validateSpaceDigest(digest, weekInput())).toEqual(digest);
+  });
+
+  it.each([
+    ['schema_invalid', undefined],
+    ['unknown_block', { ...noProfile, completed: [item('b_missing', '上线')] }],
+    ['excerpt_not_verbatim', { ...noProfile, positioning: item('b_old', '上线卖家空间') }],
+    ['phase_current_not_unique', { ...noProfile, phases: [{ ...item('b_old', '项目目标'), name: '一', status: 'current' },
+      { ...item('b_week', '页面已上线'), name: '二', status: 'current' }] }]
+  ])('rejects a profile with %s', (reason, profile) => {
+    const digest = { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], ...(profile ? { profile } : {}) };
     expect(() => validateSpaceDigest(digest, weekInput())).toThrow(expect.objectContaining({ reason }));
   });
 
   it('allows page-recorded progress but no "today" claims on a first snapshot', () => {
     const input = { ...weekInput(), changeBasis: 'first_snapshot' as const };
-    expect(validateSpaceDigest({ currentFocus: null, weekProgress: [item('b_old', '上线买家空间')], todayProgress: [], nextSteps: [] }, input))
+    expect(validateSpaceDigest({ currentFocus: null, weekProgress: [item('b_old', '上线买家空间')], todayProgress: [], nextSteps: [], profile: noProfile }, input))
       .toMatchObject({ weekProgress: [{ blockId: 'b_old' }] });
-    expect(() => validateSpaceDigest({ currentFocus: null, weekProgress: [], todayProgress: [item('b_today', '补齐了户型图')], nextSteps: [] }, input))
+    expect(() => validateSpaceDigest({ currentFocus: null, weekProgress: [], todayProgress: [item('b_today', '补齐了户型图')], nextSteps: [], profile: noProfile }, input))
       .toThrow(SpaceDigestValidationError);
   });
 });
@@ -89,19 +110,21 @@ describe('CodexSpaceProjectDigestAnalyzer', () => {
   it('retries once with the validation reason, then returns the grounded digest', async () => {
     const prompts: string[] = [];
     const outputs = [
-      { currentFocus: item('b_old', '编造的原文'), weekProgress: [], todayProgress: [], nextSteps: [] },
-      { currentFocus: item('b_old', '上线买家空间'), weekProgress: [], todayProgress: [], nextSteps: [] }
+      { currentFocus: item('b_old', '编造的原文'), weekProgress: [], todayProgress: [], nextSteps: [], profile: noProfile },
+      { currentFocus: item('b_old', '上线买家空间'), weekProgress: [], todayProgress: [], nextSteps: [], profile: noProfile }
     ];
     const analyzer = new CodexSpaceProjectDigestAnalyzer({ codex: { async executeJson({ prompt }) { prompts.push(prompt); return outputs.shift(); } } });
     await expect(analyzer.digest(weekInput())).resolves.toMatchObject({ currentFocus: { blockId: 'b_old' } });
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain('excerpt_not_verbatim');
     expect(prompts[0]).toContain('项目页记载');
+    expect(prompts[0]).toContain('profile.phases');
+    expect(prompts[0]).toContain('不要自行划分');
   });
 
   it('fails after two invalid outputs instead of storing an ungrounded digest', async () => {
     const analyzer = new CodexSpaceProjectDigestAnalyzer({ codex: { async executeJson() {
-      return { currentFocus: item('b_missing', 'x'), weekProgress: [], todayProgress: [], nextSteps: [] }; } } });
+      return { currentFocus: item('b_missing', 'x'), weekProgress: [], todayProgress: [], nextSteps: [], profile: noProfile }; } } });
     await expect(analyzer.digest(weekInput())).rejects.toBeInstanceOf(SpaceDigestValidationError);
   });
 });
@@ -114,10 +137,28 @@ describe('SpaceProjectDigestRepository', () => {
       pageUpdatedAt: page.occurredAt, generatedAt: at };
     h.digests.saveFailed({ ...base, failureCode: 'SPACE_DIGEST_OUTPUT_INVALID' });
     expect(h.digests.getLatestForProject('smart-listing')).toMatchObject({ status: 'failed', failureCode: 'SPACE_DIGEST_OUTPUT_INVALID' });
-    const digest = { currentFocus: { text: '目标', blockId: 'b1', excerpt: '目标' }, weekProgress: [], todayProgress: [], nextSteps: [] };
+    const digest = { currentFocus: { text: '目标', blockId: 'b1', excerpt: '目标' }, weekProgress: [], todayProgress: [], nextSteps: [], profile: noProfile };
     h.digests.saveReady({ ...base, changeBasis: 'first_snapshot', digest });
     h.digests.saveFailed({ ...base, failureCode: 'LATER_FAILURE' });
     expect(h.digests.getForPageSource(page.id)).toMatchObject({ status: 'ready', digest, failureCode: null });
+  });
+
+  it('still reads a digest stored before profiles existed, and lets a profiled digest replace it', () => {
+    const h = setup();
+    const page = savePage(h.sources, '2026-10-21T01:00:00.000Z', [block('b1', 'a', '目标')]);
+    const base = { projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: page.id, pageSourceVersion: page.sourceVersion,
+      pageUpdatedAt: page.occurredAt, generatedAt: at };
+    const legacy = { currentFocus: { text: '目标', blockId: 'b1', excerpt: '目标' }, weekProgress: [], todayProgress: [], nextSteps: [] };
+    h.db.client.prepare(`INSERT INTO space_project_digests (id, project_key, page_id, page_source_id, page_source_version, page_updated_at,
+      status, change_basis, digest_json, failure_code, generated_at) VALUES ('d1', 'smart-listing', 'page_1', ?, ?, ?, 'ready', 'first_snapshot', ?, NULL, ?)`)
+      .run(page.id, page.sourceVersion, page.occurredAt, JSON.stringify(legacy), at.toISOString());
+    expect(h.digests.getForPageSource(page.id)).toMatchObject({ status: 'ready', digest: legacy });
+    expect(h.digests.getForPageSource(page.id)?.digest?.profile).toBeUndefined();
+    const profiled = { ...legacy, profile: { ...noProfile, positioning: { text: '目标', blockId: 'b1', excerpt: '目标' } } };
+    h.digests.saveReady({ ...base, changeBasis: 'first_snapshot', digest: profiled });
+    expect(h.digests.getForPageSource(page.id)?.digest).toEqual(profiled);
+    h.digests.saveReady({ ...base, changeBasis: 'first_snapshot', digest: { ...profiled, profile: noProfile } });
+    expect(h.digests.getForPageSource(page.id)?.digest).toEqual(profiled);
   });
 
   it('returns the newest page version first', () => {

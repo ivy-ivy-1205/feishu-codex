@@ -13,6 +13,7 @@ import { createFounderStreamRuntime } from '../src/services/founder-stream-worke
 import { loadSpaceProjectPageView, renderSpaceProjectPageLines, spaceBoardSummary } from '../src/services/space-project-page-view.js';
 import { buildSpaceMarkdownEnvelope } from '../src/services/space-markdown-envelope.js';
 import { ingestSpaceSyncEnvelope } from '../src/services/space-sync-ingestion.js';
+import { captureGroupMessageSource } from '../src/services/group-message-source-capture.js';
 
 const at = new Date('2026-10-21T02:00:00.000Z');
 const chatId = 'oc_a84d5b6ca478220d0a37964b50776edb';
@@ -45,7 +46,8 @@ const digest = {
   currentFocus: { text: '把 27 Cecil Street 买家空间做成可复用模板', blockId: 'b1', excerpt: '页面' },
   weekProgress: [{ text: '27 Cecil Street 页面上线', blockId: 'b1', excerpt: '页面' }, { text: '补齐户型图', blockId: 'b1', excerpt: '页面' }],
   todayProgress: [{ text: '补齐周边配套', blockId: 'b1', excerpt: '页面' }],
-  nextSteps: [{ kind: 'blocker' as const, text: '第二套 listing 等 Amy 确认', blockId: 'b1', excerpt: '页面' }]
+  nextSteps: [{ kind: 'blocker' as const, text: '第二套 listing 等 Amy 确认', blockId: 'b1', excerpt: '页面' }],
+  profile: { positioning: null, phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], nextPlan: [] }
 };
 
 describe('Space project-page block', () => {
@@ -108,7 +110,7 @@ describe('Space project-page block', () => {
     expect(map).not.toContain('本周进展：27 Cecil Street 页面上线');
     expect(map).not.toContain('项目页（Space');
     expect(map).not.toContain('Space 页面');
-    const board = messages.flatMap((m) => 'boardView' in m ? m.boardView.topics : []);
+    const board = messages.flatMap((m) => m.boardView?.kind === 'work_map' ? m.boardView.topics : []);
     expect(board.some((topic) => 'space' in topic)).toBe(false);
     const progress = JSON.stringify(buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'project_progress', topicName: 'Smart Listing' },
       queryMessageId: 'om_progress_off', chatId, approvedChatIds: [chatId], now: at })[0]!.card);
@@ -148,42 +150,67 @@ describe('Space project-page block', () => {
     expect(map).toContain('本周进展：27 Cecil Street 页面上线');
     const progress = JSON.stringify(buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'project_progress', topicName: 'Smart Listing' },
       queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card);
-    expect(progress).toContain('当前重点：把 27 Cecil Street 买家空间做成可复用模板');
+    // A digest stored before profiles existed still fills the sections: its focus is what is being worked on now.
+    h.db.client.prepare("UPDATE space_project_digests SET digest_json = json_remove(digest_json, '$.profile')").run();
+    const legacy = JSON.stringify(buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'project_progress', topicName: 'Smart Listing' },
+      queryMessageId: 'om_progress_legacy', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card);
+    expect(legacy).toContain('阶段规划\\n无（页面摘要待更新）');
+    expect(legacy).toContain('正在做\\n- 把 27 Cecil Street 买家空间做成可复用模板');
+    expect(progress).toContain('阶段规划\\n无（Space 页面没有划分阶段）');
     // The Space status line follows the rest of the processing status: Beijing time, no raw ISO stamps.
     expect(map).toContain('最后成功同步：2026-10-21 10:00');
     expect(map).not.toContain('最后成功同步：2026-10-21T');
   });
 
-  it('fills 已完成, 待推进 and 卡点 in 查看项目进展 from the page, labelled, without repeating them in the block', () => {
+  it('lays out 查看项目进展 in Ivy’s order from the page profile, marking only group-chat items and saying 无 when empty', () => {
     const h = setup();
+    const page = (text: string) => ({ text, blockId: 'b1', excerpt: '页面' });
     h.digests.saveReady({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h.page.id, pageSourceVersion: 1,
-      pageUpdatedAt: h.page.occurredAt, generatedAt: at, changeBasis: 'version_diff',
-      digest: { ...digest, nextSteps: [{ kind: 'next' as const, text: '完成 Task 10 验收', blockId: 'b1', excerpt: '页面' }, ...digest.nextSteps] } });
-    const texts = (buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'project_progress', topicName: 'Smart Listing' },
-      queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card.elements as
-      { text?: { content?: string } }[]).map((element) => element.text?.content ?? '');
-    const section = (heading: string) => texts.find((text) => text.startsWith(heading))!;
-    expect(section('02 已完成')).toBe(['02 已完成', 'Space 页面（10-21 更新）：', '- 27 Cecil Street 页面上线', '- 补齐户型图', '- 补齐周边配套',
-      '群聊记录：没有明确标注“已完成／已交付／已验收”的可追溯记录；不据此判断为未完成。'].join('\n'));
-    expect(section('03 待推进')).toBe(['03 待推进', 'Space 页面（10-21 更新）：', '- 当前重点：把 27 Cecil Street 买家空间做成可复用模板',
-      '- 完成 Task 10 验收', '群聊记录：当前资料没有明确标注下一步；需要结合最新项目表达确认。'].join('\n'));
-    expect(section('04 卡点与依赖')).toBe(['04 卡点与依赖', 'Space 页面（10-21 更新）：', '- 第二套 listing 等 Amy 确认',
-      '群聊记录：当前没有满足“双方向不同且影响行动”条件的卡点记录；这不代表没有依赖。'].join('\n'));
-    const block = section('项目页（Space');
-    expect(block).toBe('项目页（Space · 页面更新于 10-21 · 同步于 10-21 10:00）');
-    // The work map keeps the full block; the progress card only moves it into the sections.
-    const map = JSON.stringify(buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'work_map' },
-      queryMessageId: 'om_map', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true }).map((m) => m.card));
-    expect(map).toContain('本周进展：27 Cecil Street 页面上线；补齐户型图');
+      pageUpdatedAt: h.page.occurredAt, generatedAt: at, changeBasis: 'version_diff', digest: { ...digest, profile: {
+        positioning: page('为买家提供可复用的房源空间'),
+        phases: [{ ...page('Amy V2 Task 1–9'), name: '能力底座', status: 'done' as const },
+          { ...page('27 Cecil Street 样板上线与验收'), name: '样板上线', status: 'current' as const },
+          { ...page('复制到第二套房源'), name: '复制推广', status: 'upcoming' as const }],
+        completed: [page('27 Cecil Street 页面上线')], inProgress: [page('Task 10 真实验收')], pending: [page('第二套房源选址')],
+        problems: [page('家庭数据读取后的最终回复失败')], divergences: [], nextPlan: [page('完成生产切换和回滚演练')] } } });
+    const sources = new ContextSourceRepository(h.db.client);
+    const captured = captureGroupMessageSource({ chatId, messageId: 'om_done', threadId: null, rootId: null, author: { openId: 'ou_ivy', displayName: null },
+      senderType: 'user', messageType: 'text', text: '照片位置笔记已上线', occurredAt: at.toISOString() }, at);
+    const source = sources.saveSource(captured.source).source;
+    const evidence = sources.saveEvidence({ sourceId: source.id, excerpt: '照片位置笔记已上线', locator: { ...captured.messageLocator,
+      sourceVersion: source.sourceVersion, contentHash: source.contentHash }, evidenceLevel: 'primary_statement', capturedAt: at }).evidence.id;
+    new AlignmentRepository(h.db.client).savePerspective({ topicId: h.topic.id, kind: 'ivy_view', expectedVersion: 0,
+      statement: '照片位置笔记已上线', confidence: 1, evidenceIds: [evidence], decisionKey: 'done', speechAct: 'view', observedAt: at });
+    const message = buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'project_progress', topicName: 'Smart Listing' },
+      queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!;
+    const texts = (message.card.elements as { tag: string; text?: { content?: string } }[]).filter((e) => e.text).map((e) => e.text!.content!);
+    expect(texts.slice(0, 8)).toEqual([
+      '项目定位\n为买家提供可复用的房源空间\n当前状态：正在推进 · 第 2 阶段：样板上线',
+      '阶段规划（共 3 个阶段，目前在第 2 阶段）\n✓ 1. 能力底座：Amy V2 Task 1–9\n▶ 2. 样板上线：27 Cecil Street 样板上线与验收\n○ 3. 复制推广：复制到第二套房源',
+      '已完成\n- 27 Cecil Street 页面上线\n- 照片位置笔记已上线（群聊）',
+      '正在做\n- Task 10 真实验收',
+      '待推进\n- 第二套房源选址',
+      '卡点与问题\n- 家庭数据读取后的最终回复失败',
+      '分歧\n无',
+      '下一步计划\n- 完成生产切换和回滚演练']);
+    expect(texts[8]).toBe(['资料截至：群聊 尚无已分析消息 · Space 页面 10-21 更新（10-21 10:00 同步）',
+      '未标注来源的条目来自 Space 页面。明细发“查看处理状态”。'].join('\n'));
+    // No repeated title, no "当前方向", no per-section boilerplate and no long processing-status block.
+    const body = JSON.stringify(message.card);
+    for (const gone of ['当前方向', '尚未形成明确目标', '群聊记录：', '处理状态（北京时间）', '项目页（Space']) expect(body).not.toContain(gone);
+    expect(message.kind === 'founder_manual_query' && message.boardView).toMatchObject({ kind: 'project_progress', title: 'Smart Listing',
+      phases: [{ name: '能力底座', status: 'done' }, { name: '样板上线', status: 'current' }, { name: '复制推广', status: 'upcoming' }] });
   });
 
-  it('keeps the full block and the group-chat-only sections while the page digest is not ready', () => {
+  it('falls back to the group chat while the page digest is not ready, and says so once', () => {
     const h = setup();
     const texts = (buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'project_progress', topicName: 'Smart Listing' },
       queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card.elements as
       { text?: { content?: string } }[]).map((element) => element.text?.content ?? '');
-    expect(texts.find((text) => text.startsWith('项目页（Space'))).toContain('项目页摘要：生成中');
-    expect(texts.find((text) => text.startsWith('02 已完成'))).toBe('02 已完成\n没有明确标注“已完成／已交付／已验收”的可追溯记录；不据此判断为未完成。');
+    expect(texts.find((text) => text.startsWith('项目定位'))).toBe('项目定位\n27 Cecil Street 上线（群聊）\n当前状态：正在推进');
+    expect(texts.find((text) => text.startsWith('阶段规划'))).toBe('阶段规划\n无（Space 页面摘要生成中）');
+    expect(texts.find((text) => text.startsWith('已完成'))).toBe('已完成\n无');
+    expect(texts.find((text) => text.startsWith('资料截至'))).toContain('\nSpace 提示：页面摘要生成中，生成后补上页面内容');
   });
 
   it('says the digest is being generated when a snapshot exists but no digest is stored yet', () => {

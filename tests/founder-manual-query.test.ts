@@ -52,18 +52,18 @@ describe('founder manual queries',()=>{
     db.close();
   });
 
-  it('renders project progress as current stage, completed, next and blockers without inventing completion',()=>{
+  it('renders a group-chat-only project in Ivy’s order and says 无 instead of explaining every empty section',()=>{
     const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
     new TopicRepository(db.client).createTopic({displayName:'Smart Listing',stage:'active_project',outcome:'验证房源服务',createdAt:at});
     const message=buildFounderManualQueryMessages({client:db.client,query:{kind:'project_progress',topicName:'Smart Listing'},
       queryMessageId:'om_progress',chatId,approvedChatIds:[chatId],now:at})[0]!;
-    const body=JSON.stringify(message.card);
-    expect(body).toContain('项目进展');
-    expect(body).toContain('当前阶段');
-    expect(body).toContain('已完成');
-    expect(body).toContain('待推进');
-    expect(body).toContain('卡点与依赖');
-    expect(body).toContain('没有明确标注');
+    const texts=(message.card.elements as {text?:{content?:string}}[]).flatMap(e=>e.text?.content?[e.text.content]:[]);
+    expect(texts.map(text=>text.split('\n')[0])).toEqual(['项目定位','阶段规划','已完成','正在做','待推进','卡点与问题','分歧','下一步计划',
+      '资料截至：群聊 尚无已分析消息']);
+    // Without a Space page every item is from the group chat, so nothing needs a source mark.
+    expect(texts[0]).toBe('项目定位\n验证房源服务\n当前状态：正在推进');
+    expect(texts.slice(1,8).every(text=>text.endsWith('\n无'))).toBe(true);
+    expect(texts[8]).toBe('资料截至：群聊 尚无已分析消息\n明细发“查看处理状态”。');
     db.close();
   });
 
@@ -74,18 +74,22 @@ describe('founder manual queries',()=>{
     expect(result.next).toEqual(['目前计划是上线两个房源','下一步完成 Task 10 验收','准备上线照片笔记']);
   });
 
-  it('shows when the project last changed, not when it was queried, and every status time in Beijing time',()=>{
+  it('moves the full processing status to 查看处理状态, explained, in Beijing time',()=>{
+    expect(parseFounderManualQuery('查看处理状态')).toEqual({kind:'processing_status'});
+    expect(parseFounderManualQuery('@_user_1 查看处理状态。')).toEqual({kind:'processing_status'});
     const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
-    new TopicRepository(db.client).createTopic({displayName:'Smart Listing',stage:'active_project',outcome:'验证房源服务',
-      createdAt:new Date('2026-10-14T08:18:40.206Z')});
     db.client.prepare("INSERT INTO founder_stream_events(event_id,message_id,chat_id,disposition,received_at) VALUES('evt_1','om_1',?,'captured','2026-10-20T03:31:59.829Z')").run(chatId);
-    const card=JSON.stringify(buildFounderManualQueryMessages({client:db.client,query:{kind:'project_progress',topicName:'Smart Listing'},
-      queryMessageId:'om_progress',chatId,approvedChatIds:[chatId],now:new Date('2026-10-21T09:47:37.611Z')})[0]!.card);
-    expect(card).toContain('本版本更新于 2026-10-14 16:18（北京时间）');
-    expect(card).not.toContain('2026-10-21');
-    expect(card).toContain('处理状态（北京时间）');
+    const messages=buildFounderManualQueryMessages({client:db.client,query:{kind:'processing_status'},
+      queryMessageId:'om_status',chatId,approvedChatIds:[chatId],now:new Date('2026-10-21T09:47:37.611Z')});
+    expect(messages).toHaveLength(1);
+    const card=JSON.stringify(messages[0]!.card);
+    expect(card).toContain('处理状态');
     expect(card).toContain('最后收到：2026-10-20 11:31');
+    expect(card).toContain('怎么看');
+    expect(card).toContain('最新已分析语料');
     expect(card).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/u);
+    // The status card is the status, once — not repeated as a footer under itself.
+    expect(card.split('最后收到：2026').length).toBe(2);
     db.close();
   });
 
@@ -187,6 +191,23 @@ describe('founder manual queries',()=>{
     expect(Buffer.byteLength(JSON.stringify(sent[0]),'utf8')).toBeLessThan(30_000);
     const second=sent[1]!.elements as {tag?:unknown}[];
     expect(second.some(element=>element.tag==='img')).toBe(false);
+    db.close();
+  });
+
+  it('hands 查看项目进展 to the editable board as structure, so the board is laid out by section, not by card text',async()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    new AlignmentRepository(db.client).configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:at});
+    new TopicRepository(db.client).createTopic({displayName:'Smart Listing',stage:'active_project',outcome:'验证房源服务',createdAt:at});
+    const views:unknown[]=[];
+    const runtime=createFounderStreamRuntime({client:db.client,jobRepository:new JobRepository(db.client),
+      flags:{captureEnabled:true,analysisEnabled:true,groupDeliveryEnabled:false,manualQueryEnabled:true},
+      approvedChatIds:[chatId],ivyPrivateChatId:'oc_private',now:()=>at,
+      analyzer:{async analyze(){return{topics:[]}}},whiteboardPublisher:{async publish(input){views.push(input.view);return{
+        documentId:'doc_1',whiteboardId:'board_1',url:'https://example.test/docx/doc_1',paletteId:'coral',previewImageKey:'img_preview'}}},delivery:{
+        async sendTextMessage(){return{messageId:'om_text'}},async sendInteractiveCard(){return{messageId:'om_card'}}}});
+    runtime.route.ingest(event('查看项目进展：Smart Listing'));
+    await runtime.runManualQueriesOnce();
+    expect(views).toEqual([expect.objectContaining({kind:'project_progress',title:'Smart Listing',positioning:'验证房源服务',status:'正在推进'})]);
     db.close();
   });
 

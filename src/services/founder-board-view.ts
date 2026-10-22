@@ -24,4 +24,17 @@ export interface FounderWorkMapBoardView {
   coverageGaps:readonly {id:string;summary:string}[];
 }
 
-export type FounderBoardView=FounderWorkMapBoardView;
+/** 查看项目进展 as structure, so the board lays it out in Ivy's order instead of re-flowing card text. */
+export interface FounderProjectProgressBoardView {
+  kind:'project_progress';
+  title:string;
+  positioning:string;
+  /** "正在推进 · 第 2 阶段：样板上线" */
+  status:string;
+  phases:readonly {name:string;tasks:string;status:'done'|'current'|'upcoming'}[];
+  phasesEmpty:string;
+  sections:readonly {title:string;items:readonly string[]}[];
+  footer:string;
+}
+
+export type FounderBoardView=FounderWorkMapBoardView|FounderProjectProgressBoardView;

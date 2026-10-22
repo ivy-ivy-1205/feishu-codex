@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import type { FounderBoardView, FounderWorkMapBoardTopic, FounderWorkMapBoardView } from './founder-board-view.js';
+import type { FounderBoardView, FounderProjectProgressBoardView, FounderWorkMapBoardTopic, FounderWorkMapBoardView } from './founder-board-view.js';
 
 export interface FounderWhiteboardNode {
   id?:string;
@@ -65,7 +65,8 @@ export function selectFounderPalette(previousId:string|null|undefined,random:()=
 
 export function buildFounderWhiteboard(input:{title:string;paletteId:string;cards:readonly Record<string,unknown>[];view?:FounderBoardView}):BuiltFounderWhiteboard{
   const palette=founderPalettes.find(item=>item.id===input.paletteId)??founderPalettes[0]!;
-  return input.view?.kind==='work_map'?buildWorkMapBoard(input.title,palette,input.view):buildGenericBoard(input.title,palette,input.cards);
+  return input.view?.kind==='work_map'?buildWorkMapBoard(input.title,palette,input.view):
+    input.view?.kind==='project_progress'?buildProjectProgressBoard(palette,input.view):buildGenericBoard(input.title,palette,input.cards);
 }
 
 export async function renderFounderWhiteboardPng(board:BuiltFounderWhiteboard):Promise<Buffer>{
@@ -108,6 +109,83 @@ function buildGenericBoard(title:string,palette:FounderPalette,cards:readonly Re
     nodes.push(textNode(x+26,y+22,columnWidth-52,block.height-40,block.value,fontSize,palette.ink,block.index===0?'bold':'regular'));
     y+=block.height+28;
   }});
+  return{palette,width,height,nodes};
+}
+
+/**
+ * 查看项目进展 as a board in Ivy's reading order (2026-10-22): the title once, 项目定位 and 阶段规划 across the full width,
+ * then 已完成|正在做, 待推进|卡点与问题, 分歧|下一步计划 side by side, and the one-line 资料截至 footer last.
+ */
+function buildProjectProgressBoard(palette:FounderPalette,view:FounderProjectProgressBoardView):BuiltFounderWhiteboard{
+  const width=1160,margin=28,gap=20,band=46,pad=18,contentWidth=width-margin*2,halfWidth=(contentWidth-gap)/2;
+  const bodyFont=20,bodyLine=Math.round(bodyFont*1.38),nodes:FounderWhiteboardNode[]=[],paperText=readableText(palette.paper);
+  const wrapped=(value:string,boxWidth:number,font:number,maxLines:number)=>wrapText(value,fullLineUnits(boxWidth,font),maxLines);
+  const items=(values:readonly string[],boxWidth:number)=>values.length?values.map(value=>wrapped(`• ${value}`,boxWidth,bodyFont,4)).join('\n'):'无';
+  const lineCount=(value:string)=>value.split('\n').length;
+  /** A box with a colored header band; returns the y below it. */
+  const box=(x:number,y:number,boxWidth:number,height:number,title:string,headerFill:string)=>{
+    nodes.push(shape(x+6,y+6,boxWidth,height,palette.ink,palette.ink,'none'));
+    nodes.push(shape(x,y,boxWidth,height,palette.surface,palette.ink));
+    nodes.push(shape(x,y,boxWidth,band,headerFill,palette.ink));
+    nodes.push(textNode(x+pad,y+8,boxWidth-pad*2,32,title,23,readableText(headerFill),'bold'));
+  };
+  nodes.push(shape(0,0,width,0,palette.paper,palette.paper,'none'));
+  nodes.push(textNode(margin,26,860,56,`项目进展 · ${view.title}`,40,paperText,'bold'));
+  nodes.push(textNode(900,36,232,26,palette.name,17,paperText,'regular','right'));
+  let y=104;
+
+  const positioning=`${wrapped(view.positioning,contentWidth-pad*2,bodyFont,4)}\n${wrapped(`当前状态：${view.status}`,contentWidth-pad*2,bodyFont,2)}`;
+  const positioningHeight=band+pad+lineCount(positioning)*bodyLine+pad;
+  box(margin,y,contentWidth,positioningHeight,'项目定位',palette.accent);
+  nodes.push(textNode(margin+pad,y+band+pad,contentWidth-pad*2,lineCount(positioning)*bodyLine,positioning,bodyFont,readableText(palette.surface),'regular'));
+  y+=positioningHeight+gap;
+
+  const currentIndex=view.phases.findIndex(phase=>phase.status==='current');
+  const phaseTitle=view.phases.length?`阶段规划（共 ${view.phases.length} 个阶段${currentIndex>=0?`，目前在第 ${currentIndex+1} 阶段`:''}）`:'阶段规划';
+  if(view.phases.length){
+    const perRow=Math.min(3,view.phases.length),chipGap=14,chipWidth=(contentWidth-pad*2-chipGap*(perRow-1))/perRow;
+    const chips=view.phases.map((phase,index)=>{
+      const label=wrapped(`${phase.status==='done'?'✓':phase.status==='current'?'▶':'○'} ${index+1} ${phase.name}`,chipWidth-28,21,2);
+      const tasks=wrapped(phase.tasks,chipWidth-28,18,3);
+      return{phase,label,tasks,height:14+lineCount(label)*29+6+lineCount(tasks)*25+14};
+    });
+    const rows:typeof chips[]=[];for(let index=0;index<chips.length;index+=perRow)rows.push(chips.slice(index,index+perRow));
+    const rowHeights=rows.map(row=>Math.max(...row.map(chip=>chip.height)));
+    const phasesHeight=band+pad+rowHeights.reduce((sum,height)=>sum+height,0)+chipGap*(rows.length-1)+pad;
+    box(margin,y,contentWidth,phasesHeight,phaseTitle,palette.accent);
+    let chipY=y+band+pad;
+    rows.forEach((row,rowIndex)=>{row.forEach((chip,column)=>{
+      const x=margin+pad+column*(chipWidth+chipGap),fill=chip.phase.status==='current'?palette.secondary:chip.phase.status==='done'?palette.recess:palette.paper;
+      const ink=readableText(fill);
+      nodes.push(shape(x,chipY,chipWidth,rowHeights[rowIndex]!,fill,palette.ink));
+      nodes.push(textNode(x+14,chipY+14,chipWidth-28,lineCount(chip.label)*29,chip.label,21,ink,'bold'));
+      nodes.push(textNode(x+14,chipY+14+lineCount(chip.label)*29+6,chipWidth-28,lineCount(chip.tasks)*25,chip.tasks,18,ink,'regular'));
+    });chipY+=rowHeights[rowIndex]!+chipGap;});
+    y+=phasesHeight+gap;
+  }else{
+    const empty=wrapped(view.phasesEmpty,contentWidth-pad*2,bodyFont,2),height=band+pad+lineCount(empty)*bodyLine+pad;
+    box(margin,y,contentWidth,height,phaseTitle,palette.accent);
+    nodes.push(textNode(margin+pad,y+band+pad,contentWidth-pad*2,lineCount(empty)*bodyLine,empty,bodyFont,readableText(palette.surface),'regular'));
+    y+=height+gap;
+  }
+
+  for(let index=0;index<view.sections.length;index+=2){
+    const pair=view.sections.slice(index,index+2).map(section=>({section,body:items(section.items,halfWidth-pad*2)}));
+    const height=band+pad+Math.max(...pair.map(entry=>lineCount(entry.body)))*bodyLine+pad;
+    pair.forEach((entry,column)=>{const x=margin+column*(halfWidth+gap);
+      // A blocker or a divergence is what needs a decision, so it is the one header that changes color.
+      const alert=(entry.section.title==='卡点与问题'||entry.section.title==='分歧')&&entry.section.items.length>0;
+      box(x,y,halfWidth,height,entry.section.title,alert?palette.highlight:palette.accent);
+      nodes.push(textNode(x+pad,y+band+pad,halfWidth-pad*2,lineCount(entry.body)*bodyLine,entry.body,bodyFont,readableText(palette.surface),'regular'));
+    });
+    y+=height+gap;
+  }
+
+  const footer=view.footer.split('\n').map(line=>wrapped(line,contentWidth-36,16,2)).join('\n'),footerHeight=lineCount(footer)*22+28;
+  nodes.push(shape(margin,y,contentWidth,footerHeight,palette.recess,palette.ink));
+  nodes.push(textNode(margin+18,y+14,contentWidth-36,lineCount(footer)*22,footer,16,readableText(palette.recess),'regular'));
+  const height=y+footerHeight+margin;
+  nodes[0]={...nodes[0]!,height};
   return{palette,width,height,nodes};
 }
 

@@ -193,7 +193,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         for (const page of loaded.pages) {
           const versions = sources.listSourceVersions(page.logicalKey);
           // An older snapshot replayed late is history; only the page as it stands now gets a digest.
-          if (versions.some(v => v.sourceVersion > page.sourceVersion) || spaceDigests.getForPageSource(page.id)?.status === 'ready') continue;
+          const stored = spaceDigests.getForPageSource(page.id);
+          if (versions.some(v => v.sourceVersion > page.sourceVersion) || (stored?.status === 'ready' && stored.digest?.profile)) continue;
           if (!options.spaceDigestAnalyzer) { digestResults.push({ page, result: { failureCode: 'analyzer_unavailable' } }); continue; }
           const digestInput = buildSpaceDigestInput({ projectKey: job.projectKey, projectName: projectDisplayName(options.client, job.projectKey) ?? target.displayName,
             page, versions, now: plannedAt });
@@ -543,7 +544,8 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
         } catch { /* Invalid jobs remain diagnostic failures, not source authority. */ }
       }
       const stamp = now();
-      const spaceSources = sources.listSources().filter(source =>
+      const allSources = sources.listSources();
+      const spaceSources = allSources.filter(source =>
         ['space_page_snapshot','space_page_comment'].includes(source.sourceType) &&
         source.contentState === 'cleartext' && source.availabilityStatus === 'available' &&
         typeof source.metadata.pageId === 'string' && !claimed.has(source.id));
@@ -571,6 +573,18 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           options.jobRepository.enqueueSpaceStreamBatch({ projectKey, since: batch[0]!.occurredAt, until: stamp.toISOString(),
             sourceIds: batch.map(s=>s.id), capturedAt: stamp });
         }
+      }
+      // A page's current digest stored before profiles existed is regenerated once, so 查看项目进展 gets its
+      // positioning and phases without anyone re-importing the page.
+      const latestPageByKey = new Map<string, ContextSourceRecord>();
+      for (const source of allSources) if (source.sourceType === 'space_page_snapshot' && source.contentState === 'cleartext' &&
+        source.availabilityStatus === 'available' && typeof source.metadata.pageId === 'string' &&
+        (latestPageByKey.get(source.logicalKey)?.sourceVersion ?? -1) < source.sourceVersion) latestPageByKey.set(source.logicalKey, source);
+      for (const page of latestPageByKey.values()) {
+        const projectKey = projectKeyFor(page.metadata.pageId as string), stored = spaceDigests.getForPageSource(page.id);
+        if (!projectKey || !mapped(projectKey) || stored?.status !== 'ready' || stored.digest?.profile) continue;
+        options.jobRepository.enqueueSpaceStreamBatch({ projectKey, since: page.occurredAt, until: stamp.toISOString(),
+          sourceIds: [page.id], capturedAt: stamp, profileRefresh: true });
       }
     }).immediate();
   }
