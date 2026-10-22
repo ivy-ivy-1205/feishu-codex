@@ -162,7 +162,7 @@ describe('Space project-page block', () => {
     expect(map).not.toContain('最后成功同步：2026-10-21T');
   });
 
-  it('lays out 查看项目进展 in Ivy’s order from the page profile, marking only group-chat items and saying 无 when empty', () => {
+  it('lays out 查看项目进展 in Ivy’s order from the page profile only, saying 无 when empty', () => {
     const h = setup();
     const page = (text: string) => ({ text, blockId: 'b1', excerpt: '页面' });
     h.digests.saveReady({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h.page.id, pageSourceVersion: 1,
@@ -187,7 +187,8 @@ describe('Space project-page block', () => {
     expect(texts.slice(0, 8)).toEqual([
       '项目定位\n为买家提供可复用的房源空间\n当前状态：正在推进 · 第 2 阶段：样板上线',
       '阶段规划（共 3 个阶段，目前在第 2 阶段）\n✓ 1. 能力底座：Amy V2 Task 1–9\n▶ 2. 样板上线：27 Cecil Street 样板上线与验收\n○ 3. 复制推广：复制到第二套房源',
-      '已完成\n- 27 Cecil Street 页面上线\n- 照片位置笔记已上线（群聊）',
+      // Ivy 2026-10-22: with a page, keyword-classified group-chat statements stay out of the sections.
+      '已完成\n- 27 Cecil Street 页面上线',
       '正在做\n- Task 10 真实验收',
       '待推进\n- 第二套房源选址',
       '卡点与问题\n- 家庭数据读取后的最终回复失败',
@@ -200,6 +201,24 @@ describe('Space project-page block', () => {
     for (const gone of ['当前方向', '尚未形成明确目标', '群聊记录：', '处理状态（北京时间）', '项目页（Space']) expect(body).not.toContain(gone);
     expect(message.kind === 'founder_manual_query' && message.boardView).toMatchObject({ kind: 'project_progress', title: 'Smart Listing',
       phases: [{ name: '能力底座', status: 'done' }, { name: '样板上线', status: 'current' }, { name: '复制推广', status: 'upcoming' }] });
+  });
+
+  it('keeps the group chat in the sections only for a project without a Space page', () => {
+    const h = setup();
+    const sources = new ContextSourceRepository(h.db.client);
+    const captured = captureGroupMessageSource({ chatId, messageId: 'om_done', threadId: null, rootId: null, author: { openId: 'ou_ivy', displayName: null },
+      senderType: 'user', messageType: 'text', text: '照片位置笔记已上线', occurredAt: at.toISOString() }, at);
+    const source = sources.saveSource(captured.source).source;
+    const evidence = sources.saveEvidence({ sourceId: source.id, excerpt: '照片位置笔记已上线', locator: { ...captured.messageLocator,
+      sourceVersion: source.sourceVersion, contentHash: source.contentHash }, evidenceLevel: 'primary_statement', capturedAt: at }).evidence.id;
+    new AlignmentRepository(h.db.client).savePerspective({ topicId: h.topic.id, kind: 'ivy_view', expectedVersion: 0,
+      statement: '照片位置笔记已上线', confidence: 1, evidenceIds: [evidence], decisionKey: 'done', speechAct: 'view', observedAt: at });
+    const done = (spaceWorkMapEnabled: boolean) => (buildFounderManualQueryMessages({ client: h.db.client,
+      query: { kind: 'project_progress', topicName: 'Smart Listing' }, queryMessageId: `om_${spaceWorkMapEnabled}`, chatId,
+      approvedChatIds: [chatId], now: at, spaceWorkMapEnabled })[0]!.card.elements as { text?: { content?: string } }[])
+      .map((element) => element.text?.content ?? '').find((text) => text.startsWith('已完成'));
+    expect(done(false)).toBe('已完成\n- 照片位置笔记已上线');
+    expect(done(true)).toBe('已完成\n无');
   });
 
   it('falls back to the group chat while the page digest is not ready, and says so once', () => {

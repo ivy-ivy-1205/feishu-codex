@@ -78,8 +78,8 @@ const stageLabels={idea:'想法',exploring:'探索中',project_candidate:'候选
 
 /**
  * 查看项目进展 in Ivy's order (2026-10-22): 项目定位, 阶段规划, 已完成, 正在做, 待推进, 卡点与问题, 分歧, 下一步计划, then a
- * one-line 资料截至 footer. Page items lead; group-chat items follow, marked "（群聊）" only when a page is shown too.
- * An empty section says 无 instead of explaining itself.
+ * one-line 资料截至 footer. With a Space page the sections come from the page; without one, from the group chat. A
+ * group-chat item shown next to page items (positioning fallback, alignment records) is marked. An empty section says 无.
  */
 function buildProjectProgress(input:{client:Database.Database;chatId:string;now:Date;spaceStaleAfterMinutes?:number;spaceWorkMapEnabled?:boolean},name:string):
   {card:Record<string,unknown>;view?:FounderProjectProgressBoardView}{
@@ -95,7 +95,9 @@ function buildProjectProgress(input:{client:Database.Database;chatId:string;now:
   const page=pageView?spaceProjectProgress(pageView):null;
   const chat=(value:string)=>`${founderText(value,180)}${page?'（群聊）':''}`;
   const finished=topic.stage==='closed'||topic.stage==='paused';
-  const {completed:chatCompleted,next:chatNext}=finished?{completed:[],next:[]}:classifyFounderProgressStatements(perspectives.map(item=>item.statement));
+  // Ivy 2026-10-22: a project with a Space page fills its sections from the page only; keyword-classified group-chat
+  // statements were noise there. Group-chat progress still reaches the work map.
+  const {completed:chatCompleted,next:chatNext}=finished||page?{completed:[],next:[]}:classifyFounderProgressStatements(perspectives.map(item=>item.statement));
   const unique=(items:readonly string[])=>[...new Set(items)];
   const currentIndex=page?page.phases.findIndex(phase=>phase.status==='current'):-1;
   const current=currentIndex>=0?page!.phases[currentIndex]!:null;

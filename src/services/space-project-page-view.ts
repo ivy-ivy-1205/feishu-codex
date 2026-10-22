@@ -123,7 +123,7 @@ export function spaceProjectProgress(view: SpaceProjectPageView): SpaceProjectPr
     return { ...base, phasesEmpty: '无（Space 页面摘要生成中）' };
   }
   if (digest.status !== 'ready' || !digest.digest) {
-    notes.push(`页面摘要未生成（${failureLabels[digest.failureCode ?? ''] ?? '原因未知'}），以下只有群聊内容`);
+    notes.push(`页面摘要未生成（${failureLabels[digest.failureCode ?? ''] ?? '原因未知'}），页面内容暂缺`);
     return { ...base, phasesEmpty: '无（Space 页面摘要未生成）' };
   }
   const d = digest.digest, profile = d.profile;

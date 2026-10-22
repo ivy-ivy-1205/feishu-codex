@@ -120,6 +120,7 @@ describe('CodexSpaceProjectDigestAnalyzer', () => {
     expect(prompts[0]).toContain('项目页记载');
     expect(prompts[0]).toContain('profile.phases');
     expect(prompts[0]).toContain('不要自行划分');
+    expect(prompts[0]).toContain('「阶段规划」');
   });
 
   it('fails after two invalid outputs instead of storing an ungrounded digest', async () => {
