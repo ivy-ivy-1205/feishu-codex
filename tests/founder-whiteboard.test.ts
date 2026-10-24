@@ -104,6 +104,19 @@ describe('founder whiteboard',()=>{
     expect(all).not.toContain('不应出现');
   });
 
+  it('leaves the phases box out entirely when the project has no phase plan by design (B line)',()=>{
+    const board=buildFounderWhiteboard({title:'项目进展 · 超级个体与超级团队',paletteId:'grove',cards:[],
+      view:{kind:'project_progress',title:'超级个体与超级团队',positioning:'用真实经历讲清个人能力如何变成团队成果',status:'正在推进',phases:[],phasesEmpty:null,
+        sections:['已完成','正在做','待推进','卡点与问题','分歧','下一步计划'].map(title=>({title,items:[]})),footer:'资料截至：群聊 尚无已分析消息'}});
+    const texts=board.nodes.filter(node=>node.type==='text_shape'&&node.text?.text);
+    const all=texts.map(node=>node.text!.text!).join('\n');
+    expect(all).not.toContain('阶段规划');
+    const positioning=texts.find(node=>node.text!.text==='项目定位')!,done=texts.find(node=>node.text!.text==='已完成')!;
+    // 已完成 follows 项目定位 directly, with only the usual gap between the boxes.
+    const positioningBox=board.nodes.find(node=>node.type==='composite_shape'&&node.x===28&&node.y===positioning.y!-8&&node.width===1104)!;
+    expect(done.y!-8).toBe(positioningBox.y!+positioningBox.height!+20);
+  });
+
   it('emits text nodes in the official OpenAPI shape without transparent style colors',()=>{
     const result=buildFounderWhiteboard({title:'工作地图',paletteId:'coral',cards:[{
       header:{title:{content:'工作地图 · 1/1'}},elements:[{text:{content:'当前阶段\n正在推进'}}]

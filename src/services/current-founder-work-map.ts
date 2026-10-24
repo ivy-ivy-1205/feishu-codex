@@ -114,6 +114,25 @@ function assertInput(input:CurrentFounderWorkMapInput):void{
   if(!Number.isFinite(since)||!Number.isFinite(until)||since>=until)throw new Error('FOUNDER_WORK_MAP_WINDOW_INVALID');
 }
 
+/** The business line (A/B/C root name) a topic sits under through part_of, or null when it hangs under none. */
+export function founderLineRootName(client:Database.Database,topicId:string):string|null{
+  const topics=new TopicRepository(client),canonical=topics.listCanonicalTopics();
+  const rootByTopic=canonicalRoots(topics.listCurrentTopics(),topics.listRelations().filter(relation=>relation.relationType==='same_as'));
+  const nameById=new Map(canonical.map(topic=>[topic.id,cleanDisplayName(topic.displayName)]));
+  const parentByChild=new Map<string,string>();
+  for(const relation of topics.listRelations().filter(relation=>relation.relationType==='part_of')){
+    const child=rootByTopic.get(relation.fromTopicId),parent=rootByTopic.get(relation.toTopicId);
+    if(child&&parent&&child!==parent)parentByChild.set(child,parent);
+  }
+  const seen=new Set<string>();
+  for(let current=parentByChild.get(rootByTopic.get(topicId)??topicId);current&&!seen.has(current);current=parentByChild.get(current)){
+    seen.add(current);
+    const name=nameById.get(current);
+    if(name&&founderLineRootNames.includes(name))return name;
+  }
+  return null;
+}
+
 function canonicalRoots(all:readonly CurrentTopic[],relations:readonly {fromTopicId:string;toTopicId:string}[]):Map<string,string>{
   const byId=new Map(all.map(topic=>[topic.id,topic])),parent=new Map(all.map(topic=>[topic.id,topic.id]));
   const find=(id:string):string=>{const current=parent.get(id)!;if(current===id)return id;const root=find(current);parent.set(id,root);return root};

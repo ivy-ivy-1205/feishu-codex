@@ -171,7 +171,7 @@ function buildProjectProgressBoard(palette:FounderPalette,view:FounderProjectPro
       nodes.push(textNode(x+12,textY,chipWidth-24,lineCount(chip.status)*23,chip.status,16,ink,'bold'));
     });chipY+=rowHeights[rowIndex]!+chipGap;});
     y+=phasesHeight+gap;
-  }else{
+  }else if(view.phasesEmpty!==null){
     const empty=wrapped(view.phasesEmpty,contentWidth-pad*2,bodyFont,2),height=band+pad+lineCount(empty)*bodyLine+pad;
     box(margin,y,contentWidth,height,phaseTitle,palette.accent);
     nodes.push(textNode(margin+pad,y+band+pad,contentWidth-pad*2,lineCount(empty)*bodyLine,empty,bodyFont,readableText(palette.surface),'regular'));
