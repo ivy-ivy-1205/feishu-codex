@@ -32,7 +32,8 @@ export interface FounderProjectProgressBoardView {
   /** "正在推进 · 当前重点：Phase 6 …" */
   status:string;
   phases:readonly {name:string;tasks:string;status:'done'|'in_progress'|'upcoming';statusText:string;focus:boolean}[];
-  phasesEmpty:string;
+  /** Shown when there are no phases; null leaves 阶段规划 out (B-line content has a fixed workflow, Ivy 2026-10-24). */
+  phasesEmpty:string|null;
   sections:readonly {title:string;items:readonly string[]}[];
   footer:string;
 }

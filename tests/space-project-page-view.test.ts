@@ -207,6 +207,30 @@ describe('Space project-page block', () => {
         { name: '客户试用', status: 'in_progress', focus: false }, { name: '复制推广', status: 'upcoming' }] });
   });
 
+  it('leaves 阶段规划 out for a 自媒体生产线 (B line) project, even when its page lists phases', () => {
+    const h = setup();
+    const topics = new TopicRepository(h.db.client);
+    const line = topics.createTopic({ displayName: '自媒体生产线', stage: 'active_project', outcome: '自媒体内容', createdAt: at });
+    const series = topics.createTopic({ displayName: '视频系列', stage: 'active_project', outcome: '系列内容', createdAt: at });
+    topics.addRelation({ fromTopicId: series.id, toTopicId: line.id, relationType: 'part_of', rationale: 'confirmed', createdAt: at });
+    // Nested under the line through a parent, as a content item can be.
+    topics.addRelation({ fromTopicId: h.topic.id, toTopicId: series.id, relationType: 'part_of', rationale: 'confirmed', createdAt: at });
+    const page = (text: string) => ({ text, blockId: 'b1', excerpt: '页面' });
+    h.digests.saveReady({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h.page.id, pageSourceVersion: 1,
+      pageUpdatedAt: h.page.occurredAt, generatedAt: at, changeBasis: 'version_diff', digest: { ...digest, profile: {
+        ...digest.profile, positioning: page('用真实经历讲清个人能力如何变成团队成果'),
+        phases: [{ ...page('写口播稿'), name: '口播稿', status: 'in_progress' as const, statusText: '进行中', focus: true }],
+        completed: [page('第一篇公众号已发布')] } } });
+    const message = buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'project_progress', topicName: 'Smart Listing' },
+      queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!;
+    const texts = (message.card.elements as { text?: { content?: string } }[]).flatMap((e) => e.text?.content ? [e.text.content] : []);
+    // Ivy 2026-10-24: B-line content follows a fixed workflow and schedule, so it has no phase plan to show.
+    expect(texts.map((text) => text.split('\n')[0]).slice(0, 7)).toEqual(['项目定位', '已完成', '正在做', '待推进', '卡点与问题', '分歧', '下一步计划']);
+    expect(texts[0]).toBe('项目定位\n用真实经历讲清个人能力如何变成团队成果\n当前状态：正在推进');
+    expect(JSON.stringify(message.card)).not.toContain('阶段规划');
+    expect(message.kind === 'founder_manual_query' && message.boardView).toMatchObject({ kind: 'project_progress', phases: [], phasesEmpty: null });
+  });
+
   it('keeps the group chat in the sections only for a project without a Space page', () => {
     const h = setup();
     const sources = new ContextSourceRepository(h.db.client);

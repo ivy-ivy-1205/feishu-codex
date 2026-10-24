@@ -6,7 +6,7 @@ import { loadSpaceProjectPageView, spaceProjectProgress } from './space-project-
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
 import { FounderTopicProjectBindingRepository } from '../repositories/founder-topic-project-binding-repository.js';
-import { buildCurrentFounderWorkMap } from './current-founder-work-map.js';
+import { buildCurrentFounderWorkMap, founderLineRootName } from './current-founder-work-map.js';
 import { computeSpaceFreshness, type SpaceFreshnessSummary } from './space-sync-freshness.js';
 import { founderCard, founderText } from './founder-card.js';
 import type { FounderWorkMapCard } from './founder-work-map-renderer.js';
@@ -99,7 +99,10 @@ function buildProjectProgress(input:{client:Database.Database;chatId:string;now:
   // statements were noise there. Group-chat progress still reaches the work map.
   const {completed:chatCompleted,next:chatNext}=finished||page?{completed:[],next:[]}:classifyFounderProgressStatements(perspectives.map(item=>item.statement));
   const unique=(items:readonly string[])=>[...new Set(items)];
-  const focus=page?.phases.find(phase=>phase.focus)??null;
+  // Ivy 2026-10-24: 自媒体生产线 (B line) content runs on a fixed workflow and schedule, so it has no 阶段规划 at all.
+  const noPhasePlan=founderLineRootName(input.client,topic.id)==='自媒体生产线';
+  const phases=noPhasePlan?[]:page?.phases??[];
+  const focus=phases.find(phase=>phase.focus)??null;
   const positioning=page?.positioning??(topic.outcome?chat(topic.outcome):'无');
   const status=`${stageLabels[topic.stage]}${focus?` · 当前重点：${focus.name}`:''}`;
   const sections=[
@@ -118,12 +121,12 @@ function buildProjectProgress(input:{client:Database.Database;chatId:string;now:
     ...(page?.notes.length?[`Space 提示：${page.notes.join('；')}`]:[]),
     `${page?'未标注来源的条目来自 Space 页面。':''}明细发“查看处理状态”。`].join('\n');
   const view:FounderProjectProgressBoardView={kind:'project_progress',title:founderText(topic.displayName,100),positioning,status,
-    phases:page?.phases??[],phasesEmpty:page?.phasesEmpty??'无',sections,footer};
+    phases,phasesEmpty:noPhasePlan?null:page?.phasesEmpty??'无',sections,footer};
   const phaseLine=(phase:FounderProjectProgressBoardView['phases'][number])=>`${founderPhaseMark(phase)} ${phase.name}：${phase.tasks}｜${phase.statusText}`;
   const card=founderCard(`项目进展 · ${view.title}`,[
     `项目定位\n${positioning}\n当前状态：${status}`,
-    view.phases.length?`${founderPhasesTitle(view.phases)}\n${founderPhaseLegend}\n${view.phases.map(phaseLine).join('\n')}`
-      :`阶段规划\n${view.phasesEmpty}`,
+    ...(view.phases.length?[`${founderPhasesTitle(view.phases)}\n${founderPhaseLegend}\n${view.phases.map(phaseLine).join('\n')}`]
+      :view.phasesEmpty===null?[]:[`阶段规划\n${view.phasesEmpty}`]),
     ...sections.map(section=>`${section.title}\n${section.items.length?section.items.map(item=>`- ${item}`).join('\n'):'无'}`)
   ],issues.length?'orange':'blue');
   return{card:withFooter(card,footer),view};
