@@ -93,7 +93,7 @@ export function renderSpaceProjectPageLines(view: SpaceProjectPageView): string[
 
 export interface SpaceProjectProgress {
   positioning: string | null;
-  phases: { name: string; tasks: string; status: 'done' | 'current' | 'upcoming' }[];
+  phases: { name: string; tasks: string; status: 'done' | 'in_progress' | 'upcoming'; statusText: string; focus: boolean }[];
   /** Why there are no phases: no digest yet, an old digest, or the page does not divide the work into phases. */
   phasesEmpty: string;
   completed: string[]; inProgress: string[]; pending: string[]; problems: string[]; divergences: string[]; nextPlan: string[];
@@ -131,7 +131,8 @@ export function spaceProjectProgress(view: SpaceProjectPageView): SpaceProjectPr
     completed: [...new Set(texts([...d.weekProgress, ...d.todayProgress]))], inProgress: d.currentFocus ? [text(d.currentFocus.text)] : [],
     problems: texts(d.nextSteps.filter((item) => item.kind === 'blocker')), nextPlan: texts(d.nextSteps.filter((item) => item.kind !== 'blocker')) };
   return { ...base, positioning: profile.positioning ? text(profile.positioning.text) : null,
-    phases: profile.phases.map((phase) => ({ name: founderText(phase.name, 30), tasks: text(phase.text), status: phase.status })),
+    phases: profile.phases.map((phase) => ({ name: founderText(phase.name, 30), tasks: text(phase.text), status: phase.status,
+      statusText: founderText(phase.statusText, 60), focus: phase.focus })),
     phasesEmpty: '无（Space 页面没有划分阶段）', completed: texts(profile.completed), inProgress: texts(profile.inProgress),
     pending: texts(profile.pending), problems: texts(profile.problems), divergences: texts(profile.divergences), nextPlan: texts(profile.nextPlan) };
 }

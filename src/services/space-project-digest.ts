@@ -10,7 +10,12 @@ const promptMarkdownBudget = 120_000;
 const digestItemSchema = z.object({ text: text(80), blockId: text(256), excerpt: text(400) }).strict();
 const nextStepSchema = digestItemSchema.extend({ kind: z.enum(['next', 'blocker']) }).strict();
 
-const phaseSchema = digestItemSchema.extend({ name: text(30), status: z.enum(['done', 'current', 'upcoming']) }).strict();
+/**
+ * Phases may run in parallel (Ivy's 合伙人对齐室 page, 2026-10-22): several can be in progress at once and at most one is
+ * the current focus. `statusText` is the page's own wording for where the phase stands.
+ */
+const phaseSchema = digestItemSchema.extend({ name: text(30), status: z.enum(['done', 'in_progress', 'upcoming']), statusText: text(60),
+  focus: z.boolean() }).strict();
 
 /**
  * The page-level picture behind 查看项目进展: what the project is, its phases as the page divides them, and the page's
@@ -19,7 +24,7 @@ const phaseSchema = digestItemSchema.extend({ name: text(30), status: z.enum(['d
  */
 export const spaceProjectProfileSchema = z.object({
   positioning: digestItemSchema.nullable(),
-  phases: z.array(phaseSchema).max(6),
+  phases: z.array(phaseSchema).max(8),
   completed: z.array(digestItemSchema).max(5),
   inProgress: z.array(digestItemSchema).max(3),
   pending: z.array(digestItemSchema).max(3),
@@ -63,7 +68,7 @@ export interface SpaceProjectDigestAnalyzer {
 }
 
 export type SpaceDigestValidationReason = 'schema_invalid' | 'unknown_block' | 'excerpt_not_verbatim' |
-  'week_item_not_changed_this_week' | 'today_item_not_changed_today' | 'today_without_version_diff' | 'phase_current_not_unique';
+  'week_item_not_changed_this_week' | 'today_item_not_changed_today' | 'today_without_version_diff' | 'phase_focus_not_unique';
 
 export class SpaceDigestValidationError extends Error {
   readonly code = 'SPACE_DIGEST_OUTPUT_INVALID';
@@ -121,6 +126,6 @@ export function validateSpaceDigest(raw: unknown, input: SpaceProjectDigestInput
   const { positioning, phases, ...sections } = digest.profile;
   if (positioning) grounded(positioning);
   for (const item of [...phases, ...Object.values(sections).flat()]) grounded(item);
-  if (phases.filter((phase) => phase.status === 'current').length > 1) throw new SpaceDigestValidationError('phase_current_not_unique');
+  if (phases.filter((phase) => phase.focus).length > 1) throw new SpaceDigestValidationError('phase_focus_not_unique');
   return digest;
 }

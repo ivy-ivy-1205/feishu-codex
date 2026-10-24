@@ -168,9 +168,10 @@ describe('Space project-page block', () => {
     h.digests.saveReady({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h.page.id, pageSourceVersion: 1,
       pageUpdatedAt: h.page.occurredAt, generatedAt: at, changeBasis: 'version_diff', digest: { ...digest, profile: {
         positioning: page('为买家提供可复用的房源空间'),
-        phases: [{ ...page('Amy V2 Task 1–9'), name: '能力底座', status: 'done' as const },
-          { ...page('27 Cecil Street 样板上线与验收'), name: '样板上线', status: 'current' as const },
-          { ...page('复制到第二套房源'), name: '复制推广', status: 'upcoming' as const }],
+        phases: [{ ...page('Amy V2 Task 1–9'), name: '能力底座', status: 'done' as const, statusText: '已完成并验收', focus: false },
+          { ...page('27 Cecil Street 样板上线与验收'), name: '样板上线', status: 'in_progress' as const, statusText: '进行中', focus: true },
+          { ...page('真实客户试用'), name: '客户试用', status: 'in_progress' as const, statusText: '可并行准备', focus: false },
+          { ...page('复制到第二套房源'), name: '复制推广', status: 'upcoming' as const, statusText: '未开始', focus: false }],
         completed: [page('27 Cecil Street 页面上线')], inProgress: [page('Task 10 真实验收')], pending: [page('第二套房源选址')],
         problems: [page('家庭数据读取后的最终回复失败')], divergences: [], nextPlan: [page('完成生产切换和回滚演练')] } } });
     const sources = new ContextSourceRepository(h.db.client);
@@ -185,8 +186,10 @@ describe('Space project-page block', () => {
       queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!;
     const texts = (message.card.elements as { tag: string; text?: { content?: string } }[]).filter((e) => e.text).map((e) => e.text!.content!);
     expect(texts.slice(0, 8)).toEqual([
-      '项目定位\n为买家提供可复用的房源空间\n当前状态：正在推进 · 第 2 阶段：样板上线',
-      '阶段规划（共 3 个阶段，目前在第 2 阶段）\n✓ 1. 能力底座：Amy V2 Task 1–9\n▶ 2. 样板上线：27 Cecil Street 样板上线与验收\n○ 3. 复制推广：复制到第二套房源',
+      '项目定位\n为买家提供可复用的房源空间\n当前状态：正在推进 · 当前重点：样板上线',
+      ['阶段规划（共 4 个阶段，当前重点：样板上线）', '✓ 已完成　◐ 进行中　○ 未开始　▶ 当前重点',
+        '✓ 能力底座：Amy V2 Task 1–9｜已完成并验收', '▶ 样板上线：27 Cecil Street 样板上线与验收｜进行中',
+        '◐ 客户试用：真实客户试用｜可并行准备', '○ 复制推广：复制到第二套房源｜未开始'].join('\n'),
       // Ivy 2026-10-22: with a page, keyword-classified group-chat statements stay out of the sections.
       '已完成\n- 27 Cecil Street 页面上线',
       '正在做\n- Task 10 真实验收',
@@ -200,7 +203,8 @@ describe('Space project-page block', () => {
     const body = JSON.stringify(message.card);
     for (const gone of ['当前方向', '尚未形成明确目标', '群聊记录：', '处理状态（北京时间）', '项目页（Space']) expect(body).not.toContain(gone);
     expect(message.kind === 'founder_manual_query' && message.boardView).toMatchObject({ kind: 'project_progress', title: 'Smart Listing',
-      phases: [{ name: '能力底座', status: 'done' }, { name: '样板上线', status: 'current' }, { name: '复制推广', status: 'upcoming' }] });
+      phases: [{ name: '能力底座', status: 'done' }, { name: '样板上线', status: 'in_progress', focus: true },
+        { name: '客户试用', status: 'in_progress', focus: false }, { name: '复制推广', status: 'upcoming' }] });
   });
 
   it('keeps the group chat in the sections only for a project without a Space page', () => {
