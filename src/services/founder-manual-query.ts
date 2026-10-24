@@ -10,7 +10,7 @@ import { buildCurrentFounderWorkMap } from './current-founder-work-map.js';
 import { computeSpaceFreshness, type SpaceFreshnessSummary } from './space-sync-freshness.js';
 import { founderCard, founderText } from './founder-card.js';
 import type { FounderWorkMapCard } from './founder-work-map-renderer.js';
-import type { FounderBoardView, FounderProjectProgressBoardView } from './founder-board-view.js';
+import { founderPhaseLegend, founderPhaseMark, founderPhasesTitle, type FounderBoardView, type FounderProjectProgressBoardView } from './founder-board-view.js';
 import { founderCommandText } from './founder-command-text.js';
 
 const defaultSpaceStaleAfterMinutes = 24 * 60;
@@ -99,10 +99,9 @@ function buildProjectProgress(input:{client:Database.Database;chatId:string;now:
   // statements were noise there. Group-chat progress still reaches the work map.
   const {completed:chatCompleted,next:chatNext}=finished||page?{completed:[],next:[]}:classifyFounderProgressStatements(perspectives.map(item=>item.statement));
   const unique=(items:readonly string[])=>[...new Set(items)];
-  const currentIndex=page?page.phases.findIndex(phase=>phase.status==='current'):-1;
-  const current=currentIndex>=0?page!.phases[currentIndex]!:null;
+  const focus=page?.phases.find(phase=>phase.focus)??null;
   const positioning=page?.positioning??(topic.outcome?chat(topic.outcome):'无');
-  const status=`${stageLabels[topic.stage]}${current?` · 第 ${currentIndex+1} 阶段：${current.name}`:''}`;
+  const status=`${stageLabels[topic.stage]}${focus?` · 当前重点：${focus.name}`:''}`;
   const sections=[
     {title:'已完成',items:unique([...(page?.completed??[]),...chatCompleted.slice(0,3).map(chat)])},
     {title:'正在做',items:unique(page?.inProgress??[])},
@@ -120,11 +119,10 @@ function buildProjectProgress(input:{client:Database.Database;chatId:string;now:
     `${page?'未标注来源的条目来自 Space 页面。':''}明细发“查看处理状态”。`].join('\n');
   const view:FounderProjectProgressBoardView={kind:'project_progress',title:founderText(topic.displayName,100),positioning,status,
     phases:page?.phases??[],phasesEmpty:page?.phasesEmpty??'无',sections,footer};
-  const phaseLine=(phase:FounderProjectProgressBoardView['phases'][number],index:number)=>
-    `${phase.status==='done'?'✓':phase.status==='current'?'▶':'○'} ${index+1}. ${phase.name}：${phase.tasks}`;
+  const phaseLine=(phase:FounderProjectProgressBoardView['phases'][number])=>`${founderPhaseMark(phase)} ${phase.name}：${phase.tasks}｜${phase.statusText}`;
   const card=founderCard(`项目进展 · ${view.title}`,[
     `项目定位\n${positioning}\n当前状态：${status}`,
-    view.phases.length?`阶段规划（共 ${view.phases.length} 个阶段${current?`，目前在第 ${currentIndex+1} 阶段`:''}）\n${view.phases.map(phaseLine).join('\n')}`
+    view.phases.length?`${founderPhasesTitle(view.phases)}\n${founderPhaseLegend}\n${view.phases.map(phaseLine).join('\n')}`
       :`阶段规划\n${view.phasesEmpty}`,
     ...sections.map(section=>`${section.title}\n${section.items.length?section.items.map(item=>`- ${item}`).join('\n'):'无'}`)
   ],issues.length?'orange':'blue');

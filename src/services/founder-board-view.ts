@@ -29,12 +29,21 @@ export interface FounderProjectProgressBoardView {
   kind:'project_progress';
   title:string;
   positioning:string;
-  /** "正在推进 · 第 2 阶段：样板上线" */
+  /** "正在推进 · 当前重点：Phase 6 …" */
   status:string;
-  phases:readonly {name:string;tasks:string;status:'done'|'current'|'upcoming'}[];
+  phases:readonly {name:string;tasks:string;status:'done'|'in_progress'|'upcoming';statusText:string;focus:boolean}[];
   phasesEmpty:string;
   sections:readonly {title:string;items:readonly string[]}[];
   footer:string;
 }
 
 export type FounderBoardView=FounderWorkMapBoardView|FounderProjectProgressBoardView;
+
+type Phase=FounderProjectProgressBoardView['phases'][number];
+/** The focus outranks its status, so the one current focus is always the single ▶. */
+export function founderPhaseMark(phase:Phase):string{return phase.focus?'▶':phase.status==='done'?'✓':phase.status==='in_progress'?'◐':'○'}
+export const founderPhaseLegend='✓ 已完成　◐ 进行中　○ 未开始　▶ 当前重点';
+export function founderPhasesTitle(phases:readonly Phase[]):string{
+  const focus=phases.find(phase=>phase.focus);
+  return`阶段规划（共 ${phases.length} 个阶段${focus?`，当前重点：${focus.name}`:''}）`;
+}

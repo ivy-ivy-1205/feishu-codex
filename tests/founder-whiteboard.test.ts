@@ -47,10 +47,12 @@ describe('founder whiteboard',()=>{
 
   it('lays out project progress in Ivy’s reading order: positioning, phases, then sections in pairs, with the title once',()=>{
     const view={kind:'project_progress' as const,title:'Family First',positioning:'为家庭买家做一套可漫游的看房展示，让客户看懂房子和生活方式',
-      status:'正在推进 · 第 2 阶段：V0.3 生活导览',
-      phases:[{name:'资料核对',tasks:'CDC 合订本与建筑基线核对',status:'done' as const},
-        {name:'V0.3 生活导览',tasks:'两条生活路线、重点站点与体验评审',status:'current' as const},
-        {name:'视频与发布',tasks:'外立面关键帧与视频生成',status:'upcoming' as const}],
+      status:'正在推进 · 当前重点：Phase 6 把项目现场的进展带回共同视野',
+      phases:[['Phase 0 让服务持续可用','done','已完成，基本运行已验证'],['Phase 1 把会议变成可继续推进的记录','done','已上线，真实会议处理已验证'],
+        ['Phase 2 让建议对应到正确的项目','done','已完成业务验收，2026 年 8 月 1 日通过'],['Phase 3 保留依据和变化过程','in_progress','资料保存已在使用；人工确认流程尚未验收'],
+        ['Phase 4 从日常交流形成工作地图','in_progress','核心功能已上线并验收；对齐判断继续完善'],['Phase 5 让结果在群里一眼看懂','in_progress','工作地图已验收；项目进展新版尚未上线'],
+        ['Phase 6 把项目现场的进展带回共同视野','in_progress','进行中，是当前重点']].map(([name,status,statusText],index)=>
+        ({name:name!,tasks:'把服务接到飞书上，使它能持续接收和处理资料，并保留出处与历史版本',status:status as 'done'|'in_progress',statusText:statusText!,focus:index===6})),
       phasesEmpty:'无',sections:[
         {title:'已完成',items:['收到 610 页 CDC 合订本并完成建筑基线及外观差异核对','完成外立面四个关键帧及首次视频生成试片']},
         {title:'正在做',items:['评审 V0.3 两条生活路线的重点站点与体验']},
@@ -64,14 +66,19 @@ describe('founder whiteboard',()=>{
       const texts=board.nodes.filter(node=>node.type==='text_shape'&&node.text?.text);
       const all=texts.map(node=>node.text!.text!).join('\n');
       expect(all.split('Family First').length-1,palette.id).toBe(1);
+      // Section headers are exact titles; only the phases header carries a count after its title.
       const headers=['项目定位','阶段规划','已完成','正在做','待推进','卡点与问题','分歧','下一步计划'].map(title=>
-        texts.find(node=>node.text!.text!.startsWith(title))!);
+        texts.find(node=>node.text!.text===title||(title==='阶段规划'&&node.text!.text!.startsWith('阶段规划（')))!);
       expect(headers.every(Boolean),palette.id).toBe(true);
       // Reading order: top to bottom, left before right within a row.
       for(let index=1;index<headers.length;index++){const previous=headers[index-1]!,current=headers[index]!;
         expect(current.y!>previous.y!||(current.y===previous.y&&current.x!>previous.x!),`${palette.id}: ${current.text!.text}`).toBe(true);}
       expect(headers[2]!.y).toBe(headers[3]!.y);expect(headers[4]!.y).toBe(headers[5]!.y);expect(headers[6]!.y).toBe(headers[7]!.y);
-      expect(all).toContain('▶ 2 V0.3 生活导览');
+      // All seven phases survive, the focus is marked once, and phases still in progress are not shown as done.
+      for(let n=0;n<=6;n++)expect(all,palette.id).toContain(`Phase ${n} `);
+      expect(all.split('▶ Phase').length-1,palette.id).toBe(1);
+      expect(all).toContain('✓ 已完成　◐ 进行中　○ 未开始　▶ 当前重点');
+      expect(all).toContain('▶ Phase 6');expect(all).toContain('◐ Phase 3');expect(all).not.toContain('✓ Phase 3');
       expect(all).toContain('无');
       expect(texts.at(-1)!.text!.text).toContain('资料截至');
       // Every text node stays inside the board and readable on the fill directly behind it.

@@ -1,5 +1,8 @@
 import sharp from 'sharp';
-import type { FounderBoardView, FounderProjectProgressBoardView, FounderWorkMapBoardTopic, FounderWorkMapBoardView } from './founder-board-view.js';
+import {
+  founderPhaseLegend, founderPhaseMark, founderPhasesTitle,
+  type FounderBoardView, type FounderProjectProgressBoardView, type FounderWorkMapBoardTopic, type FounderWorkMapBoardView
+} from './founder-board-view.js';
 
 export interface FounderWhiteboardNode {
   id?:string;
@@ -140,26 +143,32 @@ function buildProjectProgressBoard(palette:FounderPalette,view:FounderProjectPro
   nodes.push(textNode(margin+pad,y+band+pad,contentWidth-pad*2,lineCount(positioning)*bodyLine,positioning,bodyFont,readableText(palette.surface),'regular'));
   y+=positioningHeight+gap;
 
-  const currentIndex=view.phases.findIndex(phase=>phase.status==='current');
-  const phaseTitle=view.phases.length?`阶段规划（共 ${view.phases.length} 个阶段${currentIndex>=0?`，目前在第 ${currentIndex+1} 阶段`:''}）`:'阶段规划';
+  const phaseTitle=view.phases.length?wrapped(founderPhasesTitle(view.phases),contentWidth-pad*2,23,1):'阶段规划';
   if(view.phases.length){
-    const perRow=Math.min(3,view.phases.length),chipGap=14,chipWidth=(contentWidth-pad*2-chipGap*(perRow-1))/perRow;
-    const chips=view.phases.map((phase,index)=>{
-      const label=wrapped(`${phase.status==='done'?'✓':phase.status==='current'?'▶':'○'} ${index+1} ${phase.name}`,chipWidth-28,21,2);
-      const tasks=wrapped(phase.tasks,chipWidth-28,18,3);
-      return{phase,label,tasks,height:14+lineCount(label)*29+6+lineCount(tasks)*25+14};
+    // Up to four per row, so seven parallel phases stay two rows; the one current focus is the only filled chip.
+    const perRow=Math.min(4,view.phases.length),chipGap=12,chipWidth=(contentWidth-pad*2-chipGap*(perRow-1))/perRow,legendHeight=30;
+    // Narrow chips mix Latin phase numbers with CJK, so they wrap with the wider safety margin.
+    const chipWrap=(value:string,font:number,maxLines:number)=>wrapText(value,textUnits(chipWidth-24,font),maxLines);
+    const chips=view.phases.map(phase=>{
+      const label=chipWrap(`${founderPhaseMark(phase)} ${phase.name}`,19,2);
+      const tasks=chipWrap(phase.tasks,17,3);
+      const status=chipWrap(phase.statusText,16,2);
+      return{phase,label,tasks,status,height:12+lineCount(label)*27+6+lineCount(tasks)*24+6+lineCount(status)*23+12};
     });
     const rows:typeof chips[]=[];for(let index=0;index<chips.length;index+=perRow)rows.push(chips.slice(index,index+perRow));
     const rowHeights=rows.map(row=>Math.max(...row.map(chip=>chip.height)));
-    const phasesHeight=band+pad+rowHeights.reduce((sum,height)=>sum+height,0)+chipGap*(rows.length-1)+pad;
+    const phasesHeight=band+pad+legendHeight+rowHeights.reduce((sum,height)=>sum+height,0)+chipGap*(rows.length-1)+pad;
     box(margin,y,contentWidth,phasesHeight,phaseTitle,palette.accent);
-    let chipY=y+band+pad;
+    nodes.push(textNode(margin+pad,y+band+pad-6,contentWidth-pad*2,23,founderPhaseLegend,16,readableText(palette.surface),'regular'));
+    let chipY=y+band+pad+legendHeight;
     rows.forEach((row,rowIndex)=>{row.forEach((chip,column)=>{
-      const x=margin+pad+column*(chipWidth+chipGap),fill=chip.phase.status==='current'?palette.secondary:chip.phase.status==='done'?palette.recess:palette.paper;
-      const ink=readableText(fill);
+      const x=margin+pad+column*(chipWidth+chipGap);
+      const fill=chip.phase.focus?palette.secondary:chip.phase.status==='done'?palette.recess:chip.phase.status==='in_progress'?palette.paper:palette.surface;
+      const ink=readableText(fill);let textY=chipY+12;
       nodes.push(shape(x,chipY,chipWidth,rowHeights[rowIndex]!,fill,palette.ink));
-      nodes.push(textNode(x+14,chipY+14,chipWidth-28,lineCount(chip.label)*29,chip.label,21,ink,'bold'));
-      nodes.push(textNode(x+14,chipY+14+lineCount(chip.label)*29+6,chipWidth-28,lineCount(chip.tasks)*25,chip.tasks,18,ink,'regular'));
+      nodes.push(textNode(x+12,textY,chipWidth-24,lineCount(chip.label)*27,chip.label,19,ink,'bold'));textY+=lineCount(chip.label)*27+6;
+      nodes.push(textNode(x+12,textY,chipWidth-24,lineCount(chip.tasks)*24,chip.tasks,17,ink,'regular'));textY+=lineCount(chip.tasks)*24+6;
+      nodes.push(textNode(x+12,textY,chipWidth-24,lineCount(chip.status)*23,chip.status,16,ink,'bold'));
     });chipY+=rowHeights[rowIndex]!+chipGap;});
     y+=phasesHeight+gap;
   }else{

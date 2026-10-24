@@ -79,7 +79,8 @@ describe('validateSpaceDigest', () => {
 
   it('accepts a grounded project profile: positioning, phases, and each progress section', () => {
     const profile = { positioning: item('b_old', '上线买家空间'),
-      phases: [{ ...item('b_old', '项目目标'), name: '第一阶段', status: 'done' }, { ...item('b_week', '27 Cecil Street 页面已上线'), name: '样板上线', status: 'current' }],
+      phases: [{ ...item('b_old', '项目目标'), name: '第一阶段', status: 'done', statusText: '已完成', focus: false },
+        { ...item('b_week', '27 Cecil Street 页面已上线'), name: '样板上线', status: 'in_progress', statusText: '进行中，是当前重点', focus: true }],
       completed: [item('b_week', '27 Cecil Street 页面已上线')], inProgress: [item('b_today', '补齐了户型图')], pending: [],
       problems: [item('b_week', '等待 Amy 反馈')], divergences: [], nextPlan: [item('b_week', '等待 Amy 反馈')] };
     const digest = { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile };
@@ -90,11 +91,22 @@ describe('validateSpaceDigest', () => {
     ['schema_invalid', undefined],
     ['unknown_block', { ...noProfile, completed: [item('b_missing', '上线')] }],
     ['excerpt_not_verbatim', { ...noProfile, positioning: item('b_old', '上线卖家空间') }],
-    ['phase_current_not_unique', { ...noProfile, phases: [{ ...item('b_old', '项目目标'), name: '一', status: 'current' },
-      { ...item('b_week', '页面已上线'), name: '二', status: 'current' }] }]
+    ['phase_focus_not_unique', { ...noProfile, phases: [{ ...item('b_old', '项目目标'), name: '一', status: 'in_progress', statusText: '进行中', focus: true },
+      { ...item('b_week', '页面已上线'), name: '二', status: 'in_progress', statusText: '进行中', focus: true }] }]
   ])('rejects a profile with %s', (reason, profile) => {
     const digest = { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], ...(profile ? { profile } : {}) };
     expect(() => validateSpaceDigest(digest, weekInput())).toThrow(expect.objectContaining({ reason }));
+  });
+
+  it('keeps seven phases that run in parallel: several in progress, one current focus, none promoted to done', () => {
+    const phase = (n: number, status: 'done' | 'in_progress' | 'upcoming', focus = false) =>
+      ({ ...item('b_old', '项目目标'), name: `Phase ${n}`, status, statusText: status === 'done' ? '已完成' : '进行中', focus });
+    const phases = [phase(0, 'done'), phase(1, 'done'), phase(2, 'done'), phase(3, 'in_progress'), phase(4, 'in_progress'),
+      phase(5, 'in_progress'), phase(6, 'in_progress', true)];
+    const digest = { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile: { ...noProfile, phases } };
+    expect(validateSpaceDigest(digest, weekInput()).profile.phases).toEqual(phases);
+    const nine = { ...digest, profile: { ...noProfile, phases: Array.from({ length: 9 }, (_, n) => phase(n, 'upcoming')) } };
+    expect(() => validateSpaceDigest(nine, weekInput())).toThrow(expect.objectContaining({ reason: 'schema_invalid' }));
   });
 
   it('allows page-recorded progress but no "today" claims on a first snapshot', () => {
@@ -121,6 +133,8 @@ describe('CodexSpaceProjectDigestAnalyzer', () => {
     expect(prompts[0]).toContain('profile.phases');
     expect(prompts[0]).toContain('不要自行划分');
     expect(prompts[0]).toContain('「阶段规划」');
+    expect(prompts[0]).toContain('当前重点');
+    expect(prompts[0]).toContain('in_progress');
   });
 
   it('fails after two invalid outputs instead of storing an ungrounded digest', async () => {
