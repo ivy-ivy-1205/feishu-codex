@@ -167,7 +167,7 @@ describe('founder work map cards', () => {
     } }], uncertainGrouping: [], coverageGaps: [] });
     const body = JSON.stringify(page!.card);
     expect(body).toContain('Space');
-    expect(body).toContain('2026-09-19T12:00:00.000Z');
+    expect(body).toContain('最后成功同步 2026-09-19 20:00');
     expect(body).not.toContain('可能滞后');
   });
 
@@ -206,6 +206,16 @@ describe('founder work map cards', () => {
     expect(body).not.toContain('agent：已更新配套信息');
     expect(body).not.toContain('来源：待补充');
     expect(body).toContain('项目页（Space · 页面更新于 09-19');
+  });
+
+  it('shows every time in Beijing time, never as a raw ISO stamp', () => {
+    const [page] = renderFounderWorkMap({ since: '2026-08-31T00:00:00.000Z', until: '2026-09-20T17:30:00.000Z', topics: [
+      { ...topic('b', 'active_project'), displayName: '沉睡项目', dormant: true, lastActivityAt: '2026-08-01T20:00:00.000Z' }
+    ], uncertainGrouping: [], coverageGaps: [] });
+    const body = JSON.stringify(page!.card);
+    expect(body).toContain('整理范围：2026-08-31 08:00 至 2026-09-21 01:30（北京时间）');
+    expect(body).toContain('最近动态 2026-08-02');
+    expect(body).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/u);
   });
 
   it('moves dormant topics into a numbered 长期无动态 section at the end of the text card', () => {

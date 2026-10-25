@@ -38,7 +38,16 @@ export interface FounderProjectProgressBoardView {
   footer:string;
 }
 
-export type FounderBoardView=FounderWorkMapBoardView|FounderProjectProgressBoardView;
+/** 查看分歧 as structure (Ivy 2026-10-25): the three counts first, then one section per category, then the 资料截至 line. */
+export interface FounderAlignmentBoardView {
+  kind:'alignment_overview';
+  title:string;
+  counts:readonly {title:string;count:number;note:string}[];
+  sections:readonly {title:string;items:readonly string[]}[];
+  footer:string;
+}
+
+export type FounderBoardView=FounderWorkMapBoardView|FounderProjectProgressBoardView|FounderAlignmentBoardView;
 
 type Phase=FounderProjectProgressBoardView['phases'][number];
 /** The focus outranks its status, so the one current focus is always the single ▶. */

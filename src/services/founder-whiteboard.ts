@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 import {
   founderPhaseLegend, founderPhaseMark, founderPhasesTitle,
-  type FounderBoardView, type FounderProjectProgressBoardView, type FounderWorkMapBoardTopic, type FounderWorkMapBoardView
+  type FounderAlignmentBoardView, type FounderBoardView, type FounderProjectProgressBoardView, type FounderWorkMapBoardTopic, type FounderWorkMapBoardView
 } from './founder-board-view.js';
 
 export interface FounderWhiteboardNode {
@@ -69,7 +69,8 @@ export function selectFounderPalette(previousId:string|null|undefined,random:()=
 export function buildFounderWhiteboard(input:{title:string;paletteId:string;cards:readonly Record<string,unknown>[];view?:FounderBoardView}):BuiltFounderWhiteboard{
   const palette=founderPalettes.find(item=>item.id===input.paletteId)??founderPalettes[0]!;
   return input.view?.kind==='work_map'?buildWorkMapBoard(input.title,palette,input.view):
-    input.view?.kind==='project_progress'?buildProjectProgressBoard(palette,input.view):buildGenericBoard(input.title,palette,input.cards);
+    input.view?.kind==='project_progress'?buildProjectProgressBoard(palette,input.view):
+      input.view?.kind==='alignment_overview'?buildAlignmentOverviewBoard(palette,input.view):buildGenericBoard(input.title,palette,input.cards);
 }
 
 export async function renderFounderWhiteboardPng(board:BuiltFounderWhiteboard):Promise<Buffer>{
@@ -187,6 +188,56 @@ function buildProjectProgressBoard(palette:FounderPalette,view:FounderProjectPro
       box(x,y,halfWidth,height,entry.section.title,alert?palette.highlight:palette.accent);
       nodes.push(textNode(x+pad,y+band+pad,halfWidth-pad*2,lineCount(entry.body)*bodyLine,entry.body,bodyFont,readableText(palette.surface),'regular'));
     });
+    y+=height+gap;
+  }
+
+  const footer=view.footer.split('\n').map(line=>wrapped(line,contentWidth-36,16,2)).join('\n'),footerHeight=lineCount(footer)*22+28;
+  nodes.push(shape(margin,y,contentWidth,footerHeight,palette.recess,palette.ink));
+  nodes.push(textNode(margin+18,y+14,contentWidth-36,lineCount(footer)*22,footer,16,readableText(palette.recess),'regular'));
+  const height=y+footerHeight+margin;
+  nodes[0]={...nodes[0]!,height};
+  return{palette,width,height,nodes};
+}
+
+/**
+ * 查看分歧 as a board (Ivy 2026-10-25), in the same style as 查看项目进展: the title once, the three category counts side
+ * by side, one full-width section per category (真实分歧 highlighted when there is one), then the one-line 资料截至 footer.
+ */
+function buildAlignmentOverviewBoard(palette:FounderPalette,view:FounderAlignmentBoardView):BuiltFounderWhiteboard{
+  const width=1160,margin=28,gap=20,band=46,pad=18,contentWidth=width-margin*2;
+  const bodyFont=20,bodyLine=Math.round(bodyFont*1.38),nodes:FounderWhiteboardNode[]=[],paperText=readableText(palette.paper);
+  const wrapped=(value:string,boxWidth:number,font:number,maxLines:number)=>wrapText(value,fullLineUnits(boxWidth,font),maxLines);
+  const lineCount=(value:string)=>value.split('\n').length;
+  nodes.push(shape(0,0,width,0,palette.paper,palette.paper,'none'));
+  nodes.push(textNode(margin,26,860,56,view.title,40,paperText,'bold'));
+  nodes.push(textNode(900,36,232,26,palette.name,17,paperText,'regular','right'));
+  let y=104;
+
+  // Counts: one tile per category; a tile with a real divergence is the one that changes color.
+  const tileGap=16,tileWidth=(contentWidth-tileGap*(view.counts.length-1))/view.counts.length;
+  const tileWrap=(value:string,font:number,maxLines:number)=>wrapText(value,textUnits(tileWidth-36,font),maxLines);
+  const tiles=view.counts.map(item=>({item,note:tileWrap(item.note,16,3)}));
+  const tileHeight=18+32+6+48+8+Math.max(...tiles.map(tile=>lineCount(tile.note)))*23+18;
+  tiles.forEach(({item,note},index)=>{
+    const x=margin+index*(tileWidth+tileGap),fill=item.title==='真实分歧'&&item.count>0?palette.highlight:palette.surface,ink=readableText(fill);
+    nodes.push(shape(x+6,y+6,tileWidth,tileHeight,palette.ink,palette.ink,'none'));
+    nodes.push(shape(x,y,tileWidth,tileHeight,fill,palette.ink));
+    nodes.push(textNode(x+18,y+18,tileWidth-36,32,item.title,23,ink,'bold'));
+    nodes.push(textNode(x+18,y+18+32+6,tileWidth-36,48,`${item.count} 项`,34,ink,'bold'));
+    nodes.push(textNode(x+18,y+18+32+6+48+8,tileWidth-36,lineCount(note)*23,note,16,ink,'regular'));
+  });
+  y+=tileHeight+gap+6;
+
+  for(const section of view.sections){
+    // Entries mix project names in Latin with Chinese, so they wrap with the wider safety margin.
+    const body=section.items.length?section.items.map(item=>wrapText(`• ${item}`,textUnits(contentWidth-pad*2,bodyFont),3)).join('\n'):'无';
+    const height=band+pad+lineCount(body)*bodyLine+pad;
+    const alert=section.title.startsWith('真实分歧')&&section.items.length>0,headerFill=alert?palette.highlight:palette.accent;
+    nodes.push(shape(margin+6,y+6,contentWidth,height,palette.ink,palette.ink,'none'));
+    nodes.push(shape(margin,y,contentWidth,height,palette.surface,palette.ink));
+    nodes.push(shape(margin,y,contentWidth,band,headerFill,palette.ink));
+    nodes.push(textNode(margin+pad,y+8,contentWidth-pad*2,32,section.title,23,readableText(headerFill),'bold'));
+    nodes.push(textNode(margin+pad,y+band+pad,contentWidth-pad*2,lineCount(body)*bodyLine,body,bodyFont,readableText(palette.surface),'regular'));
     y+=height+gap;
   }
 

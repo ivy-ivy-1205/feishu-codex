@@ -157,9 +157,10 @@ describe('Space project-page block', () => {
     expect(legacy).toContain('阶段规划\\n无（页面摘要待更新）');
     expect(legacy).toContain('正在做\\n- 把 27 Cecil Street 买家空间做成可复用模板');
     expect(progress).toContain('阶段规划\\n无（Space 页面没有划分阶段）');
-    // The Space status line follows the rest of the processing status: Beijing time, no raw ISO stamps.
-    expect(map).toContain('最后成功同步：2026-10-21 10:00');
-    expect(map).not.toContain('最后成功同步：2026-10-21T');
+    // The work map ends with the one-line 资料截至 footer, in Beijing time, instead of the full processing status.
+    expect(map).toContain('资料截至：群聊 尚无已分析消息 · Space 页面最后同步 10-21 10:00');
+    expect(map).not.toContain('处理状态（北京时间）');
+    expect(map).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/u);
   });
 
   it('lays out 查看项目进展 in Ivy’s order from the page profile only, saying 无 when empty', () => {
@@ -229,6 +230,23 @@ describe('Space project-page block', () => {
     expect(texts[0]).toBe('项目定位\n用真实经历讲清个人能力如何变成团队成果\n当前状态：正在推进');
     expect(JSON.stringify(message.card)).not.toContain('阶段规划');
     expect(message.kind === 'founder_manual_query' && message.boardView).toMatchObject({ kind: 'project_progress', phases: [], phasesEmpty: null });
+  });
+
+  it('adds the divergences a Space page records to 查看分歧, marked as from the page', () => {
+    const h = setup();
+    const page = (text: string) => ({ text, blockId: 'b1', excerpt: '页面' });
+    h.digests.saveReady({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: h.page.id, pageSourceVersion: 1,
+      pageUpdatedAt: h.page.occurredAt, generatedAt: at, changeBasis: 'version_diff', digest: { ...digest, profile: {
+        ...digest.profile, divergences: [page('第二套房先做楼花还是现房仍有不同判断')] } } });
+    const overview = (spaceWorkMapEnabled: boolean) => (buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'open_alignment' },
+      queryMessageId: `om_overview_${spaceWorkMapEnabled}`, chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled })[0]!.card.elements as
+      { text?: { content?: string } }[]).flatMap((element) => element.text?.content ? [element.text.content] : []);
+    const shown = overview(true);
+    expect(shown[0]!.split('\n')[1]).toBe('真实分歧 1 项 · 缺少另一方表达 0 项 · 已确认共识 0 项');
+    expect(shown[1]).toBe('真实分歧（1）\n- Smart Listing｜第二套房先做楼花还是现房仍有不同判断（Space 页面 10-21）');
+    expect(shown.at(-1)).toContain('Space 页面最后同步 10-21 10:00');
+    // Without the Space display flag the page stays out of every founder view, this one included.
+    expect(overview(false)[1]).toBe('真实分歧（0）\n无');
   });
 
   it('keeps the group chat in the sections only for a project without a Space page', () => {

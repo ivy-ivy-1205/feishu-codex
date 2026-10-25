@@ -1,3 +1,4 @@
+import { founderBeijingTime } from './founder-time.js';
 import type { CurrentTopic, TopicStage } from '../domain/topic.js';
 import { founderCard, founderSourceText, founderText, type FounderCardEvidence } from './founder-card.js';
 import type { SpaceFreshnessSummary } from './space-sync-freshness.js';
@@ -100,7 +101,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
     const displayKind = topic.displayKind ?? 'project';
     const kind = displayKind === 'task' ? '任务' : displayKind === 'goal' ? '阶段目标' : displayKind === 'idea' ? '观点' : '项目';
     const suffix = topic.stage === 'paused' ? '（暂停）' : '';
-    const activity = topic.lastActivityAt ? `最近动态 ${new Date(topic.lastActivityAt).toISOString().slice(0, 10)}` : '最近动态未知';
+    const activity = topic.lastActivityAt ? `最近动态 ${founderBeijingTime(new Date(topic.lastActivityAt).toISOString()).slice(0, 10)}` : '最近动态未知';
     const text = `${kind}｜${founderText(topic.displayName, 120)}${suffix}\n${activity}${topic.outcome ? `；当前方向：${founderText(topic.outcome, 160)}` : ''}`;
     if (displayKind === 'project' || displayKind === 'idea') add(dormantSection, text, { kind: 'topic', id: topic.id, expectedVersion: topic.currentVersion });
     else addSupporting(dormantSection, text);
@@ -112,7 +113,7 @@ export function renderFounderWorkMap(input: FounderWorkMapInput): FounderWorkMap
       { kind: 'uncertain_grouping', id: grouping.id });
   }
   for (const gap of [...input.coverageGaps].sort(compareId)) add('覆盖缺口', founderText(gap.summary, 240), { kind: 'coverage_gap', id: gap.id });
-  const preface = `整理范围：${new Date(start).toISOString()} 至 ${new Date(end).toISOString()}\n这是根据已读取语料整理的工作地图，可继续纠正。`;
+  const preface = `整理范围：${founderBeijingTime(new Date(start).toISOString())} 至 ${founderBeijingTime(new Date(end).toISOString())}（北京时间）\n这是根据已读取语料整理的工作地图，可继续纠正。`;
   const footer = `归类待确认：${input.uncertainGrouping.length} 项；覆盖缺口：${input.coverageGaps.length} 项。未报告缺口不代表完整同步。\n可直接在本卡下用自然语言回复，例如“2 和 4 是同一个项目”“第 1 项只是想法”。编号用于项目、观点和待确认项的纠正定位；任务与阶段目标挂在所属项目下。`;
   const chunks: Item[][] = [[]];
   for (const item of items) {
@@ -171,13 +172,13 @@ function perspectivePreview(topicName:string,items:NonNullable<FounderWorkMapTop
   const historyCount=items.length-visible.length;
   const details=[...visible].sort((a,b)=>order[a.status]-order[b.status]||a.observedAt.localeCompare(b.observedAt)||a.founder.localeCompare(b.founder)||a.statement.localeCompare(b.statement))
     .map(item=>{const at=new Date(item.observedAt);if(!Number.isFinite(at.getTime()))throw new Error('valid perspective time is required');
-      return `\n${labels[item.status]}（${item.founder}，${at.toISOString().slice(0,10)}）：${founderText(item.statement,180)}`}).join('');
+      return `\n${labels[item.status]}（${item.founder}，${founderBeijingTime(at.toISOString()).slice(0,10)}）：${founderText(item.statement,180)}`}).join('');
   return `${details}${historyCount?`\n历史记录：${historyCount} 条，可用“查看对齐：${founderText(topicName,80)}”查看`:''}`;
 }
 
 function spaceFreshnessPreview(freshness: SpaceFreshnessSummary | undefined): string {
   if (!freshness || freshness.status === 'not_bound') return '';
-  const lastSync = freshness.lastSuccessfulSyncAt ? new Date(freshness.lastSuccessfulSyncAt).toISOString() : '尚无成功同步记录';
+  const lastSync = freshness.lastSuccessfulSyncAt ? founderBeijingTime(freshness.lastSuccessfulSyncAt) : '尚无成功同步记录';
   if (freshness.status === 'permission_lost') return `\nSpace 同步：权限缺失，最后成功同步 ${lastSync}；保留历史内容`;
   const gapNote = freshness.coverageIncomplete || freshness.gapCount > 0 ? `；缺口 ${freshness.gapCount} 项` : '';
   if (freshness.status === 'stale') return `\nSpace 同步：最后成功同步 ${lastSync}${gapNote}。Space 内容可能滞后，请以最新 Page 为准`;
@@ -193,10 +194,10 @@ function topicEvidencePreview(topic: FounderWorkMapTopic): string {
 
 function evidencePreview(evidence: readonly FounderCardEvidence[],linkedSourceCount=0): string {
   const first = [...evidence].sort((a,b)=>Number(Boolean(a.isFounderCorrection))-Number(Boolean(b.isFounderCorrection))||compareId(a,b))[0];
-  if(first?.isFounderCorrection)return `\n来源：Ivy 工作地图纠正 · ${new Date(first.occurredAt).toISOString()}${evidence.length > 1 ?
+  if(first?.isFounderCorrection)return `\n来源：Ivy 工作地图纠正 · ${founderBeijingTime(first.occurredAt)}${evidence.length > 1 ?
     `\n另有 ${evidence.length - 1} 条来源，完整来源保留在记录中。` : ''}`;
   if(first){const source=first.locator.kind==='group_message'
-    ?`来源：群聊 · ${new Date(first.occurredAt).toISOString()}\n原文：${founderText(first.excerpt,240)}`:founderSourceText(first);
+    ?`来源：群聊 · ${founderBeijingTime(first.occurredAt)}\n原文：${founderText(first.excerpt,240)}`:founderSourceText(first);
     return `\n${source}${evidence.length > 1 ? `\n另有 ${evidence.length - 1} 条来源，完整来源保留在记录中。` : ''}`;}
   if(!Number.isSafeInteger(linkedSourceCount)||linkedSourceCount<0)throw new Error('valid linked source count is required');
   return linkedSourceCount>0?`\n来源：已关联 ${linkedSourceCount} 个来源，暂无可展示摘录。`:'\n来源：待补充（不作为已确认共识）';

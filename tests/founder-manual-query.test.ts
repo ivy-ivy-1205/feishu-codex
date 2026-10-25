@@ -105,10 +105,10 @@ describe('founder manual queries',()=>{
     const row=db.client.prepare("SELECT payload FROM outbox WHERE status='pending'").get() as {payload:string};
     const payload=JSON.parse(row.payload);
     expect(payload.kind).toBe('founder_manual_query');
-    expect(JSON.stringify(payload.card)).toContain('处理状态');
-    expect(JSON.stringify(payload.card)).toContain('最后防漏复核');
-    expect(JSON.stringify(payload.card)).toContain('待处理');
-    expect(JSON.stringify(payload.card)).toContain('未补偿分析来源');
+    expect(JSON.stringify(payload.card)).toContain('待对齐总览');
+    expect(JSON.stringify(payload.card)).toContain('资料截至：群聊');
+    expect(JSON.stringify(payload.card)).toContain('明细发“查看处理状态”');
+    expect(payload.boardView).toMatchObject({kind:'alignment_overview'});
     db.close();
   });
 
@@ -335,8 +335,51 @@ describe('founder manual queries',()=>{
     expect(body).not.toContain('James 的理解\n- 未接入账号，未部署。');
     const overview=JSON.stringify(buildFounderManualQueryMessages({client:db.client,query:{kind:'open_alignment'},
       queryMessageId:'om_overview',chatId,approvedChatIds:[chatId],now:at})[0]!.card);
-    expect(overview).toContain('AiJia 合伙人对齐室：缺少 James 的当前表达');
+    expect(overview).toContain('AiJia 合伙人对齐室｜Ivy 确认的项目目标：系统已经进入影子运行；James 尚未回应');
     expect(overview).not.toContain('缺少 Ivy 的明确表达');
+    db.close();
+  });
+
+  it('opens 查看分歧 with the three categories, lists only active projects with who said what and when, and ends with one 资料截至 line',()=>{
+    const db=createSqliteDatabase(':memory:');migrateDatabase(db.client);
+    const topics=new TopicRepository(db.client),alignment=new AlignmentRepository(db.client),sources=new ContextSourceRepository(db.client);
+    alignment.configureFounderIdentity({founder:'ivy',sourceSystem:'feishu',externalAuthorId:'ou_ivy',configuredAt:at});
+    alignment.configureFounderIdentity({founder:'james',sourceSystem:'feishu',externalAuthorId:'ou_james',configuredAt:at});
+    const created=new Date('2026-08-01T00:00:00.000Z');
+    const evidence=(id:string,openId:string,text:string,occurredAt:string)=>{const captured=captureGroupMessageSource({chatId,messageId:id,threadId:null,rootId:null,
+      author:{openId,displayName:null},senderType:'user',messageType:'text',text,occurredAt},new Date(occurredAt));
+      const source=sources.saveSource(captured.source).source;return sources.saveEvidence({sourceId:source.id,excerpt:text,
+        locator:{...captured.messageLocator,sourceVersion:source.sourceVersion,contentHash:source.contentHash},evidenceLevel:'primary_statement',capturedAt:new Date(occurredAt)}).evidence.id};
+    const view=(topicId:string,kind:'ivy_view'|'james_view'|'shared_decision',text:string,occurredAt:string)=>alignment.savePerspective({topicId,kind,expectedVersion:0,
+      statement:text,confidence:1,evidenceIds:[evidence(`om_${topicId}_${kind}`,kind==='james_view'?'ou_james':'ou_ivy',text,occurredAt)],decisionKey:`k_${kind}`,
+      speechAct:kind==='shared_decision'?'explicit_agreement':'view',observedAt:new Date(occurredAt)});
+    const project=(displayName:string,stage:'active_project'|'closed'|'paused'='active_project')=>topics.createTopic({displayName,stage,createdAt:created});
+    // A line root, a closed project and a paused one are not things anyone still needs to answer.
+    view(project('自媒体生产线').id,'ivy_view','B 线照常推进','2026-09-20T00:00:00.000Z');
+    view(project('EP00《挺好》','closed').id,'ivy_view','已发布','2026-09-20T00:00:00.000Z');
+    view(project('AI 选房经验与知识库','paused').id,'ivy_view','等 Jimmy 反馈','2026-09-20T00:00:00.000Z');
+    const smart=project('Smart Listing');view(smart.id,'ivy_view','先验证房源页面','2026-09-10T02:00:00.000Z');
+    view(project('AiJia AI Native 官网').id,'ivy_view','官网先做需求入口','2026-08-20T02:00:00.000Z');
+    view(project('Family First').id,'shared_decision','双方确认先做外立面','2026-09-18T02:00:00.000Z');
+    db.client.prepare(`INSERT INTO alignment_issues(id,topic_id,decision_key,dimension,evidence_set_hash,candidate_json,status,created_at,updated_at)
+      VALUES('issue_1',?,'second_home','direction','hash_1',?,'candidate','2026-09-21T02:00:00.000Z','2026-09-21T02:00:00.000Z')`).run(smart.id,JSON.stringify({
+        id:'issue_1',status:'candidate',topicId:smart.id,decisionKey:'second_home',dimension:'direction',
+        ivy:{evidenceId:'e_ivy',statement:'第二套用楼花'},james:{evidenceId:'e_james',statement:'第二套用现房'},
+        actionConsequence:{evidenceId:'e_ivy',excerpt:'决定下一套房'},actionHorizon:null,evidenceIds:['e_ivy','e_james'],evidenceSetHash:'hash_1'}));
+    const message=buildFounderManualQueryMessages({client:db.client,query:{kind:'open_alignment'},queryMessageId:'om_overview',
+      chatId,approvedChatIds:[chatId],now:at})[0]!;
+    const texts=(message.card.elements as {text?:{content?:string}}[]).flatMap(e=>e.text?.content?[e.text.content]:[]);
+    expect(texts.map(text=>text.split('\n')[0])).toEqual(['总览','真实分歧（1）','缺少另一方表达（2）','已确认共识（1）','资料截至：群聊 尚无已分析消息']);
+    expect(texts[0]!.split('\n')[1]).toBe('真实分歧 1 项 · 缺少另一方表达 2 项 · 已确认共识 1 项');
+    expect(texts[1]).toBe('真实分歧（1）\n- Smart Listing｜Ivy：第二套用楼花 ↔ James：第二套用现房（群聊 09-21）');
+    // Newest first; over 30 days without an answer is called out.
+    expect(texts[2]).toBe(['缺少另一方表达（2）','- Smart Listing｜Ivy 说：先验证房源页面；James 尚未回应（群聊 09-10）',
+      '- AiJia AI Native 官网｜Ivy 说：官网先做需求入口；James 尚未回应（群聊 08-20 · 较久未回应）'].join('\n'));
+    expect(texts[3]).toBe('已确认共识（1）\n- Family First｜双方确认先做外立面（群聊 09-18）');
+    const body=JSON.stringify(message.card);
+    for(const gone of ['自媒体生产线','EP00','AI 选房经验与知识库','处理状态（北京时间）','最后防漏复核'])expect(body).not.toContain(gone);
+    expect(message.kind==='founder_manual_query'&&message.boardView).toMatchObject({kind:'alignment_overview',title:'待对齐总览',
+      counts:[{title:'真实分歧',count:1},{title:'缺少另一方表达',count:2},{title:'已确认共识',count:1}]});
     db.close();
   });
 
@@ -372,9 +415,13 @@ describe('founder manual queries',()=>{
       queryMessageId:'om_large',chatId,approvedChatIds:[chatId],now:at})[0]!;
     const body=JSON.stringify(message.card);
     expect(Buffer.byteLength(body,'utf8')).toBeLessThanOrEqual(28_000);
-    expect(body).toContain('不可读/跳过缺口：1');
-    expect(body).toContain('最后防漏复核：2026-09-10 08:00');
+    // The status is one line under every answer; the full status, with the coverage audit, is 查看处理状态.
+    expect(body).toContain('未读取：群聊 1 处（如 PDF、视频、部分附件）');
     expect(body).toContain('仅展示前');
+    const status=JSON.stringify(buildFounderManualQueryMessages({client:db.client,query:{kind:'processing_status'},
+      queryMessageId:'om_status_full',chatId,approvedChatIds:[chatId],now:at})[0]!.card);
+    expect(status).toContain('不可读/跳过缺口：1');
+    expect(status).toContain('最后防漏复核：2026-09-10 08:00');
     db.close();
   });
 
@@ -396,7 +443,7 @@ describe('founder manual queries',()=>{
     insert('analysis_failed_1','analyze_founder_stream_batch','failed',{chatId,sourceIds:[recovered,missing]},'2026-09-25T02:00:00.000Z');
     insert('analysis_failed_2','analyze_founder_stream_batch','failed',{chatId,sourceIds:[missing]},'2026-09-25T03:00:00.000Z');
     insert('attachment_failed','capture_founder_attachment','failed',{chatId,messageId:'om_file',attempt:3},'2026-09-25T04:00:00.000Z');
-    const body=JSON.stringify(buildFounderManualQueryMessages({client:db.client,query:{kind:'work_map'},queryMessageId:'om_status',
+    const body=JSON.stringify(buildFounderManualQueryMessages({client:db.client,query:{kind:'processing_status'},queryMessageId:'om_status',
       chatId,approvedChatIds:[chatId],now:at})[0]!.card);
     expect(body).toContain('最新已分析语料：2026-09-23 08:00');
     expect(body).toContain('未补偿分析来源：1；采集失败任务：1');
@@ -462,10 +509,15 @@ describe('founder manual queries',()=>{
     const binding = spaceSync.createBinding({ id: 'binding-1', projectKey: 'smart_listing', spaceId: null, pageId: 'page_1',
       pageUrl: 'https://chatgpt.com/space/page_1', managementMode: 'space', syncMode: 'manual', createdAt: at });
     spaceSync.recordSuccessfulSync({ bindingId: binding.id, pageSequence: 1, pageUpdatedAt: at.toISOString(), syncedAt: at });
-    const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'project_progress',
-      topicName: 'whatever' }, queryMessageId: 'om_global_space', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card);
+    const body = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'processing_status' },
+      queryMessageId: 'om_global_space', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card);
     expect(body).toContain('Space 页面');
     expect(body).toContain('已绑定项目：1');
+    // Other answers carry it as one footer line.
+    const answer = JSON.stringify(buildFounderManualQueryMessages({ client: db.client, query: { kind: 'project_progress',
+      topicName: 'whatever' }, queryMessageId: 'om_global_space_footer', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!.card);
+    expect(answer).toContain('Space 页面最后同步 09-25 18:00');
+    expect(answer).not.toContain('已绑定项目');
   });
 
   it('does not show the Space page summary line when no binding exists at all', () => {
