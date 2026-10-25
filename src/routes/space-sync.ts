@@ -86,8 +86,9 @@ export function registerSpaceSyncIngestRoutes(
           status: 'accepted',
           syncId: result.syncId,
           replay: result.replay,
+          unchanged: result.unchanged,
           run: {
-            pageSourceCreated: result.run.pageSourceCreated,
+            pageSourceCreated: !result.unchanged && result.run.pageSourceCreated,
             commentSourcesCreated: result.run.commentSourcesCreated,
             coveragePageComplete: result.run.coveragePageComplete,
             coverageCommentsComplete: result.run.coverageCommentsComplete,

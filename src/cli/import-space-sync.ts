@@ -63,7 +63,8 @@ export function runImportSpaceSyncCli(args: string[], dependencies: ImportSpaceS
   dependencies.write(JSON.stringify({
     syncId: result.syncId,
     replay: result.replay,
-    pageSourceCreated: result.run.pageSourceCreated,
+    unchanged: result.unchanged,
+    pageSourceCreated: !result.unchanged && result.run.pageSourceCreated,
     commentSourcesCreated: result.run.commentSourcesCreated,
     coveragePageComplete: result.run.coveragePageComplete,
     coverageCommentsComplete: result.run.coverageCommentsComplete,

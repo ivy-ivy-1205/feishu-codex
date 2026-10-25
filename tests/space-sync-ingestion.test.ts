@@ -244,6 +244,34 @@ describe('ingestSpaceSyncEnvelope', () => {
       .toEqual({ n: 1 });
   });
 
+  it('records an hourly check of an unchanged page as a fresh sync without writing sources, runs or jobs', () => {
+    const { database, spaceSyncRepository, contextSourceRepository, now } = setup(
+      ['2026-10-19T00:00:00.000Z', '2026-10-19T00:00:01.000Z', '2026-10-19T05:00:00.000Z']);
+    mapProjectTopic(database);
+    const jobRepository = new JobRepository(database.client);
+    const deps = { client: database.client, spaceSyncRepository, contextSourceRepository,
+      limits: { maxBlocks: 100, maxComments: 100 }, now, jobRepository, spaceAnalysisEnabled: true };
+    const first = ingestSpaceSyncEnvelope(envelope({ comments: [] }), deps);
+    const count = (table: string) => (database.client.prepare(`SELECT count(*) n FROM ${table}`).get() as { n: number }).n;
+    const before = [count('context_sources'), count('space_sync_runs'), count('batch_jobs')];
+    const checked = ingestSpaceSyncEnvelope(envelope({ syncId: 'sync_2', trigger: 'scheduled', capturedAt: '2026-10-19T05:00:00.000Z', comments: [] }), deps);
+    expect(checked).toMatchObject({ syncId: 'sync_2', replay: false, unchanged: true });
+    expect(checked.run.id).toBe(first.run.id);
+    expect([count('context_sources'), count('space_sync_runs'), count('batch_jobs')]).toEqual(before);
+    expect(spaceSyncRepository.getBindingByPageId('page_1')?.lastSuccessfulSyncAt).toBe('2026-10-19T05:00:00.000Z');
+    expect(first.unchanged).toBe(false);
+  });
+
+  it('still ingests a check whose page text matches but whose coverage differs from the last run', () => {
+    const { database, spaceSyncRepository, contextSourceRepository, now } = setup();
+    const deps = { client: database.client, spaceSyncRepository, contextSourceRepository, limits: { maxBlocks: 100, maxComments: 100 }, now };
+    ingestSpaceSyncEnvelope(envelope({ comments: [] }), deps);
+    const result = ingestSpaceSyncEnvelope(envelope({ syncId: 'sync_2', comments: [], coverage: { pageComplete: true,
+      commentsComplete: false, nextCursor: null, gaps: [{ code: 'comments_not_exported', summary: '评论未同步' }] } }), deps);
+    expect(result.unchanged).toBe(false);
+    expect(result.run.gapCount).toBe(1);
+  });
+
   it('leaves sources unqueued while the project has no human-mapped work-map topic', () => {
     const { database, spaceSyncRepository, contextSourceRepository, now } = setup();
     const jobRepository = new JobRepository(database.client);
