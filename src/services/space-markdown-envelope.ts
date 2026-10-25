@@ -30,22 +30,28 @@ export function markdownPageUpdatedAt(markdown: string): string | null {
   return `${match[1]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00+08:00`;
 }
 
+/**
+ * `scheduled` is the hourly read by Ivy's local Codex App (change sheet 2026-10-20, T2): the
+ * same page text, read through the Pages connector instead of a hand export.
+ */
 export function buildSpaceMarkdownEnvelope(input: {
   markdown: string; projectKey: string; page: { pageId: string; url: string }; title: string; capturedAt: Date; updatedAt?: string | null;
+  trigger?: 'manual' | 'scheduled';
 }): SpaceSyncEnvelopeV1 {
   const updatedAt = input.updatedAt ?? markdownPageUpdatedAt(input.markdown);
   const stamp = input.capturedAt.toISOString().replace(/[-:]|\.\d{3}/gu, '');
+  const scheduled = input.trigger === 'scheduled';
   return {
     schemaVersion: 1,
-    syncId: `md-${input.page.pageId}-${stamp}`,
+    syncId: `${scheduled ? 'auto' : 'md'}-${input.page.pageId}-${stamp}`,
     projectKey: input.projectKey,
-    trigger: 'manual',
+    trigger: scheduled ? 'scheduled' : 'manual',
     capturedAt: input.capturedAt.toISOString(),
     page: { pageId: input.page.pageId, spaceId: null, url: input.page.url, title: input.title, sequence: null, updatedAt,
       blocks: spaceMarkdownBlocks(input.markdown) },
     comments: [],
     coverage: { pageComplete: true, commentsComplete: false, nextCursor: null, gaps: [
-      { code: 'comments_not_exported', summary: '评论未同步：本次由 Markdown 导出，只含页面正文。' },
+      { code: 'comments_not_exported', summary: scheduled ? '评论未同步：本次由本机定时读取，只含页面正文。' : '评论未同步：本次由 Markdown 导出，只含页面正文。' },
       ...(updatedAt ? [] : [{ code: 'page_updated_at_unknown', summary: '页面更新时间未知：导出文件里没有写明。' }])
     ] }
   };

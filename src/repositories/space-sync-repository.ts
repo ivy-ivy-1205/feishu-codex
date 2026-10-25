@@ -134,6 +134,17 @@ export class SpaceSyncRepository {
     if (result.changes !== 1) throw new Error('SPACE_SYNC_BINDING_NOT_FOUND');
   }
 
+  /** A read that matched the stored page: the page is confirmed current, its sequence and update time stay as recorded. */
+  recordUnchangedCheck(input: { bindingId: string; checkedAt: Date }): void {
+    const timestamp = input.checkedAt.toISOString();
+    const result = this.client.prepare(`
+      UPDATE project_space_bindings
+      SET last_synced_at = ?, last_successful_sync_at = ?, last_error_code = NULL, status = 'active', updated_at = ?
+      WHERE id = ?
+    `).run(timestamp, timestamp, timestamp, input.bindingId);
+    if (result.changes !== 1) throw new Error('SPACE_SYNC_BINDING_NOT_FOUND');
+  }
+
   recordSyncFailure(input: RecordSyncFailureInput): void {
     const timestamp = input.attemptedAt.toISOString();
     const result = this.client.prepare(`

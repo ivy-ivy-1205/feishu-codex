@@ -84,7 +84,7 @@ describe('Space page Markdown → sync envelope', () => {
     const later = new Date(capturedAt.getTime() + 3_600_000);
     const second = ingestSpaceSyncEnvelope(buildSpaceMarkdownEnvelope({ markdown, projectKey: 'smart-listing', page, title: 't', capturedAt: later }), deps);
     expect(first.run.pageSourceCreated).toBe(true);
-    expect(second.run.pageSourceCreated).toBe(false);
+    expect(second).toMatchObject({ unchanged: true, run: { id: first.run.id } });
     expect(contextSourceRepository.listSources().filter((source) => source.sourceType === 'space_page_snapshot')).toHaveLength(1);
     db.close();
   });

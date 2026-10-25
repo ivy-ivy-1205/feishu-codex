@@ -45,6 +45,8 @@ export interface SpaceSyncIngestionResult {
   syncId: string;
   /** true when this is a safe retry of an already-committed syncId, not a new write. */
   replay: boolean;
+  /** true when the page read matches the latest stored version: only the sync time moved, and `run` is that earlier run. */
+  unchanged: boolean;
   run: SpaceSyncRunRecord;
 }
 
@@ -66,7 +68,7 @@ export function ingestSpaceSyncEnvelope(
       existingRun.projectKey === envelope.projectKey &&
       existingRun.pageId === envelope.page.pageId;
     if (!matches) throw new SpaceSyncIngestionError('space_sync_envelope_conflict');
-    return { syncId: envelope.syncId, replay: true, run: existingRun };
+    return { syncId: envelope.syncId, replay: true, unchanged: false, run: existingRun };
   }
 
   const binding = dependencies.spaceSyncRepository.getBindingByPageId(envelope.page.pageId);
@@ -75,6 +77,19 @@ export function ingestSpaceSyncEnvelope(
   if (binding.status !== 'active') throw new SpaceSyncIngestionError('space_sync_binding_not_active');
 
   const startedAt = dependencies.now();
+
+  // A scheduled reader submits every hour whether or not the page moved; an identical read
+  // only proves the page is still current, so it refreshes the sync time without new rows.
+  const latestRun = dependencies.spaceSyncRepository.getLatestRunForBinding(binding.id);
+  const latestPage = dependencies.contextSourceRepository.listSourceVersions(spacePageLogicalKey(envelope.page.pageId)).at(-1);
+  if (latestRun && latestPage && envelope.comments.length === 0 &&
+    latestPage.contentHash === sha256(canonicalSpacePageContentText(envelope.page.blocks)) &&
+    latestRun.coveragePageComplete === envelope.coverage.pageComplete &&
+    latestRun.coverageCommentsComplete === envelope.coverage.commentsComplete &&
+    latestRun.gapCount === envelope.coverage.gaps.length) {
+    dependencies.spaceSyncRepository.recordUnchangedCheck({ bindingId: binding.id, checkedAt: startedAt });
+    return { syncId: envelope.syncId, replay: false, unchanged: true, run: latestRun };
+  }
 
   return dependencies.client.transaction(() => {
     const pageSave = dependencies.contextSourceRepository.saveSource({
@@ -201,6 +216,6 @@ export function ingestSpaceSyncEnvelope(
       completedAt: dependencies.now()
     });
 
-    return { syncId: envelope.syncId, replay: false, run };
+    return { syncId: envelope.syncId, replay: false, unchanged: false, run };
   })();
 }
