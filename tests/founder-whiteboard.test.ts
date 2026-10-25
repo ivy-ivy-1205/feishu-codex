@@ -117,6 +117,52 @@ describe('founder whiteboard',()=>{
     expect(done.y!-8).toBe(positioningBox.y!+positioningBox.height!+20);
   });
 
+  it('lays out 查看分歧 as three counts first, then one section per category, with the title once and one footer line',()=>{
+    const view={kind:'alignment_overview' as const,title:'待对齐总览',
+      counts:[{title:'真实分歧',count:2,note:'双方都有明确表态，但判断不同（群聊对齐记录，或 Space 页面写明的分歧）'},
+        {title:'缺少另一方表达',count:3,note:'一方说了，另一方还没回应；不算同意，也不算分歧'},{title:'已确认共识',count:0,note:'双方都明确同意'}],
+      sections:[{title:'真实分歧（2）',items:['超级个体与超级团队｜租赁场景是否更易采用、是否应优先投入仍有不同判断（Space 页面 10-25）',
+          'Smart Listing｜Ivy：第二套用楼花 ↔ James：第二套用现房（群聊 09-21）']},
+        {title:'缺少另一方表达（3）',items:['Smart Listing｜Ivy 说：先验证房源页面；James 尚未回应（群聊 09-10）',
+          'AiJia AI Native 官网｜Ivy 说：官网先做需求入口，客户可以从官网进入需求理解与持续服务；James 尚未回应（群聊 08-20 · 较久未回应）',
+          'Family First｜Ivy 说：先做外立面；James 尚未回应（群聊 09-18）']},
+        {title:'已确认共识（0）',items:[]}],
+      footer:'资料截至：群聊 2026-10-24 22:09 · Space 页面最后同步 10-25 11:35\n未读取：群聊 114 处（如 PDF、视频、部分附件）\n明细发“查看处理状态”。'};
+    for(const palette of founderPalettes){
+      const board=buildFounderWhiteboard({title:'待对齐总览',paletteId:palette.id,cards:[],view});
+      expect(board.width).toBe(1160);
+      const texts=board.nodes.filter(node=>node.type==='text_shape'&&node.text?.text);
+      const all=texts.map(node=>node.text!.text!).join('\n');
+      expect(all.split('待对齐总览').length-1,palette.id).toBe(1);
+      // The three counts sit side by side at the top.
+      const tiles=['真实分歧','缺少另一方表达','已确认共识'].map(title=>texts.find(node=>node.text!.text===title)!);
+      expect(tiles.every(Boolean),palette.id).toBe(true);
+      expect(new Set(tiles.map(node=>node.y)).size).toBe(1);
+      expect(tiles[0]!.x!).toBeLessThan(tiles[1]!.x!);expect(tiles[1]!.x!).toBeLessThan(tiles[2]!.x!);
+      for(const count of ['2 项','3 项','0 项'])expect(all).toContain(count);
+      // Then the sections, top to bottom, each below the counts.
+      const headers=view.sections.map(section=>texts.find(node=>node.text!.text===section.title)!);
+      expect(headers.every(Boolean),palette.id).toBe(true);
+      for(let index=1;index<headers.length;index++)expect(headers[index]!.y!).toBeGreaterThan(headers[index-1]!.y!);
+      expect(headers[0]!.y!).toBeGreaterThan(tiles[0]!.y!);
+      expect(all).toContain('较久未回应');expect(all).toContain('Space 页面 10-25');
+      expect(texts.at(-1)!.text!.text).toContain('资料截至');
+      expect(all).not.toContain('处理状态（北京时间）');
+      // A real divergence is what needs a decision, so its header is the one that changes color.
+      const fillBehind=(node:typeof texts[number])=>board.nodes.slice(0,board.nodes.indexOf(node)).filter(candidate=>candidate.type==='composite_shape'&&
+        (candidate.x??0)<=node.x!&&(candidate.y??0)<=node.y!&&(candidate.x??0)+(candidate.width??0)>=node.x!+node.width!&&
+        (candidate.y??0)+(candidate.height??0)>=node.y!+node.height!).at(-1)!.style!.fill_color!;
+      expect(fillBehind(headers[0]!).toUpperCase()).toBe(palette.highlight.toUpperCase());
+      expect(fillBehind(headers[1]!).toUpperCase()).not.toBe(palette.highlight.toUpperCase());
+      texts.forEach(node=>{
+        expect(node.x!+node.width!).toBeLessThanOrEqual(board.width);expect(node.y!+node.height!).toBeLessThanOrEqual(board.height);
+        const ems=(line:string)=>Array.from(line).reduce((sum,char)=>sum+(/[\p{Script=Han}\u3000-\u303F\uFF00-\uFFEF“”（）•↔·｜]/u.test(char)?1:0.62),0);
+        if(node.text!.horizontal_align!=='right')for(const line of node.text!.text!.split('\n'))expect(ems(line)*node.text!.font_size!,line).toBeLessThanOrEqual(node.width!);
+        expect(contrastRatio(node.text!.text_color!,fillBehind(node)),`${palette.id}: ${node.text!.text}`).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  });
+
   it('emits text nodes in the official OpenAPI shape without transparent style colors',()=>{
     const result=buildFounderWhiteboard({title:'工作地图',paletteId:'coral',cards:[{
       header:{title:{content:'工作地图 · 1/1'}},elements:[{text:{content:'当前阶段\n正在推进'}}]

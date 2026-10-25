@@ -1,3 +1,4 @@
+import { founderBeijingTime } from './founder-time.js';
 import type { ContextEvidenceRecord } from '../repositories/context-source-repository.js';
 
 export type FounderCardKind = 'founder_work_map' | 'alignment_question' | 'alignment_resolution';
@@ -27,7 +28,7 @@ export function founderSourceText(source: FounderCardEvidence): string {
     : source.locator.kind === 'space_comment'
     ? `Space 评论 ${founderText(source.locator.messageId, 100)}`
     : `妙记 ${source.minuteToken && /^obcn[A-Za-z0-9_-]{1,100}$/.test(source.minuteToken) ? source.minuteToken : '（外部编号不可用）'} · 第 ${source.locator.segmentOrdinal + 1} 段`;
-  return `来源：${reference} · ${new Date(source.occurredAt).toISOString()}\n原文：${founderText(source.excerpt, founderSourceExcerptLimit)}`;
+  return `来源：${reference} · ${founderBeijingTime(source.occurredAt)}\n原文：${founderText(source.excerpt, founderSourceExcerptLimit)}`;
 }
 
 export function founderCard(title: string, lines: readonly string[], color = 'blue'): Record<string, unknown> {

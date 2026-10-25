@@ -10,7 +10,8 @@ import { buildCurrentFounderWorkMap, founderLineRootName } from './current-found
 import { computeSpaceFreshness, type SpaceFreshnessSummary } from './space-sync-freshness.js';
 import { founderCard, founderText } from './founder-card.js';
 import type { FounderWorkMapCard } from './founder-work-map-renderer.js';
-import { founderPhaseLegend, founderPhaseMark, founderPhasesTitle, type FounderBoardView, type FounderProjectProgressBoardView } from './founder-board-view.js';
+import { founderPhaseLegend, founderPhaseMark, founderPhasesTitle, type FounderAlignmentBoardView, type FounderBoardView, type FounderProjectProgressBoardView } from './founder-board-view.js';
+import { founderLineRootNames } from './founder-work-map-renderer.js';
 import { founderCommandText } from './founder-command-text.js';
 
 const defaultSpaceStaleAfterMinutes = 24 * 60;
@@ -25,8 +26,8 @@ export type FounderManualQuery =
 export interface FounderManualCardQueryMessage {
   kind:'founder_manual_query'; queryMessageId:string; page:number; totalPages:number;
   targetChatId:string; card:Record<string,unknown>;
-  /** 查看项目进展 only: the same content as structure, so the editable board is laid out in section order. */
-  boardView?:FounderProjectProgressBoardView;
+  /** 查看项目进展 and 查看分歧: the same content as structure, so the editable board is laid out by section. */
+  boardView?:FounderProjectProgressBoardView|FounderAlignmentBoardView;
 }
 export type FounderManualQueryMessage=FounderManualCardQueryMessage|(FounderWorkMapCard&{
   mapId:string;targetChatId:string;manualQueryMessageId:string;boardView:FounderBoardView;
@@ -53,25 +54,31 @@ export function buildFounderManualQueryMessages(input:{client:Database.Database;
   queryMessageId:string;chatId:string;approvedChatIds:readonly string[];now:Date;spaceStaleAfterMinutes?:number;
   /** SPACE_SYNC_WORKMAP_ENABLED: Space page summaries and status stay out of every founder view until this is on. */
   spaceWorkMapEnabled?:boolean}):FounderManualQueryMessage[]{
-  const status=processingStatus(input.client,input.chatId,input.spaceWorkMapEnabled===true);
+  // Ivy 2026-10-25: every answer ends with the one-line 资料截至 footer; the full status is its own command.
+  const footer=()=>dataFooter(input.client,input.chatId,{space:input.spaceWorkMapEnabled?spaceSyncedLine(input.client):null});
   if(input.query.kind==='work_map'){
     const result=buildWorkMap(input);
-    if(result)return result.cards.map(item=>({...item,mapId:result.mapId,targetChatId:input.chatId,boardView:result.boardView,
-      manualQueryMessageId:input.queryMessageId,card:withProcessingStatus(item.card,status)}));
+    if(result){const line=footer();return result.cards.map(item=>({...item,mapId:result.mapId,targetChatId:input.chatId,boardView:result.boardView,
+      manualQueryMessageId:input.queryMessageId,card:withFooter(item.card,line)}));}
   }
   if(input.query.kind==='processing_status')return[{kind:'founder_manual_query',queryMessageId:input.queryMessageId,page:1,totalPages:1,
-    targetChatId:input.chatId,card:founderCard('处理状态',[status,processingStatusGuide],'blue')}];
+    targetChatId:input.chatId,card:founderCard('处理状态',[processingStatus(input.client,input.chatId,input.spaceWorkMapEnabled===true),processingStatusGuide],'blue')}];
+  if(input.query.kind==='open_alignment'){
+    const overview=buildAlignmentOverview(input);
+    return[{kind:'founder_manual_query',queryMessageId:input.queryMessageId,page:1,totalPages:1,targetChatId:input.chatId,
+      card:withFooter(overview.card,overview.view.footer),boardView:overview.view}];
+  }
   if(input.query.kind==='project_progress'){
     const progress=buildProjectProgress(input,input.query.topicName);
     // A found project carries its own one-line 资料截至 footer; the full status is one command away (查看处理状态).
     return[{kind:'founder_manual_query',queryMessageId:input.queryMessageId,page:1,totalPages:1,targetChatId:input.chatId,
-      ...(progress.view?{card:progress.card,boardView:progress.view}:{card:withProcessingStatus(progress.card,status)})}];
+      ...(progress.view?{card:progress.card,boardView:progress.view}:{card:withFooter(progress.card,footer())})}];
   }
   const cards=input.query.kind==='topic_alignment'?[buildTopicAlignment(input,input.query.topicName)]:
-    input.query.kind==='open_alignment'?[buildOpenAlignment(input)]:
-      [founderCard('工作地图',['目前没有可展示的项目；机器人不会凭空创建项目。'])];
+    [founderCard('工作地图',['目前没有可展示的项目；机器人不会凭空创建项目。'])];
+  const line=footer();
   return cards.map((card,index)=>({kind:'founder_manual_query',queryMessageId:input.queryMessageId,page:index+1,
-    totalPages:cards.length,targetChatId:input.chatId,card:withProcessingStatus(card,status)}));
+    totalPages:cards.length,targetChatId:input.chatId,card:withFooter(card,line)}));
 }
 
 const stageLabels={idea:'想法',exploring:'探索中',project_candidate:'候选项目',active_project:'正在推进',paused:'暂停',closed:'已结束'} as const;
@@ -114,12 +121,8 @@ function buildProjectProgress(input:{client:Database.Database;chatId:string;now:
       `Ivy：${founderText(issue.ivy.statement,100)} ↔ James：${founderText(issue.james.statement,100)}（对齐记录）`)])},
     {title:'下一步计划',items:unique(page?.nextPlan??[])}
   ];
-  const facts=processingFacts(input.client,input.chatId);
-  const unread=[...(facts.gaps?[`群聊 ${facts.gaps} 处（如 PDF、视频、部分附件）`]:[]),...(page?.unread??[]).map(item=>`Space ${item}`)];
-  const footer=[`资料截至：群聊 ${facts.analyzedSourceAt?founderBeijingTime(facts.analyzedSourceAt):'尚无已分析消息'}${page?` · ${page.dataLine}`:''}`,
-    ...(unread.length?[`未读取：${unread.join(' · ')}`]:[]),
-    ...(page?.notes.length?[`Space 提示：${page.notes.join('；')}`]:[]),
-    `${page?'未标注来源的条目来自 Space 页面。':''}明细发“查看处理状态”。`].join('\n');
+  const footer=dataFooter(input.client,input.chatId,{space:page?.dataLine??null,spaceUnread:page?.unread,notes:page?.notes,
+    lead:page?'未标注来源的条目来自 Space 页面。':''});
   const view:FounderProjectProgressBoardView={kind:'project_progress',title:founderText(topic.displayName,100),positioning,status,
     phases,phasesEmpty:noPhasePlan?null:page?.phasesEmpty??'无',sections,footer};
   const phaseLine=(phase:FounderProjectProgressBoardView['phases'][number])=>`${founderPhaseMark(phase)} ${phase.name}：${phase.tasks}｜${phase.statusText}`;
@@ -204,23 +207,53 @@ function buildTopicAlignment(input:{client:Database.Database;now:Date},name:stri
   return founderCard('双方理解与待对齐',lines,issues.length?'orange':'blue');
 }
 
-function buildOpenAlignment(input:{client:Database.Database}):Record<string,unknown>{
+type AlignmentEntry={project:string;text:string;source:'群聊'|'Space 页面';at:string;stale?:boolean};
+const staleAfterMs=30*24*60*60*1000,shownPerSection=8;
+
+/**
+ * 查看分歧 (Ivy 2026-10-25): only projects still being pushed — not the A/B/C lines, closed or paused items — each
+ * entry naming who said what and when, newest first. A page's written divergences count, marked as from the page.
+ */
+function buildAlignmentOverview(input:{client:Database.Database;chatId:string;now:Date;spaceStaleAfterMinutes?:number;spaceWorkMapEnabled?:boolean}):
+  {card:Record<string,unknown>;view:FounderAlignmentBoardView}{
   const topics=new TopicRepository(input.client),alignment=new AlignmentRepository(input.client),issues=new AlignmentIssueRepository(input.client);
-  const topicList=topics.listCanonicalTopics(),topicById=new Map(topicList.map(topic=>[topic.id,topic]));
-  const missing:string[]=[];
-  for(const topic of topicList){
-    const views=alignment.listCanonicalPerspectives(topic.id);
-    const ivy=topic.rationale==='Ivy confirmed Founder work map baseline'||
-      views.some(item=>item.kind==='ivy_view'&&item.observedAt>=topic.changedAt);
-    const james=views.some(item=>item.kind==='james_view'&&item.observedAt>=topic.changedAt);
-    if(ivy!==james)missing.push(`${topic.displayName}：缺少 ${ivy?'James':'Ivy'} 的当前表达`);
+  const hidden=new Set((input.client.prepare("SELECT topic_id FROM founder_topic_visibility WHERE visibility='space_managed'").all() as {topic_id:string}[])
+    .map(row=>row.topic_id));
+  const active=topics.listCanonicalTopics().filter(topic=>!founderLineRootNames.includes(topic.displayName.trim())&&
+    topic.stage!=='closed'&&topic.stage!=='paused'&&!hidden.has(topic.id));
+  const divergences:AlignmentEntry[]=[],missing:AlignmentEntry[]=[],shared:AlignmentEntry[]=[];
+  for(const topic of active){
+    const project=founderText(topic.displayName,60),views=alignment.listCanonicalPerspectives(topic.id);
+    const latest=(kind:'ivy_view'|'james_view')=>views.filter(item=>item.kind===kind&&item.observedAt>=topic.changedAt)
+      .sort((a,b)=>b.observedAt.localeCompare(a.observedAt))[0];
+    const baseline=topic.rationale==='Ivy confirmed Founder work map baseline',ivy=latest('ivy_view'),james=latest('james_view');
+    if(Boolean(ivy||baseline)!==Boolean(james)){
+      const spoke=ivy??james;
+      const text=spoke?`${ivy?'Ivy':'James'} 说：${founderText(spoke.statement,90)}；${ivy?'James':'Ivy'} 尚未回应`:
+        `Ivy 确认的项目目标：${founderText(topic.outcome??'项目结构',90)}；James 尚未回应`;
+      const at=spoke?.observedAt??topic.changedAt;
+      missing.push({project,text,source:'群聊',at,stale:input.now.getTime()-Date.parse(at)>staleAfterMs});
+    }
+    for(const item of views.filter(view=>view.kind==='shared_decision'))
+      shared.push({project,text:founderText(item.statement,100),source:'群聊',at:item.observedAt});
+    for(const issue of issues.listForTopic(topic.id).filter(item=>['candidate','ready','asked'].includes(item.status)))
+      divergences.push({project,text:`Ivy：${founderText(issue.ivy.statement,60)} ↔ James：${founderText(issue.james.statement,60)}`,source:'群聊',at:issue.createdAt});
+    const pageView=input.spaceWorkMapEnabled?loadSpaceProjectPageView(input.client,topic.id,input.now,input.spaceStaleAfterMinutes??defaultSpaceStaleAfterMinutes):null;
+    if(pageView)for(const text of spaceProjectProgress(pageView).divergences)
+      divergences.push({project,text,source:'Space 页面',at:pageView.pageUpdatedAt??input.now.toISOString()});
   }
-  const open=topicList.flatMap(topic=>issues.listForTopic(topic.id))
-    .filter(item=>['candidate','ready','asked'].includes(item.status));
-  const lines=['已确认共识、单方理解和真实分歧严格分开；没有回复不会被记成同意。',
-    `缺少另一方表达：${missing.length} 项${missing.length?`\n${missing.slice(0,12).map(item=>`- ${founderText(item,180)}`).join('\n')}`:'。'}`,
-    `真实分歧：${open.length} 项${open.length?`\n${open.slice(0,12).map(item=>`- ${founderText(topicById.get(item.topicId)?.displayName??item.topicId,100)}：${founderText(item.ivy.statement,100)} ↔ ${founderText(item.james.statement,100)}`).join('\n')}`:'。'}`];
-  return founderCard('待对齐总览',lines,open.length?'orange':'blue');
+  const line=(entry:AlignmentEntry)=>`${entry.project}｜${entry.text}（${entry.source} ${founderBeijingTime(entry.at).slice(5,10)}${entry.stale?' · 较久未回应':''}）`;
+  const section=(title:string,entries:AlignmentEntry[])=>{const sorted=[...entries].sort((a,b)=>b.at.localeCompare(a.at)),shown=sorted.slice(0,shownPerSection);
+    return{title:`${title}（${entries.length}）`,items:[...shown.map(line),...(sorted.length>shown.length?[`另有 ${sorted.length-shown.length} 项，可用“查看对齐：项目名”查看`]:[])]}};
+  const counts=[{title:'真实分歧',count:divergences.length,note:'双方都有明确表态，但判断不同（群聊对齐记录，或 Space 页面写明的分歧）'},
+    {title:'缺少另一方表达',count:missing.length,note:'一方说了，另一方还没回应；不算同意，也不算分歧'},
+    {title:'已确认共识',count:shared.length,note:'双方都明确同意'}];
+  const sections=[section('真实分歧',divergences),section('缺少另一方表达',missing),section('已确认共识',shared)];
+  const footer=dataFooter(input.client,input.chatId,{space:input.spaceWorkMapEnabled?spaceSyncedLine(input.client):null});
+  const card=founderCard('待对齐总览',[
+    `总览\n${counts.map(item=>`${item.title} ${item.count} 项`).join(' · ')}\n${counts.map(item=>`${item.title}：${item.note}`).join('\n')}\n只看在推进的项目；超过 30 天未回应的标“较久未回应”。`,
+    ...sections.map(item=>`${item.title}\n${item.items.length?item.items.map(text=>`- ${text}`).join('\n'):'无'}`)],divergences.length?'orange':'blue');
+  return{card,view:{kind:'alignment_overview',title:'待对齐总览',counts,sections,footer}};
 }
 
 function processingFacts(client:Database.Database,chatId:string){
@@ -293,17 +326,29 @@ function latestCoverageAudit(client:Database.Database,chatId:string):string|null
   return null;
 }
 
-function withFooter(card:Record<string,unknown>,footer:string):Record<string,unknown>{
-  const elements=Array.isArray(card.elements)?card.elements:[];
-  return{...card,elements:[...elements,{tag:'hr'},{tag:'div',text:{tag:'plain_text',content:footer}}]};
+/** The one-line 资料截至 footer (Ivy 2026-10-22, extended to every board query 2026-10-25); 查看处理状态 has the detail. */
+function dataFooter(client:Database.Database,chatId:string,extra:{space?:string|null;spaceUnread?:readonly string[];notes?:readonly string[];lead?:string}={}):string{
+  const facts=processingFacts(client,chatId);
+  const unread=[...(facts.gaps?[`群聊 ${facts.gaps} 处（如 PDF、视频、部分附件）`]:[]),...(extra.spaceUnread??[]).map(item=>`Space ${item}`)];
+  return[`资料截至：群聊 ${facts.analyzedSourceAt?founderBeijingTime(facts.analyzedSourceAt):'尚无已分析消息'}${extra.space?` · ${extra.space}`:''}`,
+    ...(unread.length?[`未读取：${unread.join(' · ')}`]:[]),
+    ...(extra.notes?.length?[`Space 提示：${extra.notes.join('；')}`]:[]),
+    `${extra.lead??''}明细发“查看处理状态”。`].join('\n');
 }
 
-function withProcessingStatus(card:Record<string,unknown>,status:string):Record<string,unknown>{
-  const elements=Array.isArray(card.elements)?card.elements:[];
-  const result={...card,elements:[...elements,{tag:'hr'},{tag:'div',text:{tag:'plain_text',content:status}}]};
-  return Buffer.byteLength(JSON.stringify(result),'utf8')<=28_000?result:
-    founderCard('查询结果过长',[status,'结果超过飞书单卡安全上限，请缩小到具体项目后再次查询。'],'orange');
+/** "Space 页面最后同步 10-25 11:35" when any page is bound; null otherwise. */
+function spaceSyncedLine(client:Database.Database):string|null{
+  const latest=new SpaceSyncRepository(client).listBindings().map(b=>b.lastSuccessfulSyncAt).filter((v):v is string=>Boolean(v)).sort().at(-1);
+  return latest?`Space 页面最后同步 ${founderBeijingTime(latest).slice(5)}`:null;
 }
+
+function withFooter(card:Record<string,unknown>,footer:string):Record<string,unknown>{
+  const elements=Array.isArray(card.elements)?card.elements:[];
+  const result={...card,elements:[...elements,{tag:'hr'},{tag:'div',text:{tag:'plain_text',content:footer}}]};
+  return Buffer.byteLength(JSON.stringify(result),'utf8')<=28_000?result:
+    founderCard('查询结果过长',['结果超过飞书单卡安全上限，请缩小到具体项目后再次查询。',footer],'orange');
+}
+
 
 function countPersistedGaps(client:Database.Database,chatId:string):number{
   const rows=client.prepare("SELECT source_type,content_text,metadata_json FROM context_sources WHERE source_type IN ('feishu_sync_gap','feishu_sync_coverage')")

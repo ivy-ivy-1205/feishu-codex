@@ -121,7 +121,7 @@ describe('current founder work map publisher',()=>{
     const body=JSON.stringify(result.cards);
     expect(body).toContain('项目｜B_Ivy交接包_V2（已结束）');
     expect(body).not.toContain('： B_Ivy交接包_V2');
-    expect(body).toContain('来源：Ivy 工作地图纠正 · 2026-09-22T00:00:00.000Z');
+    expect(body).toContain('来源：Ivy 工作地图纠正 · 2026-09-22 08:00');
     expect(body).not.toContain('这是一段不应在每个项目下重复的批量纠正原文');
   });
 
