@@ -328,7 +328,9 @@ Ivy 验收「查看项目进展：Smart Listing」时提出了几个问题，同
     - 专用钥匙在 Ivy 的 Mac 上生成（`~/.ssh/feishu_space_submit`），服务器 `authorized_keys` 先备份为 `/root/.ssh/authorized_keys.pre-space-submit-20261026T122841Z`，再加一行受限钥匙。强制命令装在 `/opt/feishu-codex/bin/space-submit.sh`，允许名单 `/opt/feishu-codex/config/space-submit-allowlist` 只有 `feishu-adaptor`，日志在 `logs/space-submit.log`。
     - 实测这把钥匙：执行命令、空命令、提交名单外项目都被拒绝，端口转发不通。
     - 用这把钥匙提交合伙人对齐室页面：第一次生成第 3 版（与手动导入相比只少开头标题行），摘要约 1 分钟生成；第二次同样内容返回「未变」，只刷新同步时间，没有新增记录或 Codex 调用。发送记录 49 条不变，没有错误日志。
-    - 还差一步：Ivy 在 Codex App 里允许每日任务写入本机文件夹并访问网络（SSH），再把任务改成读取后提交。
+    - 2026-10-26 Codex App 每日任务已改为「每日读取并同步合伙人对齐室页面」（任务 ID `space`，每天北京时间 9:00）：读四页并保存比对，只提交 `feishu-adaptor`。
+      - 手动完整跑一次：提交返回「未变」，服务器同步时间刷新到 20:57，版本数、摘要数、发送记录（49 条）都不变，没有错误日志。
+      - 写入和 SSH 是这次经权限申请后放行的，下一次无人值守运行能否保持权限，看 10-27 9:00 的结果。
   - 回滚：删掉 `authorized_keys` 里 `feishu-space-submit` 那一行并停掉 Codex App 任务，就回到手动导出；代码回滚照常切回上一镜像，两版之间没有表结构变化。
   - 限制：
     - Mac 睡眠、关机或 Codex App 没开时，同步会暂停。卡片底部的「Space 页面最后同步」如实显示上次时间，超过 24 小时标为过期。每天一次时，某天 9:00 那次没跑成就会显示过期。
