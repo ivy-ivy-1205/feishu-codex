@@ -303,7 +303,7 @@ Ivy 验收「查看项目进展：Smart Listing」时提出了几个问题，同
   - 新摘要仍是 7 个阶段：Phase 0–2 已完成，Phase 3–6 进行中，Phase 6 为当前重点。
   - 工作地图导入前后一致（正式条目 48，显示 21；比上线时多的一条来自群聊分析，与导入无关）。发送记录 49 条不变，没有待发消息，没有错误日志。
 - 接入评论：先看有评论页面的实际样子，决定 bot 评论怎么归属；同时修好「只开分析时评论观点提前露出」的问题。
-- 自动同步（T2，Ivy 2026-10-25 批准方案 A）：由 Ivy 本机的 Codex App 每小时读取一次已登记的页面，通过一把专用 SSH 钥匙交给服务器，不再手动导出 Markdown。
+- 自动同步（T2，Ivy 2026-10-25 批准方案 A）：由 Ivy 本机的 Codex App 每天北京时间 9:00 读取一次已登记的页面（Ivy 10-26 把每小时改为每天一次），通过一把专用 SSH 钥匙交给服务器，不再手动导出 Markdown。
   - 为什么这样做：服务器读不到 Space（要用 Ivy 的 ChatGPT 账号，服务器不保存登录态）。走 SSH 不需要开放公网入口，也不用改和 RealAgent 共用的 nginx。
   - 第 1 步验证（2026-10-25，只读，没碰服务器）：
     - Codex App 能读到 4 个页面的完整 Markdown，以及标题、系统修改时间和序列号。
@@ -320,10 +320,18 @@ Ivy 验收「查看项目进展：Smart Listing」时提出了几个问题，同
     2. 安装 `/opt/feishu-codex/bin/space-submit.sh`（root 所有，700）。允许名单只写 `feishu-adaptor`。
     3. 钥匙在 Ivy 的 Mac 上生成，私钥不离开本机。服务器 `authorized_keys` 只加一行 `restrict,command="/opt/feishu-codex/bin/space-submit.sh"`。
     4. 用这把钥匙提交一次合伙人对齐室页面，核对版本、摘要、发送记录和日志。
-    5. 再把 Codex App 任务改为每小时一次（9:00–23:00），先只跑这一页，观察几天后再加另外三页。
-  - 回滚：删掉 `authorized_keys` 那一行并停掉 Codex App 任务，就回到手动导出；代码回滚照常切回上一镜像。
+    5. 把 Codex App 的每日任务改为读取后提交，先只提交这一页，观察几天后再加另外三页。
+  - 10-26 9:00 无人值守读取：四页正文和评论都读成功，SHA-256 与前一天一致；只有保存观察记录被 Codex App 沙盒拦住（不允许写 `~/feishu-space-sync-test/`）。
+  - 2026-10-26 已上线并试跑：
+    - 生产 `7892f50`（PR #48），镜像 `sha256:8c5d3653…`；回滚镜像 `rollback-pre-space-auto-submit-20261026T122023Z`，停机备份 `backups/bridge-pre-space-auto-submit-20261026T122023Z.sqlite`。
+    - 隔离预检：卡片和工作地图与生产完全一致（53/2/21）。切换门禁一次通过；等群聊分析跑完队列约 7 分钟。
+    - 专用钥匙在 Ivy 的 Mac 上生成（`~/.ssh/feishu_space_submit`），服务器 `authorized_keys` 先备份为 `/root/.ssh/authorized_keys.pre-space-submit-20261026T122841Z`，再加一行受限钥匙。强制命令装在 `/opt/feishu-codex/bin/space-submit.sh`，允许名单 `/opt/feishu-codex/config/space-submit-allowlist` 只有 `feishu-adaptor`，日志在 `logs/space-submit.log`。
+    - 实测这把钥匙：执行命令、空命令、提交名单外项目都被拒绝，端口转发不通。
+    - 用这把钥匙提交合伙人对齐室页面：第一次生成第 3 版（与手动导入相比只少开头标题行），摘要约 1 分钟生成；第二次同样内容返回「未变」，只刷新同步时间，没有新增记录或 Codex 调用。发送记录 49 条不变，没有错误日志。
+    - 还差一步：Ivy 在 Codex App 里允许每日任务写入本机文件夹并访问网络（SSH），再把任务改成读取后提交。
+  - 回滚：删掉 `authorized_keys` 里 `feishu-space-submit` 那一行并停掉 Codex App 任务，就回到手动导出；代码回滚照常切回上一镜像，两版之间没有表结构变化。
   - 限制：
-    - Mac 睡眠、关机或 Codex App 没开时，同步会暂停。卡片底部的「Space 页面最后同步」如实显示上次时间，超过 24 小时标为过期。
+    - Mac 睡眠、关机或 Codex App 没开时，同步会暂停。卡片底部的「Space 页面最后同步」如实显示上次时间，超过 24 小时标为过期。每天一次时，某天 9:00 那次没跑成就会显示过期。
     - 评论仍不同步，评论由谁表达的问题另行决定。
 
 ## 回滚
