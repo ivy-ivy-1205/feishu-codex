@@ -106,9 +106,11 @@
     - 只有 `MINUTE_NOT_READY` 和 `RATE_LIMITED` 这两类错误会转为重试；其他错误会一直循环。原因待查。
     - 发版门禁要求队列空闲，这条任务会让门禁一直等不到。
     - 2026-10-25 Ivy 确认这是活动现场的无关录音，不用排查。已用 `JobRepository.markFailed` 标为失败（原因 `IGNORED_BY_IVY_UNRELATED_RECORDING`），妙记记录保留；之前备份为 `backups/bridge-pre-ignore-minute-20261025T050814Z.sqlite`。发版脚本不再需要为它例外放行。
-  - 2026-10-25 Ivy 批准 Space 自动同步方案 A：由本机 Codex App 每小时读取（9:00–23:00），通过只能提交的专用 SSH 钥匙交给服务器，不开公网入口，不改共享 nginx。
-    - 第 1 步只读验证通过：能读到完整 Markdown 和修改时间，自动读取与手动导出正文一致。
-    - 服务器侧代码已合并，未上线。上线前提是 10-26 9:00 的无人值守观察结果。上线后先只跑合伙人对齐室一页。
+  - 2026-10-25 Ivy 批准 Space 自动同步方案 A：由本机 Codex App 读取，通过只能提交的专用 SSH 钥匙交给服务器，不开公网入口，不改共享 nginx。频率是每天北京时间 9:00 一次（Ivy 10-26 从每小时改为每天）。
+    - 第 1 步只读验证通过：能读到完整 Markdown 和修改时间，自动读取与手动导出正文一致。10-26 无人值守读取也成功。
+    - 2026-10-26 已上线：生产 `7892f50`（PR #48），回滚镜像 `rollback-pre-space-auto-submit-20261026T122023Z`。专用钥匙 `~/.ssh/feishu_space_submit` 已装到服务器，强制命令 `/opt/feishu-codex/bin/space-submit.sh`，允许名单目前只有 `feishu-adaptor`。试跑通过。
+    - 加页面时只改服务器 `config/space-submit-allowlist`，不用发版。撤销时删 `authorized_keys` 里 `feishu-space-submit` 那一行。
+    - Codex App 沙盒默认不能写 `~/feishu-space-sync-test/`，也可能不能联网；每日任务要 Ivy 在 App 里放开这两项。
     - 测试目录在 `~/feishu-space-sync-test/`，只放 Ivy 本机，不进仓库。
   - Ivy 常在群里发 PDF、视频、音频、md 和飞书文档。现有代码只提取 md/txt/html/docx/xlsx 的文字，PDF、语音和飞书文档内容都只记缺口。是否补上，待 Ivy 决定。
   - 2026-10-21 Ivy 决定接入另外两个 Space 页面（登记计划 `docs/2026-10-21-space-mapping-plan.json`，代码已合并 PR #34 `c02445b`，未上线）：
