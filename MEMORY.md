@@ -111,7 +111,9 @@
     - 2026-10-26 已上线：生产 `7892f50`（PR #48），回滚镜像 `rollback-pre-space-auto-submit-20261026T122023Z`。专用钥匙 `~/.ssh/feishu_space_submit` 已装到服务器，强制命令 `/opt/feishu-codex/bin/space-submit.sh`，允许名单目前只有 `feishu-adaptor`。试跑通过。
     - 加页面时只改服务器 `config/space-submit-allowlist`，不用发版。撤销时删 `authorized_keys` 里 `feishu-space-submit` 那一行。
     - Codex App 沙盒默认不能写 `~/feishu-space-sync-test/`，也可能不能联网；每日任务要 Ivy 在 App 里放开这两项。
-    - 2026-10-26 每日任务（ID `space`，9:00）已改为读四页、只提交 `feishu-adaptor`，手动运行通过。另外三页仍人工导入，等对齐室这一页稳定几天后再加入允许名单。
+    - 2026-10-26 每日任务（ID `space`，9:00）已改为读四页、只提交 `feishu-adaptor`，手动运行通过。
+    - 2026-10-27 四页都已加入允许名单，四页都自动同步，不再需要手动导出。本机提交统一用 `~/feishu-space-sync-test/sync-space.py`；Codex 定时任务里的组合命令会弹确认，要为这个脚本单独加放行规则。
+    - 重新生成摘要时，Space 页面里的「分歧」可能被模型判断成有或没有（10-27 Smart Listing、Family First 都从 1 条变成 0 条）。要稳定，需要 Ivy 定下「分歧」的标准，再写进摘要规则。
     - 测试目录在 `~/feishu-space-sync-test/`，只放 Ivy 本机，不进仓库。
   - Ivy 常在群里发 PDF、视频、音频、md 和飞书文档。现有代码只提取 md/txt/html/docx/xlsx 的文字，PDF、语音和飞书文档内容都只记缺口。是否补上，待 Ivy 决定。
   - 2026-10-21 Ivy 决定接入另外两个 Space 页面（登记计划 `docs/2026-10-21-space-mapping-plan.json`，代码已合并 PR #34 `c02445b`，未上线）：
