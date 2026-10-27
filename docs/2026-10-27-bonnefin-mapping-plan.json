@@ -1,0 +1,23 @@
+{
+  "projects": [
+    {
+      "projectKey": "bonnefin-56",
+      "displayName": "56 Bonnefin 楼花展示",
+      "aliases": [
+        "56 Bonnefin",
+        "Bonnefin 楼花"
+      ],
+      "page": {
+        "pageId": "page_de4e39d09e1c81919906b20c624a27e2",
+        "pageUrl": "https://chatgpt.com/space/page_de4e39d09e1c81919906b20c624a27e2",
+        "managementMode": "hybrid",
+        "syncMode": "scheduled"
+      },
+      "topic": {
+        "existingTopicId": "topic_4b2f5910ac508f77d877ead8d63e1130",
+        "line": "A"
+      }
+    }
+  ],
+  "authors": []
+}
