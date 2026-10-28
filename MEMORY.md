@@ -114,6 +114,7 @@
     - 2026-10-26 每日任务（ID `space`，9:00）已改为读四页、只提交 `feishu-adaptor`，手动运行通过。
     - 2026-10-27 四页都已加入允许名单，四页都自动同步，不再需要手动导出。本机提交统一用 `~/feishu-space-sync-test/sync-space.py`；Codex 定时任务里的组合命令会弹确认，要为这个脚本单独加放行规则。
     - 2026-10-27 新增第五页「56 Bonnefin 楼花展示项目总览」（`page_de4e39d09e1c81919906b20c624a27e2`）：项目 `bonnefin-56`，挂在 A 线，绑到条目 `topic_4b2f5910ac508f77d877ead8d63e1130`。重复条目「56 Bonnefin这个项目」由 Ivy 回复卡片合并。
+    - 本机提交超时不等于没同步：先看服务器 `logs/space-submit.log` 和版本数再判断。脚本已改为超时后自动重试一次。
     - 重新生成摘要时，Space 页面里的「分歧」可能被模型判断成有或没有（10-27 Smart Listing、Family First 都从 1 条变成 0 条）。要稳定，需要 Ivy 定下「分歧」的标准，再写进摘要规则。
     - 测试目录在 `~/feishu-space-sync-test/`，只放 Ivy 本机，不进仓库。
   - Ivy 常在群里发 PDF、视频、音频、md 和飞书文档。现有代码只提取 md/txt/html/docx/xlsx 的文字，PDF、语音和飞书文档内容都只记缺口。是否补上，待 Ivy 决定。
