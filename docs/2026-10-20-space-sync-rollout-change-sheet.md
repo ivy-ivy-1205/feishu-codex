@@ -352,6 +352,12 @@ Ivy 验收「查看项目进展：Smart Listing」时提出了几个问题，同
     - Family First 页面有更新，服务器 16:16 收到第 4 版，摘要已生成。但本机脚本等回执超过 3 分钟就超时了。这次下午每页提交都要 1.5–2.5 分钟，早上只要几秒。
     - 本机脚本改为：每次最多等 7 分钟，超时或连接失败后等 2 分钟再试一次。重试是安全的：如果上一次其实已经到了，服务器只回「未变」。改完后重跑五页，全部「未变」，用时约 1.5 分钟，退出码 0。
     - 发送记录 49 条不变，没有待发消息。
+  - 2026-10-30 9:00 五页全部同步成功（Smart Listing、Family First 各收到新版本，其余三页未变），但中途又弹了一次确认：Codex 用临时 python 命令把五页正文存进 `~/feishu-space-sync-test/`，这个文件夹不在它的沙盒可写范围内。Ivy 批准以下调整：
+    - 同步脚本移到 `~/.feishu-space-sync/sync-space.py`（只读），数据文件夹里不再放脚本。放行规则同步改到新路径，原规则文件备份为 `~/.codex/rules/default.rules.pre-space-writable-20261030T011417Z`。
+    - `~/.codex/config.toml` 加 `[sandbox_workspace_write] writable_roots = ["/Users/mengxi/feishu-space-sync-test"]`，Codex 往这个文件夹存页面不再需要确认。原配置备份为 `~/.codex/config.toml.pre-space-writable-20261030T011417Z`。
+    - 脚本必须放在可写文件夹之外：放行规则允许它联网运行，如果 Codex 能不经确认改写它，就等于不经确认运行任意联网代码。
+    - 已核验：沙盒能写数据文件夹，不能写脚本文件夹和其他目录；新路径命中放行规则，旧路径不再命中。
+    - Codex 每日任务的提示词要改成调用新路径，由 Ivy 交给 Codex 更新并手动运行一次确认不弹窗。
   - 回滚：删掉 `authorized_keys` 里 `feishu-space-submit` 那一行并停掉 Codex App 任务，就回到手动导出；代码回滚照常切回上一镜像，两版之间没有表结构变化。
   - 限制：
     - Mac 睡眠、关机或 Codex App 没开时，同步会暂停。卡片底部的「Space 页面最后同步」如实显示上次时间，超过 24 小时标为过期。每天一次时，某天 9:00 那次没跑成就会显示过期。
