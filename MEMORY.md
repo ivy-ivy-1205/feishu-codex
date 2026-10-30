@@ -110,7 +110,7 @@
     - 第 1 步只读验证通过：能读到完整 Markdown 和修改时间，自动读取与手动导出正文一致。10-26 无人值守读取也成功。
     - 2026-10-26 已上线：生产 `7892f50`（PR #48），回滚镜像 `rollback-pre-space-auto-submit-20261026T122023Z`。专用钥匙 `~/.ssh/feishu_space_submit` 已装到服务器，强制命令 `/opt/feishu-codex/bin/space-submit.sh`，允许名单目前只有 `feishu-adaptor`。试跑通过。
     - 加页面时只改服务器 `config/space-submit-allowlist`，不用发版。撤销时删 `authorized_keys` 里 `feishu-space-submit` 那一行。
-    - 2026-10-30 起 `~/.codex/config.toml` 把 `~/feishu-space-sync-test/` 设为沙盒可写，Codex 存页面不再弹确认。这个文件夹只放数据；任何被放行联网运行的脚本都不能放进可写文件夹，否则等于放行任意联网代码。
+    - Codex App 的定时任务不读 `config.toml` 的沙盒可写目录（App 自己管权限，日志里是 `permission_profile: "managed"`），只能写对话的项目目录和 `/tmp`。所以 2026-10-30 起 Codex 只把页面存到 `/tmp/feishu-space-sync-stage/`，由放行的脚本核验后搬进 `~/feishu-space-sync-test/` 再提交。被放行联网运行的脚本不能放在 Codex 可写的地方。
     - 2026-10-26 每日任务（ID `space`，9:00）已改为读四页、只提交 `feishu-adaptor`，手动运行通过。
     - 2026-10-27 四页都已加入允许名单，四页都自动同步，不再需要手动导出。本机提交统一用 `~/.feishu-space-sync/sync-space.py`（10-30 从数据文件夹移出），放行规则只认这条命令。
     - 2026-10-27 新增第五页「56 Bonnefin 楼花展示项目总览」（`page_de4e39d09e1c81919906b20c624a27e2`）：项目 `bonnefin-56`，挂在 A 线，绑到条目 `topic_4b2f5910ac508f77d877ead8d63e1130`。重复条目「56 Bonnefin这个项目」由 Ivy 回复卡片合并。
