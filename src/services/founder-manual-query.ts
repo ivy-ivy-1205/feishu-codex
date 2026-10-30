@@ -260,8 +260,9 @@ function buildAlignmentOverview(input:{client:Database.Database;chatId:string;no
   }
   const line=(entry:AlignmentEntry)=>`${entry.project}｜${entry.text}（${entry.source} ${founderBeijingTime(entry.at).slice(5,10)}${entry.stale?' · 较久未回应':''}）`;
   const refs:FounderAlignmentItemRef[]=[];
+  // Ivy 2026-10-30: 真实分歧 and 待决定 list every item, each numbered so a reply can reach it (40 only guards card size).
   const section=(title:string,entries:AlignmentEntry[],numbered?:'divergence'|'decision')=>{
-    const sorted=[...entries].sort((a,b)=>b.at.localeCompare(a.at)),shown=sorted.slice(0,shownPerSection);
+    const sorted=[...entries].sort((a,b)=>b.at.localeCompare(a.at)),shown=sorted.slice(0,numbered?40:shownPerSection);
     const items=shown.map(entry=>{
       if(!numbered||!entry.target)return line(entry);
       const displayedNumber=refs.length+1;

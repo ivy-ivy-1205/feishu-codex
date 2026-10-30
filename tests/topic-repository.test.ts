@@ -10,6 +10,7 @@ import {
   TopicRepository,
   TopicVersionConflictError
 } from '../src/repositories/topic-repository.js';
+import { FounderTopicProjectBindingRepository } from '../src/repositories/founder-topic-project-binding-repository.js';
 
 function createHarness() {
   const database = createSqliteDatabase(':memory:');
@@ -368,5 +369,21 @@ describe('TopicRepository', () => {
       .toEqual({ count: 2 });
     expect(database.client.prepare('SELECT COUNT(*) AS count FROM context_topic_relations').get())
       .toEqual({ count: 2 });
+  });
+  it('keeps the topic a founder registered to a project as the shown member of a same_as group, even when it is newer', () => {
+    const database = createSqliteDatabase(':memory:');
+    migrateDatabase(database.client);
+    const topics = new TopicRepository(database.client);
+    const hidden = topics.createTopic({ displayName: '56 Bonnefin这个项目', stage: 'active_project', outcome: null, createdAt: new Date('2026-10-24T00:00:00.000Z') });
+    const registered = topics.createTopic({ displayName: '56 Bonnefin 楼花展示项目总览', stage: 'active_project', outcome: null, createdAt: new Date('2026-10-26T00:00:00.000Z') });
+    topics.addRelation({ fromTopicId: registered.id, toTopicId: hidden.id, relationType: 'same_as', rationale: 'test', createdAt: new Date('2026-10-30T00:00:00.000Z') });
+    expect(topics.listCanonicalTopics().map((topic) => topic.id)).toEqual([hidden.id]);
+    database.client.prepare(`INSERT INTO projects (project_key, display_name, aliases, status, origin, stage, created_at, updated_at)
+      VALUES ('bonnefin-56', '56 Bonnefin', '[]', 'active', 'human_confirmed', 'active_project', ?, ?)`).run('2026-10-27T00:00:00.000Z', '2026-10-27T00:00:00.000Z');
+    new FounderTopicProjectBindingRepository(database.client).recordHumanConfirmed({ topicId: registered.id, projectKey: 'bonnefin-56',
+      role: 'canonical', at: new Date('2026-10-27T00:00:00.000Z') });
+    expect(topics.listCanonicalTopics()).toEqual([expect.objectContaining({ id: registered.id,
+      evidenceIds: expect.any(Array) })]);
+    database.close();
   });
 });
