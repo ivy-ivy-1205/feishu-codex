@@ -322,6 +322,32 @@ describe('Space project-page digest per page version', () => {
     expect(h.db.client.prepare("SELECT count(*) n FROM outbox").get()).toEqual({ n: 0 });
   });
 
+  it('keeps an unchanged paragraph in the section the earlier digest gave it, even when the model flips it on the next page version', async () => {
+    let run = 0;
+    const h = digestHarness(async (input) => {
+      const first = input.blocks[0]!;
+      const entry = { text: first.markdown, blockId: first.id, excerpt: first.markdown };
+      run += 1;
+      return { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [],
+        profile: { ...noProfile, ...(run === 1 ? { decisions: [entry] } : { problems: [entry] }) } };
+    });
+    canonicalTopic(h);
+    const v1 = spacePageSource(h.sources);
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(), sourceIds: [v1.id], capturedAt: start });
+    await h.runtime.runOnce();
+    const v2 = h.sources.saveSource({ sourceSystem: 'chatgpt_space', sourceType: 'space_page_snapshot', externalId: 'page_1',
+      logicalKey: 'chatgpt_space:page:page_1', occurredAt: '2026-10-21T01:00:00.000Z', authors: [], locatorUri: 'https://chatgpt.com/space/page_1',
+      contentFormat: 'text/markdown', contentText: 'Smart Listing 项目总览\n\n新增了一段', metadata: { pageId: 'page_1', title: 'Smart Listing', blocks: [
+        { id: 'block_1', hash: 'a'.repeat(64), markdown: 'Smart Listing 项目总览' }, { id: 'block_2', hash: 'b'.repeat(64), markdown: '新增了一段' }] },
+      availabilityStatus: 'available', capturedAt: start }).source;
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(), sourceIds: [v2.id], capturedAt: start });
+    await h.runtime.runOnce();
+    expect(h.calls).toHaveLength(2);
+    const stored = h.digests.getForPageSource(v2.id)?.digest?.profile;
+    expect(stored?.decisions).toEqual([expect.objectContaining({ excerpt: 'Smart Listing 项目总览' })]);
+    expect(stored?.problems).toEqual([]);
+  });
+
   it('never re-digests a page whose digest already has a profile', async () => {
     const h = digestHarness(async (input) => ({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [],
       profile: { ...noProfile, positioning: { text: '项目总览', blockId: input.blocks[0]!.id, excerpt: '项目总览' } } }));

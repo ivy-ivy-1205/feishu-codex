@@ -57,6 +57,13 @@ export class SpaceProjectDigestRepository {
     return row ? toRecord(row) : null;
   }
 
+  /** The newest ready digest at or before `pageSourceVersion`, for carrying section choices over to the next version of the page. */
+  getReadyAtOrBefore(projectKey: string, pageSourceVersion: number): SpaceProjectDigestRecord | null {
+    const row = this.client.prepare(`SELECT * FROM space_project_digests WHERE project_key = ? AND status = 'ready'
+      AND page_source_version <= ? ORDER BY page_source_version DESC LIMIT 1`).get(projectKey, pageSourceVersion) as Row | undefined;
+    return row ? toRecord(row) : null;
+  }
+
   /**
    * The digest of the newest page version that has one (ready or failed), so a failure is shown, not hidden. Newest is the
    * highest version: page times mix "+08:00" and "Z" offsets, which do not sort correctly as text.
