@@ -148,10 +148,25 @@ describe('CodexSpaceProjectDigestAnalyzer', () => {
     expect(prompts[0]).toContain('in_progress');
   });
 
-  it('fails after two invalid outputs instead of storing an ungrounded digest', async () => {
-    const analyzer = new CodexSpaceProjectDigestAnalyzer({ codex: { async executeJson() {
-      return { currentFocus: item('b_missing', 'x'), weekProgress: [], todayProgress: [], nextSteps: [], profile: noProfile }; } } });
-    await expect(analyzer.digest(weekInput())).rejects.toBeInstanceOf(SpaceDigestValidationError);
+  it('after two outputs with a few ungrounded items, keeps the grounded rest and drops only those items (2026-10-30)', async () => {
+    const prompts: string[] = [];
+    const analyzer = new CodexSpaceProjectDigestAnalyzer({ codex: { async executeJson({ prompt }) {
+      prompts.push(prompt);
+      return { currentFocus: item('b_missing', 'x'), weekProgress: [item('b_week', '页面已上线'), item('b_old', '上线买家空间')], todayProgress: [],
+        nextSteps: [], profile: { ...noProfile, positioning: item('b_old', '编造的定位'), completed: [item('b_week', '页面已上线'), item('b_week', '没写过的话')],
+          decisions: [item('b_today', '补齐了户型图')] } }; } } });
+    await expect(analyzer.digest(weekInput())).resolves.toEqual({ currentFocus: null, weekProgress: [item('b_week', '页面已上线')], todayProgress: [],
+      nextSteps: [], profile: { ...noProfile, completed: [item('b_week', '页面已上线')], decisions: [item('b_today', '补齐了户型图')] } });
+    expect(prompts).toHaveLength(2);
+  });
+
+  it('still fails when the output breaks the schema or a phase is ungrounded, instead of storing a partial phase plan', async () => {
+    const phase = (blockId: string, excerpt: string) => ({ ...item(blockId, excerpt), name: '阶段', status: 'in_progress', statusText: '进行中', focus: false });
+    for (const output of [{ currentFocus: null }, { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [],
+      profile: { ...noProfile, phases: [phase('b_old', '项目目标'), phase('b_old', '编造的阶段')] } }]) {
+      const analyzer = new CodexSpaceProjectDigestAnalyzer({ codex: { async executeJson() { return output; } } });
+      await expect(analyzer.digest(weekInput())).rejects.toBeInstanceOf(SpaceDigestValidationError);
+    }
   });
 });
 

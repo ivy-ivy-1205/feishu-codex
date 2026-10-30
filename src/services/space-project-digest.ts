@@ -107,6 +107,25 @@ export function buildSpaceDigestInput(input: { projectKey: string; projectName: 
     blocks: all.filter((block) => keep.has(block.id)) };
 }
 
+/**
+ * The last resort after the retries (2026-10-30): an output whose schema and phase plan hold but where a few items fail
+ * grounding keeps its grounded items and drops the others, instead of losing the whole digest. A dropped item is never
+ * shown (宁缺毋滥); a phase is never dropped, since a missing phase would misstate the plan, so phase failures still fail.
+ */
+export function pruneUngroundedSpaceDigest(raw: unknown, input: SpaceProjectDigestInput): SpaceProjectDigest {
+  const parsed = spaceProjectDigestSchema.safeParse(raw);
+  if (!parsed.success) throw new SpaceDigestValidationError('schema_invalid');
+  const digest = parsed.data, blocks = new Map(input.blocks.map((block) => [block.id, block]));
+  const grounded = (item: SpaceDigestItem) => blocks.get(item.blockId)?.markdown.includes(item.excerpt) ?? false;
+  const week = (item: SpaceDigestItem) => grounded(item) && (input.changeBasis !== 'version_diff' || blocks.get(item.blockId)!.changedThisWeek);
+  const today = (item: SpaceDigestItem) => grounded(item) && input.changeBasis === 'version_diff' && blocks.get(item.blockId)!.changedToday;
+  const { positioning, phases, ...sections } = digest.profile;
+  return validateSpaceDigest({ currentFocus: digest.currentFocus && grounded(digest.currentFocus) ? digest.currentFocus : null,
+    weekProgress: digest.weekProgress.filter(week), todayProgress: digest.todayProgress.filter(today), nextSteps: digest.nextSteps.filter(grounded),
+    profile: { positioning: positioning && grounded(positioning) ? positioning : null, phases,
+      ...Object.fromEntries(Object.entries(sections).map(([key, items]) => [key, items.filter(grounded)])) } }, input);
+}
+
 export function validateSpaceDigest(raw: unknown, input: SpaceProjectDigestInput): SpaceProjectDigest {
   const parsed = spaceProjectDigestSchema.safeParse(raw);
   if (!parsed.success) throw new SpaceDigestValidationError('schema_invalid');
