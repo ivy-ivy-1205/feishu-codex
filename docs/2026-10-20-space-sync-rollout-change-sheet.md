@@ -399,7 +399,7 @@ Ivy 验收「查看项目进展：Smart Listing」时提出了几个问题，同
       - 发版脚本加了门禁：剩余不足 300M 就不切换。
       - 上线后 Ivy 批准清理两类（第三类 `/root` 下其他项目的旧备份和工具缓存不动）：
         - 飞书镜像只留最近 3 版：`5ba31c4`（当前）、`7892f50`、`ebab791`。删掉 23 个旧标签，腾出约 3.6G；更早的版本要用时，从 git 重新构建。
-        - 清空 Docker 构建缓存，腾出约 7G。缓存全是飞书构建留下的，下次构建会慢几分钟。
+        - 清空 Docker 构建缓存，腾出约 7G。用的是 `docker builder prune -a`，清的是整台主机的构建缓存，不只是飞书的（只核对过最大的 15 条，都是飞书的）。飞书和 RealAgentAI 下次重新构建都会慢一些。收尾核查见 `docs/2026-10-30-server-disk-cleanup-closeout.md`。
         - 删掉 `preview/` 下 11 个预览目录（都是生产库副本）。
         - 新增 `/etc/logrotate.d/rsyslog`：`messages`、`secure`、`cron` 等每周轮转、留 4 份、压缩。删掉这个文件即恢复原样。首次轮转把 2.4G 压到 193M，旧内容都保留在压缩文件里。
         - 新增 `/etc/systemd/journald.conf.d/size.conf`（`SystemMaxUse=500M`）：journal 从 2.8G 降到 504M，删掉这个文件即恢复原样。
