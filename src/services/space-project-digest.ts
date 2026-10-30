@@ -108,6 +108,45 @@ export function buildSpaceDigestInput(input: { projectKey: string; projectName: 
 }
 
 /**
+ * Keeps 卡点 / 分歧 / 待决定 from flickering between regenerations (Ivy 2026-10-30). The model draws the line between them
+ * a little differently each run, so a paragraph that has not changed since the earlier digest keeps the section it had:
+ * an item the model dropped is put back, and one it moved to another section is moved back. A paragraph is "unchanged"
+ * when its block id (a content hash) is still on the page and still contains the earlier excerpt. Edited paragraphs are
+ * judged afresh. 卡点 keeps its cap of 3; nothing is carried that would break a cap.
+ */
+export function carryOverSpaceClassifications(next: SpaceProjectDigest, previous: StoredSpaceProjectDigest | null,
+  input: SpaceProjectDigestInput): SpaceProjectDigest {
+  const before = previous?.profile;
+  if (!before) return next;
+  const blocks = new Map(input.blocks.map((block) => [block.id, block.markdown]));
+  const caps = { divergences: 20, decisions: 20, problems: 3 } as const;
+  const names = ['divergences', 'decisions', 'problems'] as const;
+  const profile = { ...next.profile, divergences: [...next.profile.divergences], decisions: [...next.profile.decisions],
+    problems: [...next.profile.problems] };
+  const given = new Map<string, Set<string>>();
+  for (const name of names) for (const old of before[name] ?? []) {
+    if (!blocks.get(old.blockId)?.includes(old.excerpt)) continue;
+    given.set(old.blockId, new Set([...(given.get(old.blockId) ?? []), name]));
+  }
+  // What the model itself put in each section, before anything is added back: a restored item must not count as its own proof.
+  const modelHad = Object.fromEntries(names.map((name) => [name, new Set(next.profile[name].map((entry) => entry.blockId))]));
+  const settled = new Set<string>();
+  for (const name of names) {
+    for (const old of before[name] ?? []) {
+      if (!blocks.get(old.blockId)?.includes(old.excerpt)) continue;
+      if (!modelHad[name].has(old.blockId)) {
+        if (profile[name].length >= caps[name]) continue;
+        profile[name].push(old);
+      }
+      settled.add(old.blockId);
+    }
+  }
+  // A paragraph keeps only the sections the earlier digest gave it; the model's other placements of it are dropped.
+  for (const other of names) profile[other] = profile[other].filter((entry) => !settled.has(entry.blockId) || given.get(entry.blockId)?.has(other));
+  return { ...next, profile };
+}
+
+/**
  * The last resort after the retries (2026-10-30): an output whose schema and phase plan hold but where a few items fail
  * grounding keeps its grounded items and drops the others, instead of losing the whole digest. A dropped item is never
  * shown (宁缺毋滥); a phase is never dropped, since a missing phase would misstate the plan, so phase failures still fail.

@@ -4,7 +4,7 @@ import { migrateDatabase } from '../src/db/migrate.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
 import { SpaceProjectDigestRepository } from '../src/repositories/space-project-digest-repository.js';
 import {
-  buildSpaceDigestInput, SpaceDigestValidationError, validateSpaceDigest, type SpaceProjectDigestInput
+  buildSpaceDigestInput, carryOverSpaceClassifications, SpaceDigestValidationError, validateSpaceDigest, type SpaceProjectDigestInput
 } from '../src/services/space-project-digest.js';
 import { CodexSpaceProjectDigestAnalyzer } from '../src/adapters/codex-space-project-digest.js';
 
@@ -238,5 +238,71 @@ describe('SpaceProjectDigestRepository', () => {
     for (const page of [v2, v1]) h.digests.saveFailed({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: page.id,
       pageSourceVersion: page.sourceVersion, pageUpdatedAt: page.occurredAt, generatedAt: at, failureCode: 'X' });
     expect(h.digests.getLatestForProject('smart-listing')?.pageSourceId).toBe(v2.id);
+  });
+});
+
+describe('carryOverSpaceClassifications', () => {
+  const input = (): SpaceProjectDigestInput => ({ projectKey: 'smart-listing', projectName: 'Smart Listing', pageTitle: 'P', pageUpdatedAt: at.toISOString(),
+    changeBasis: 'first_snapshot', truncated: false, blocks: [
+      { id: 'b1', markdown: '渠道分工仍待确定', changedThisWeek: false, changedToday: false },
+      { id: 'b2', markdown: '等建筑师答复 Q1–Q8', changedThisWeek: false, changedToday: false },
+      { id: 'b3', markdown: '主责与佣金待拍板', changedThisWeek: false, changedToday: false },
+      { id: 'b4', markdown: '另一个待定事项', changedThisWeek: false, changedToday: false }
+    ] });
+  const digest = (profile: Partial<Record<'problems' | 'divergences' | 'decisions', ReturnType<typeof item>[]>>) => ({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile: { ...noProfile, ...profile } });
+  const texts = (items: { blockId: string }[]) => items.map((i) => i.blockId);
+
+  it('keeps an earlier 待决定 the model dropped this time, while its paragraph is unchanged', () => {
+    const previous = digest({ decisions: [item('b1', '渠道分工仍待确定')] });
+    const next = digest({});
+    expect(texts(carryOverSpaceClassifications(next, previous, input()).profile.decisions)).toEqual(['b1']);
+  });
+
+  it('moves a paragraph back to its earlier section when the model flipped it, without duplicating it', () => {
+    const previous = digest({ problems: [item('b2', '等建筑师答复 Q1–Q8')] });
+    const next = digest({ decisions: [item('b2', '等建筑师答复 Q1–Q8')] });
+    const out = carryOverSpaceClassifications(next, previous, input()).profile;
+    expect(texts(out.problems)).toEqual(['b2']);
+    expect(out.decisions).toEqual([]);
+  });
+
+  it('does not carry an item whose paragraph was edited or is no longer on the page', () => {
+    const previous = digest({ decisions: [item('b_gone', '改写前的段落')] });
+    expect(carryOverSpaceClassifications(digest({}), previous, input()).profile.decisions).toEqual([]);
+  });
+
+  it('keeps the new wording when both runs agree, and adds no duplicate', () => {
+    const previous = digest({ decisions: [{ text: '旧写法', blockId: 'b3', excerpt: '主责与佣金待拍板' }] });
+    const next = digest({ decisions: [{ text: '新写法', blockId: 'b3', excerpt: '主责与佣金待拍板' }] });
+    expect(carryOverSpaceClassifications(next, previous, input()).profile.decisions).toEqual([{ text: '新写法', blockId: 'b3', excerpt: '主责与佣金待拍板' }]);
+  });
+
+  it('restores every earlier item of a paragraph that held several, not just the first', () => {
+    const previous = digest({ decisions: [{ text: '问题一', blockId: 'b3', excerpt: '主责' }, { text: '问题二', blockId: 'b3', excerpt: '佣金' }] });
+    expect(carryOverSpaceClassifications(digest({}), previous, input()).profile.decisions.map((i) => i.text)).toEqual(['问题一', '问题二']);
+  });
+
+  it('leaves a paragraph that sat in two sections in both', () => {
+    const previous = digest({ decisions: [{ text: '待决', blockId: 'b3', excerpt: '主责' }], problems: [{ text: '待答复', blockId: 'b3', excerpt: '佣金' }] });
+    const out = carryOverSpaceClassifications(digest({}), previous, input()).profile;
+    expect([texts(out.decisions), texts(out.problems)]).toEqual([['b3'], ['b3']]);
+  });
+
+  it('never grows 卡点 past its cap of 3', () => {
+    const full = [item('b1', '渠道分工仍待确定'), item('b3', '主责与佣金待拍板'), item('b4', '另一个待定事项')];
+    const previous = digest({ problems: [item('b2', '等建筑师答复 Q1–Q8')] });
+    expect(carryOverSpaceClassifications(digest({ problems: full }), previous, input()).profile.problems).toEqual(full);
+  });
+
+  it('returns the new digest as it is when there is no earlier one, or the earlier one had no profile', () => {
+    const next = digest({ decisions: [item('b1', '渠道分工仍待确定')] });
+    expect(carryOverSpaceClassifications(next, null, input())).toEqual(next);
+    expect(carryOverSpaceClassifications(next, { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [] }, input())).toEqual(next);
+  });
+
+  it('works on earlier digests stored before 待决定 existed', () => {
+    const { decisions: _decisions, ...old } = noProfile;
+    const previous = { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile: { ...old, problems: [item('b2', '等建筑师答复 Q1–Q8')] } };
+    expect(texts(carryOverSpaceClassifications(digest({}), previous, input()).profile.problems)).toEqual(['b2']);
   });
 });
