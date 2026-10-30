@@ -201,9 +201,15 @@ export class TopicRepository {
     return rows.map(toCurrentTopic);
   }
 
-  /** Collapse only explicit same_as components; directional part_of relations remain visible. */
+  /**
+   * Collapse only explicit same_as components; directional part_of relations remain visible. The oldest member stands
+   * for the group, except that a member a founder registered to a project (its Space page, its line) always does
+   * (2026-10-30: the hidden 「56 Bonnefin这个项目」 predates the registered 「56 Bonnefin 楼花展示项目总览」).
+   */
   listCanonicalTopics(): CurrentTopic[] {
     const topics = this.listCurrentTopics();
+    const registered = new Set((this.client.prepare(`SELECT topic_id FROM founder_topic_project_bindings
+      WHERE role = 'canonical' AND source <> 'analysis'`).all() as { topic_id: string }[]).map((row) => row.topic_id));
     const byId = new Map(topics.map((topic) => [topic.id, topic]));
     const parent = new Map(topics.map((topic) => [topic.id, topic.id]));
     const find = (id: string): string => {
@@ -215,7 +221,8 @@ export class TopicRepository {
       const a = find(left), b = find(right);
       if (a === b) return;
       const first = byId.get(a)!, second = byId.get(b)!;
-      const canonical = first.createdAt.localeCompare(second.createdAt) <= 0 ? a : b;
+      const canonical = registered.has(a) !== registered.has(b) ? (registered.has(a) ? a : b)
+        : first.createdAt.localeCompare(second.createdAt) <= 0 ? a : b;
       parent.set(canonical === a ? b : a, canonical);
     };
     for (const relation of this.listRelations()) {

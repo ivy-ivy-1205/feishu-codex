@@ -88,6 +88,15 @@ describe('查看分歧 待决定 and numbered replies (Ivy 2026-10-30)', () => {
       counts: [{ title: '真实分歧', count: 1 }, { title: '待决定', count: 1 }, { title: '缺少另一方表达' }, { title: '已确认共识' }] });
   });
 
+  it('numbers every 待决定 item instead of hiding the ninth behind 另有 N 项, so each can be replied to', () => {
+    const h = setup({ decisions: Array.from({ length: 10 }, (_, index) => item(`第 ${index + 1} 个方案待定`, index % 2 ? 'b1' : 'b2')) });
+    const { message, texts } = overview(h);
+    expect(texts[2]!.split('\n')).toHaveLength(11);
+    expect(texts[2]).toContain('- 10. Smart Listing｜');
+    expect(texts[2]).not.toContain('另有');
+    expect(message.kind === 'founder_manual_query' && message.alignmentRefs).toHaveLength(10);
+  });
+
   it('parses free-form, multi-line replies and refuses anything it cannot read', () => {
     expect(parseAlignmentJudgements('第 2 条 已解决：按 A 方案')).toEqual([{ displayedNumber: 2, verdict: 'resolved', statement: '按 A 方案' }]);
     expect(parseAlignmentJudgements('2 已解决')).toEqual([{ displayedNumber: 2, verdict: 'resolved', statement: null }]);

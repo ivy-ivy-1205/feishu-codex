@@ -13,9 +13,9 @@ export interface MergeFounderTopicsDependencies {
 /**
  * Merges a work-map duplicate that has no number on any card (so a founder cannot reply "第 X 项和第 Y 项是同一个项目")
  * into the item it duplicates, e.g. the hidden 「56 Bonnefin这个项目」 into 「56 Bonnefin 楼花展示项目总览」
- * (Ivy 2026-10-30). A same_as relation collapses both into the older topic, so the merge is refused unless `--into`
- * stays the one shown — its line, Space page and history keep their place. Preview is the default; --apply needs a
- * change-sheet reference. Nothing is deleted.
+ * (Ivy 2026-10-30). The merge is tried and rolled back first: it is refused unless `--into` stays the one shown — its
+ * line, Space page and history keep their place. Preview is the default; --apply needs a change-sheet reference.
+ * Nothing is deleted.
  */
 export function runMergeFounderTopicsCli(args: readonly string[], dependencies: MergeFounderTopicsDependencies): number {
   const { values } = parseArgs({ args: args[0] === '--' ? args.slice(1) : [...args], strict: true, options: {
@@ -36,6 +36,15 @@ export function runMergeFounderTopicsCli(args: readonly string[], dependencies: 
     }
     return topics.listCanonicalTopics().find((topic) => group.has(topic.id))?.id ?? null;
   };
+  const merge = () => topics.addRelation({ fromTopicId: into!, toTopicId: from!, relationType: 'same_as',
+    rationale: `Ivy 确认属于同一项目（${changeRef ?? 'preview'}）`, createdAt: dependencies.now() });
+  /** Applies the relation inside a transaction that is always rolled back, and reports whether `--into` stays shown. */
+  const mergeKeepsShown = () => {
+    let kept = false;
+    try { dependencies.client.transaction(() => { merge(); kept = canonicalOf(from!) === into && canonicalOf(into!) === into; throw rollback; })(); }
+    catch (error) { if (error !== rollback) throw error; }
+    return kept;
+  };
   const target = current.get(into), duplicate = current.get(from);
   const preview = {
     into: target ? { id: target.id, name: target.displayName, stage: target.stage, createdAt: target.createdAt } : null,
@@ -43,20 +52,21 @@ export function runMergeFounderTopicsCli(args: readonly string[], dependencies: 
     status: !target || !duplicate ? 'topic_not_found'
       : canonicalOf(into) !== into ? 'into_is_not_shown'
       : canonicalOf(from) === into ? 'already_merged'
-      : duplicate.createdAt < target.createdAt ? 'would_replace_shown_topic' : 'ready'
+      : mergeKeepsShown() ? 'ready' : 'would_replace_shown_topic'
   };
   if (!values.apply || preview.status !== 'ready') {
     dependencies.write(JSON.stringify({ mode: values.apply ? 'rejected' : 'preview', ...preview }, null, 2));
     return preview.status === 'ready' || preview.status === 'already_merged' ? 0 : 2;
   }
   dependencies.client.transaction(() => {
-    topics.addRelation({ fromTopicId: into, toTopicId: from, relationType: 'same_as',
-      rationale: `Ivy 确认属于同一项目（${changeRef}）`, createdAt: dependencies.now() });
+    merge();
     if (canonicalOf(from) !== into || canonicalOf(into) !== into) throw new Error('MERGE_TOPICS_CANONICAL_MOVED');
   })();
   dependencies.write(JSON.stringify({ mode: 'applied', ...preview, status: 'merged' }, null, 2));
   return 0;
 }
+
+const rollback = new Error('MERGE_TOPICS_PREVIEW_ROLLBACK');
 
 function main(): void {
   const databasePath = process.env.DATABASE_URL?.trim();
