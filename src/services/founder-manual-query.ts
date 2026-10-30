@@ -2,6 +2,8 @@ import type Database from 'better-sqlite3';
 import { founderBeijingTime } from './founder-time.js';
 import { AlignmentIssueRepository } from '../repositories/alignment-issue-repository.js';
 import { AlignmentRepository } from '../repositories/alignment-repository.js';
+import { AlignmentJudgementRepository } from '../repositories/alignment-judgement-repository.js';
+import { alignmentReplyGuide, type FounderAlignmentItemRef } from './alignment-judgement-service.js';
 import { loadSpaceProjectPageView, spaceProjectProgress } from './space-project-page-view.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
@@ -28,6 +30,8 @@ export interface FounderManualCardQueryMessage {
   targetChatId:string; card:Record<string,unknown>;
   /** 查看项目进展 and 查看分歧: the same content as structure, so the editable board is laid out by section. */
   boardView?:FounderProjectProgressBoardView|FounderAlignmentBoardView;
+  /** 查看分歧 only: what each number on the card points at, so a reply can settle it. */
+  alignmentRefs?:FounderAlignmentItemRef[];
 }
 export type FounderManualQueryMessage=FounderManualCardQueryMessage|(FounderWorkMapCard&{
   mapId:string;targetChatId:string;manualQueryMessageId:string;boardView:FounderBoardView;
@@ -66,7 +70,7 @@ export function buildFounderManualQueryMessages(input:{client:Database.Database;
   if(input.query.kind==='open_alignment'){
     const overview=buildAlignmentOverview(input);
     return[{kind:'founder_manual_query',queryMessageId:input.queryMessageId,page:1,totalPages:1,targetChatId:input.chatId,
-      card:withFooter(overview.card,overview.view.footer),boardView:overview.view}];
+      card:withFooter(overview.card,overview.view.footer),boardView:overview.view,...(overview.refs.length?{alignmentRefs:overview.refs}:{})}];
   }
   if(input.query.kind==='project_progress'){
     const progress=buildProjectProgress(input,input.query.topicName);
@@ -84,7 +88,7 @@ export function buildFounderManualQueryMessages(input:{client:Database.Database;
 const stageLabels={idea:'想法',exploring:'探索中',project_candidate:'候选项目',active_project:'正在推进',paused:'暂停',closed:'已结束'} as const;
 
 /**
- * 查看项目进展 in Ivy's order (2026-10-22): 项目定位, 阶段规划, 已完成, 正在做, 待推进, 卡点与问题, 分歧, 下一步计划, then a
+ * 查看项目进展 in Ivy's order (2026-10-22): 项目定位, 阶段规划, 已完成, 正在做, 待推进, 卡点与问题, 分歧, 待决定 (2026-10-30), 下一步计划, then a
  * one-line 资料截至 footer. With a Space page the sections come from the page; without one, from the group chat. A
  * group-chat item shown next to page items (positioning fallback, alignment records) is marked. An empty section says 无.
  */
@@ -117,8 +121,10 @@ function buildProjectProgress(input:{client:Database.Database;chatId:string;now:
     {title:'正在做',items:unique(page?.inProgress??[])},
     {title:'待推进',items:unique([...(page?.pending??[]),...chatNext.slice(0,3).map(chat)])},
     {title:'卡点与问题',items:unique(page?.problems??[])},
-    {title:'分歧',items:unique([...(page?.divergences??[]),...issues.slice(0,3).map(issue=>
+    {title:'分歧',items:unique([...(page?.divergences??[]).map(item=>item.text),...issues.slice(0,3).map(issue=>
       `Ivy：${founderText(issue.ivy.statement,100)} ↔ James：${founderText(issue.james.statement,100)}（对齐记录）`)])},
+    // Ivy 2026-10-30: options the page lists with no one taking a side yet are not a divergence; they wait for a decision.
+    {title:'待决定',items:unique((page?.decisions??[]).map(item=>item.text))},
     {title:'下一步计划',items:unique(page?.nextPlan??[])}
   ];
   const footer=dataFooter(input.client,input.chatId,{space:page?.dataLine??null,spaceUnread:page?.unread,notes:page?.notes,
@@ -207,21 +213,25 @@ function buildTopicAlignment(input:{client:Database.Database;now:Date},name:stri
   return founderCard('双方理解与待对齐',lines,issues.length?'orange':'blue');
 }
 
-type AlignmentEntry={project:string;text:string;source:'群聊'|'Space 页面';at:string;stale?:boolean};
+type AlignmentRefTarget=DistributiveOmit<FounderAlignmentItemRef,'displayedNumber'|'section'|'project'|'text'>;
+type DistributiveOmit<T,K extends PropertyKey>=T extends unknown?Omit<T,K>:never;
+type AlignmentEntry={project:string;text:string;source:'群聊'|'Space 页面';at:string;stale?:boolean;target?:AlignmentRefTarget};
 const staleAfterMs=30*24*60*60*1000,shownPerSection=8;
 
 /**
  * 查看分歧 (Ivy 2026-10-25): only projects still being pushed — not the A/B/C lines, closed or paused items — each
  * entry naming who said what and when, newest first. A page's written divergences count, marked as from the page.
+ * Ivy 2026-10-30: the page's open decisions are their own 待决定 section; 真实分歧 and 待决定 lines are numbered so a
+ * reply ("第 2 条 已解决：…", "第 3 条 不是分歧") settles them; what was settled in the last 30 days is 最近已解决.
  */
 function buildAlignmentOverview(input:{client:Database.Database;chatId:string;now:Date;spaceStaleAfterMinutes?:number;spaceWorkMapEnabled?:boolean}):
-  {card:Record<string,unknown>;view:FounderAlignmentBoardView}{
+  {card:Record<string,unknown>;view:FounderAlignmentBoardView;refs:FounderAlignmentItemRef[]}{
   const topics=new TopicRepository(input.client),alignment=new AlignmentRepository(input.client),issues=new AlignmentIssueRepository(input.client);
   const hidden=new Set((input.client.prepare("SELECT topic_id FROM founder_topic_visibility WHERE visibility='space_managed'").all() as {topic_id:string}[])
     .map(row=>row.topic_id));
   const active=topics.listCanonicalTopics().filter(topic=>!founderLineRootNames.includes(topic.displayName.trim())&&
     topic.stage!=='closed'&&topic.stage!=='paused'&&!hidden.has(topic.id));
-  const divergences:AlignmentEntry[]=[],missing:AlignmentEntry[]=[],shared:AlignmentEntry[]=[];
+  const divergences:AlignmentEntry[]=[],decisions:AlignmentEntry[]=[],missing:AlignmentEntry[]=[],shared:AlignmentEntry[]=[];
   for(const topic of active){
     const project=founderText(topic.displayName,60),views=alignment.listCanonicalPerspectives(topic.id);
     const latest=(kind:'ivy_view'|'james_view')=>views.filter(item=>item.kind===kind&&item.observedAt>=topic.changedAt)
@@ -236,24 +246,44 @@ function buildAlignmentOverview(input:{client:Database.Database;chatId:string;no
     }
     for(const item of views.filter(view=>view.kind==='shared_decision'))
       shared.push({project,text:founderText(item.statement,100),source:'群聊',at:item.observedAt});
-    for(const issue of issues.listForTopic(topic.id).filter(item=>['candidate','ready','asked'].includes(item.status)))
-      divergences.push({project,text:`Ivy：${founderText(issue.ivy.statement,60)} ↔ James：${founderText(issue.james.statement,60)}`,source:'群聊',at:issue.createdAt});
+    for(const issue of issues.listForTopic(topic.id))if(issue.status==='candidate'||issue.status==='ready'||issue.status==='asked')
+      divergences.push({project,text:`Ivy：${founderText(issue.ivy.statement,60)} ↔ James：${founderText(issue.james.statement,60)}`,source:'群聊',
+        at:issue.createdAt,target:{kind:'alignment_issue',topicId:topic.id,issueId:issue.id,expectedStatus:issue.status,expectedUpdatedAt:issue.updatedAt}});
     const pageView=input.spaceWorkMapEnabled?loadSpaceProjectPageView(input.client,topic.id,input.now,input.spaceStaleAfterMinutes??defaultSpaceStaleAfterMinutes):null;
-    if(pageView)for(const text of spaceProjectProgress(pageView).divergences)
-      divergences.push({project,text,source:'Space 页面',at:pageView.pageUpdatedAt??input.now.toISOString()});
+    if(pageView){
+      const progress=spaceProjectProgress(pageView),at=pageView.pageUpdatedAt??input.now.toISOString();
+      const entry=(item:{text:string;blockId:string}):AlignmentEntry=>({project,text:item.text,source:'Space 页面',at,
+        ...(pageView.projectKey?{target:{kind:'space_item',topicId:topic.id,projectKey:pageView.projectKey,blockId:item.blockId}}:{})});
+      divergences.push(...progress.divergences.map(entry));
+      decisions.push(...progress.decisions.map(entry));
+    }
   }
   const line=(entry:AlignmentEntry)=>`${entry.project}｜${entry.text}（${entry.source} ${founderBeijingTime(entry.at).slice(5,10)}${entry.stale?' · 较久未回应':''}）`;
-  const section=(title:string,entries:AlignmentEntry[])=>{const sorted=[...entries].sort((a,b)=>b.at.localeCompare(a.at)),shown=sorted.slice(0,shownPerSection);
-    return{title:`${title}（${entries.length}）`,items:[...shown.map(line),...(sorted.length>shown.length?[`另有 ${sorted.length-shown.length} 项，可用“查看对齐：项目名”查看`]:[])]}};
-  const counts=[{title:'真实分歧',count:divergences.length,note:'双方都有明确表态，但判断不同（群聊对齐记录，或 Space 页面写明的分歧）'},
+  const refs:FounderAlignmentItemRef[]=[];
+  const section=(title:string,entries:AlignmentEntry[],numbered?:'divergence'|'decision')=>{
+    const sorted=[...entries].sort((a,b)=>b.at.localeCompare(a.at)),shown=sorted.slice(0,shownPerSection);
+    const items=shown.map(entry=>{
+      if(!numbered||!entry.target)return line(entry);
+      const displayedNumber=refs.length+1;
+      refs.push({...entry.target,displayedNumber,section:numbered,project:entry.project,text:entry.text});
+      return`${displayedNumber}. ${line(entry)}`;
+    });
+    return{title:`${title}（${entries.length}）`,items:[...items,...(sorted.length>shown.length?[`另有 ${sorted.length-shown.length} 项，可用“查看对齐：项目名”查看`]:[])]}};
+  const resolved=new AlignmentJudgementRepository(input.client).listResolvedSince(new Date(input.now.getTime()-staleAfterMs).toISOString());
+  const resolvedSection={title:`最近已解决（${resolved.length}）`,items:resolved.slice(0,shownPerSection).map(item=>
+    `${item.projectName}｜${founderText(item.itemText,60)} → ${item.statement?founderText(item.statement,80):item.section==='decision'?'已决定':'已解决'}`+
+    `（${item.founder==='ivy'?'Ivy':'James'} 记录 ${founderBeijingTime(item.createdAt).slice(5,10)}）`)};
+  const counts=[{title:'真实分歧',count:divergences.length,note:'两人或两方对同一件事写明了不同主张，都有原文'},
+    {title:'待决定',count:decisions.length,note:'Space 页面列了方案或待拍板的事，还没人表态'},
     {title:'缺少另一方表达',count:missing.length,note:'一方说了，另一方还没回应；不算同意，也不算分歧'},
     {title:'已确认共识',count:shared.length,note:'双方都明确同意'}];
-  const sections=[section('真实分歧',divergences),section('缺少另一方表达',missing),section('已确认共识',shared)];
+  const sections=[section('真实分歧',divergences,'divergence'),section('待决定',decisions,'decision'),section('缺少另一方表达',missing),
+    section('已确认共识',shared),resolvedSection];
   const footer=dataFooter(input.client,input.chatId,{space:input.spaceWorkMapEnabled?spaceSyncedLine(input.client):null});
   const card=founderCard('待对齐总览',[
-    `总览\n${counts.map(item=>`${item.title} ${item.count} 项`).join(' · ')}\n${counts.map(item=>`${item.title}：${item.note}`).join('\n')}\n只看在推进的项目；超过 30 天未回应的标“较久未回应”。`,
+    `总览\n${counts.map(item=>`${item.title} ${item.count} 项`).join(' · ')}\n${counts.map(item=>`${item.title}：${item.note}`).join('\n')}\n只看在推进的项目；超过 30 天未回应的标“较久未回应”。${refs.length?`\n${alignmentReplyGuide}`:''}`,
     ...sections.map(item=>`${item.title}\n${item.items.length?item.items.map(text=>`- ${text}`).join('\n'):'无'}`)],divergences.length?'orange':'blue');
-  return{card,view:{kind:'alignment_overview',title:'待对齐总览',counts,sections,footer}};
+  return{card,view:{kind:'alignment_overview',title:'待对齐总览',counts,sections,footer},refs};
 }
 
 function processingFacts(client:Database.Database,chatId:string){

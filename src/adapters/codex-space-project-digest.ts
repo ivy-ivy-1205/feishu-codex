@@ -37,9 +37,12 @@ export function renderPrompt(input: SpaceProjectDigestInput, retryReason: string
     'profile.positioning：页面写明的项目定位，即这个项目主要做什么、为谁解决什么问题，一句话；没有就 null。',
     'profile.phases：只有页面明确划分了阶段时才填。页面有「阶段规划」段落时以该段为准；否则只采用页面写明的阶段（如“阶段一/Phase 1”），按页面顺序；页面没有划分阶段就输出空数组，不要自行划分。最多 8 个，不要合并或丢掉阶段。每个阶段：name 为页面的阶段名（不超过 30 字，保留编号如 Phase 6），text 为该阶段的主要任务；status：页面写明已完成为 done，页面写明正在进行、部分完成或继续完善为 in_progress（可以有多个），其余为 upcoming，不要把未全部完成的阶段标为 done；statusText 为页面对该阶段状态的原意概括（不超过 40 字）；focus：页面写明是当前重点的阶段为 true，最多一个，页面没写当前重点就全部为 false。',
     'profile.completed：页面明确记载已经完成的事项，不限本周，最多 5 条，重要的在前。profile.inProgress：页面写明正在做的工作，最多 3 条。profile.pending：已计划但还没开始的事项，最多 3 条。同一件事只放进其中一栏。',
-    'profile.problems：页面写明的卡点、风险或待澄清的问题，最多 3 条。profile.divergences：页面明确记载的不同判断或分歧，最多 2 条；只记录页面写明存在不同看法的事项，不得从沉默或单方表述推断分歧。profile.nextPlan：页面写明的下一步计划，最多 3 条。',
+    'profile.problems：页面写明的卡点、风险或待澄清的问题，最多 3 条；等第三方确认、文件或版本不一致这类事项放这里，不算分歧。',
+    'profile.divergences（分歧）：两个人或两方对同一件事写明了不同主张，而且双方的主张都能在页面原文找到。页面写了是谁的主张（如“James：…”“Ivy（10-28）：…”）时，text 写明是谁。只有一方表态、沉默或推测都不算分歧。页面记载几条就列几条，不要凑数，也不要只挑几条。',
+    'profile.decisions（待决定）：页面列出了两个或以上可选方案、或写明有一件事尚待拍板，但还没有人表态支持哪一个。页面记载几条就列几条，不要凑数。已经写明决定结果的不算待决定。',
+    '同一件事只放进 problems、divergences、decisions 其中一栏。profile.nextPlan：页面写明的下一步计划，最多 3 条。',
     '每条 text 是不超过 60 字的中文概括；blockId 必须是输入值；excerpt 必须从该 block 的 markdown 中连续逐字复制，不超过 120 字。',
-    '不得把内容归属到具体某个人；这是“项目页记载”。宁缺毋滥：没有可靠依据的字段留空。',
+    '除分歧条目可写出页面原文署名的人或方之外，不得把内容归属到具体某个人；这是“项目页记载”。宁缺毋滥：没有可靠依据的字段留空。',
     ...(retryReason ? [`上一次输出未通过本地验证（${retryReason}）。只修正对应问题，excerpt 必须逐字复制。`] : []),
     '', 'Supplied page JSON:', JSON.stringify(input)
   ].join('\n');

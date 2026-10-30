@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { AlignmentIssueRepository } from '../repositories/alignment-issue-repository.js';
+import { AlignmentJudgementRepository } from '../repositories/alignment-judgement-repository.js';
 import { ContextSourceRepository } from '../repositories/context-source-repository.js';
 import { FounderTopicProjectBindingRepository } from '../repositories/founder-topic-project-binding-repository.js';
 import { SpaceProjectDigestRepository, type SpaceProjectDigestRecord } from '../repositories/space-project-digest-repository.js';
@@ -10,6 +11,8 @@ import { isResolvedSpaceComment } from './space-batch-processor.js';
 import { spaceWindowStarts } from './space-page-diff.js';
 
 export interface SpaceProjectPageView {
+  /** The registered project the page belongs to; absent only in hand-built views. */
+  projectKey?: string;
   freshness: SpaceFreshnessSummary;
   /** Newest stored page snapshot time (the page's own update time), not the sync time. */
   pageUpdatedAt: string | null;
@@ -20,6 +23,8 @@ export interface SpaceProjectPageView {
   syncGaps?: string[];
   /** Short names of the same gaps for one-line footers ("评论未同步"). */
   syncGapsShort?: string[];
+  /** Paragraphs a founder settled from 查看分歧 (已解决 / 不是分歧); their 分歧 and 待决定 items are no longer listed. */
+  judgedBlockIds?: string[];
 }
 
 const gapLabels: Record<string, string> = {
@@ -79,11 +84,12 @@ export function loadSpaceProjectPageView(client: Database.Database, topicId: str
     digest: null, changeBasis: null, failureCode: 'pending_latest_version' } : null;
   // "今日/本周" were computed when the digest was generated; they expire with the founder calendar, not with the page.
   const windows = spaceWindowStarts(now);
-  return { freshness, pageUpdatedAt: page?.occurredAt ?? null,
+  return { projectKey: canonical.projectKey, freshness, pageUpdatedAt: page?.occurredAt ?? null,
     digest: digest ? { status: digest.status, changeBasis: digest.changeBasis, digest: digest.digest, failureCode: digest.failureCode,
       generatedAt: digest.generatedAt, generatedToday: Date.parse(digest.generatedAt) >= Date.parse(windows.todayStart),
       generatedThisWeek: Date.parse(digest.generatedAt) >= Date.parse(windows.weekStart) } : null,
-    comments, syncGaps, syncGapsShort };
+    comments, syncGaps, syncGapsShort,
+    judgedBlockIds: [...new AlignmentJudgementRepository(client).judgedSpaceBlockIds(canonical.projectKey)] };
 }
 
 /** One compact block per project: page-recorded status, never attributed to a person, never the page rewritten. */
@@ -91,12 +97,16 @@ export function renderSpaceProjectPageLines(view: SpaceProjectPageView): string[
   return [...spacePageStatusLines(view), ...spaceDigestLines(view), ...spaceCommentLines(view)];
 }
 
+/** A 分歧 or 待决定 line with the paragraph it came from, so a reply to 查看分歧 can settle that paragraph. */
+export interface SpaceProgressItem { text: string; blockId: string }
+
 export interface SpaceProjectProgress {
   positioning: string | null;
   phases: { name: string; tasks: string; status: 'done' | 'in_progress' | 'upcoming'; statusText: string; focus: boolean }[];
   /** Why there are no phases: no digest yet, an old digest, or the page does not divide the work into phases. */
   phasesEmpty: string;
-  completed: string[]; inProgress: string[]; pending: string[]; problems: string[]; divergences: string[]; nextPlan: string[];
+  completed: string[]; inProgress: string[]; pending: string[]; problems: string[];
+  divergences: SpaceProgressItem[]; decisions: SpaceProgressItem[]; nextPlan: string[];
   /** "Space 页面 10-21 更新（10-21 10:00 同步）" for the 资料截至 footer. */
   dataLine: string;
   unread: string[];
@@ -109,13 +119,16 @@ export interface SpaceProjectProgress {
  */
 export function spaceProjectProgress(view: SpaceProjectPageView): SpaceProjectProgress {
   const text = (value: string) => founderText(value, 120), texts = (items: readonly { text: string }[]) => items.map((item) => text(item.text));
+  const judged = new Set(view.judgedBlockIds ?? []);
+  const open = (items: readonly { text: string; blockId: string }[]) =>
+    items.filter((item) => !judged.has(item.blockId)).map((item) => ({ text: text(item.text), blockId: item.blockId }));
   const { freshness } = view, digest = view.digest;
   const synced = freshness.lastSuccessfulSyncAt ? `${founderMonthDayTime(freshness.lastSuccessfulSyncAt)} 同步` : '尚无成功同步';
   const notes: string[] = [];
   if (freshness.status === 'permission_lost') notes.push('权限缺失，页面内容停在最后一次成功同步');
   else if (freshness.status === 'stale') notes.push('页面内容可能滞后，请以最新页面为准');
   if (view.comments.open) notes.push(`页面评论未解决 ${view.comments.open} 条`);
-  const base = { phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], nextPlan: [], positioning: null,
+  const base = { phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], decisions: [], nextPlan: [], positioning: null,
     dataLine: `Space 页面 ${view.pageUpdatedAt ? `${founderMonthDay(view.pageUpdatedAt)} 更新` : '更新时间未知'}（${synced}）`,
     unread: view.syncGapsShort ?? [], notes };
   if (!digest || digest.failureCode === 'pending_latest_version') {
@@ -134,7 +147,8 @@ export function spaceProjectProgress(view: SpaceProjectPageView): SpaceProjectPr
     phases: profile.phases.map((phase) => ({ name: founderText(phase.name, 30), tasks: text(phase.text), status: phase.status,
       statusText: founderText(phase.statusText, 60), focus: phase.focus })),
     phasesEmpty: '无（Space 页面没有划分阶段）', completed: texts(profile.completed), inProgress: texts(profile.inProgress),
-    pending: texts(profile.pending), problems: texts(profile.problems), divergences: texts(profile.divergences), nextPlan: texts(profile.nextPlan) };
+    pending: texts(profile.pending), problems: texts(profile.problems), divergences: open(profile.divergences),
+    decisions: open(profile.decisions ?? []), nextPlan: texts(profile.nextPlan) };
 }
 
 function spacePageStatusLines(view: SpaceProjectPageView): string[] {

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import type { FounderAlignmentItemRef, FounderAlignmentOverviewMessage } from '../services/alignment-judgement-service.js';
 import type { MinuteContext } from '../ports/feishu.js';
 import type { MeetingSummaryDraft } from '../ports/summarizer.js';
 import type { FounderWorkMapCard } from '../services/founder-work-map-renderer.js';
@@ -102,9 +103,12 @@ export class OutboxRepository {
     } catch { return null; }
   }
 
-  findDeliveredFounderMessage(chatId: string, messageId: string): FounderWorkMapMessage | AlignmentQuestionMessage | null {
+  findDeliveredFounderMessage(chatId: string, messageId: string):
+    FounderWorkMapMessage | AlignmentQuestionMessage | FounderAlignmentOverviewMessage | null {
     const row = this.client.prepare(`SELECT payload FROM outbox WHERE destination = ? AND delivered_message_id = ?
       AND status = 'delivered' AND delivered_at IS NOT NULL`).get(chatId, messageId) as { payload: string } | undefined;
+    const overview = row ? parseAlignmentOverviewMessage(row.payload) : null;
+    if (overview) return overview.targetChatId === chatId ? overview : null;
     const message = row ? parseOutboxMessage(row.payload) : null;
     if (message?.targetChatId !== chatId || (message.kind !== 'founder_work_map' && message.kind !== 'alignment_question')) return null;
     if (message.kind === 'alignment_question') return message;
@@ -395,6 +399,22 @@ function parseOutboxMessage(payload: string): OutboxMessage | null {
     return value as unknown as IvyContextReviewMessage;
   }
   return null;
+}
+
+/** A delivered 查看分歧 card that carries its numbered items (2026-10-30); older cards without them take no replies. */
+function parseAlignmentOverviewMessage(payload: string): FounderAlignmentOverviewMessage | null {
+  let value: unknown;
+  try { value = JSON.parse(payload); } catch { return null; }
+  if (!isRecord(value) || value.kind !== 'founder_manual_query' || typeof value.targetChatId !== 'string' ||
+    !Array.isArray(value.alignmentRefs) || value.alignmentRefs.length === 0) return null;
+  const text = (ref: Record<string, unknown>, key: string) => typeof ref[key] === 'string' && (ref[key] as string).trim().length > 0;
+  const refs = value.alignmentRefs;
+  const valid = refs.every((ref) => isRecord(ref) && Number.isSafeInteger(ref.displayedNumber) && Number(ref.displayedNumber) > 0 &&
+    ['divergence', 'decision'].includes(String(ref.section)) && text(ref, 'topicId') && text(ref, 'project') && text(ref, 'text') &&
+    ((ref.kind === 'alignment_issue' && text(ref, 'issueId') && ['candidate', 'ready', 'asked'].includes(String(ref.expectedStatus)) &&
+      text(ref, 'expectedUpdatedAt')) || (ref.kind === 'space_item' && text(ref, 'projectKey') && text(ref, 'blockId'))));
+  if (!valid || new Set(refs.map((ref) => (ref as { displayedNumber: number }).displayedNumber)).size !== refs.length) return null;
+  return { kind: 'alignment_overview', targetChatId: value.targetChatId, refs: refs as FounderAlignmentItemRef[] };
 }
 
 function alignmentQuestionKey(input: { issueId: string; evidenceSetHash: string }): string {

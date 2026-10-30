@@ -3,7 +3,7 @@ import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
 import { SpaceSyncRepository } from '../src/repositories/space-sync-repository.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
-import { runSpaceAutoSubmitCli } from '../src/cli/space-auto-submit.js';
+import { runSpaceAutoSubmitCli, spaceAutoSubmitErrorLine } from '../src/cli/space-auto-submit.js';
 
 const page = '更新于 2026 年 10 月 25 日\n\n# 正在做\n\nPhase 6 资料接入。\n';
 
@@ -65,5 +65,15 @@ describe('space-auto-submit CLI', () => {
     files.set('/tmp/page.md', page);
     expect(() => run([...args.slice(0, 5), '--updated-at', '10-25'])).toThrow('SPACE_AUTO_SUBMIT_ARGUMENTS_INVALID');
     expect(() => run(args.filter((arg) => !arg.startsWith('--title')))).toThrow('SPACE_AUTO_SUBMIT_ARGUMENTS_INVALID');
+  });
+  it('names the kind of failure without page text, so a rejected submit can be diagnosed from the log (2026-10-30)', () => {
+    expect(spaceAutoSubmitErrorLine(new Error('SPACE_AUTO_SUBMIT_EMPTY'))).toBe('SPACE_AUTO_SUBMIT_EMPTY. No page content logged.');
+    expect(spaceAutoSubmitErrorLine(Object.assign(new Error('database is locked'), { name: 'SqliteError', code: 'SQLITE_BUSY' })))
+      .toBe('SPACE_AUTO_SUBMIT_FAILED (SqliteError SQLITE_BUSY). No page content logged.');
+    expect(spaceAutoSubmitErrorLine(Object.assign(new Error('space_sync_envelope_conflict'), { name: 'SpaceSyncIngestionError',
+      code: 'space_sync_envelope_conflict' }))).toBe('SPACE_AUTO_SUBMIT_FAILED (SpaceSyncIngestionError space_sync_envelope_conflict). No page content logged.');
+    // A message could quote the page, so only the error's name and a code-shaped code are ever printed.
+    expect(spaceAutoSubmitErrorLine(new TypeError('页面正文 secret'))).toBe('SPACE_AUTO_SUBMIT_FAILED (TypeError). No page content logged.');
+    expect(spaceAutoSubmitErrorLine(Object.assign(new Error('x'), { code: 'has spaces 页面' }))).toBe('SPACE_AUTO_SUBMIT_FAILED (Error). No page content logged.');
   });
 });

@@ -35,7 +35,7 @@ function weekInput(): SpaceProjectDigestInput {
 }
 
 const item = (blockId: string, excerpt: string) => ({ text: excerpt.slice(0, 20), blockId, excerpt });
-const noProfile = { positioning: null, phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], nextPlan: [] };
+const noProfile = { positioning: null, phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], decisions: [], nextPlan: [] };
 
 describe('buildSpaceDigestInput', () => {
   it('marks this-week and today changed blocks from stored page versions', () => {
@@ -82,7 +82,7 @@ describe('validateSpaceDigest', () => {
       phases: [{ ...item('b_old', '项目目标'), name: '第一阶段', status: 'done', statusText: '已完成', focus: false },
         { ...item('b_week', '27 Cecil Street 页面已上线'), name: '样板上线', status: 'in_progress', statusText: '进行中，是当前重点', focus: true }],
       completed: [item('b_week', '27 Cecil Street 页面已上线')], inProgress: [item('b_today', '补齐了户型图')], pending: [],
-      problems: [item('b_week', '等待 Amy 反馈')], divergences: [], nextPlan: [item('b_week', '等待 Amy 反馈')] };
+      problems: [item('b_week', '等待 Amy 反馈')], divergences: [], decisions: [], nextPlan: [item('b_week', '等待 Amy 反馈')] };
     const digest = { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile };
     expect(validateSpaceDigest(digest, weekInput())).toEqual(digest);
   });
@@ -96,6 +96,17 @@ describe('validateSpaceDigest', () => {
   ])('rejects a profile with %s', (reason, profile) => {
     const digest = { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], ...(profile ? { profile } : {}) };
     expect(() => validateSpaceDigest(digest, weekInput())).toThrow(expect.objectContaining({ reason }));
+  });
+
+  it('lists every grounded divergence and open decision the page records, with no small cap (Ivy 2026-10-30)', () => {
+    const divergences = Array.from({ length: 6 }, () => item('b_week', '等待 Amy 反馈'));
+    const decisions = Array.from({ length: 7 }, () => item('b_old', '上线买家空间'));
+    const digest = { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile: { ...noProfile, divergences, decisions } };
+    expect(validateSpaceDigest(digest, weekInput())).toEqual(digest);
+    expect(() => validateSpaceDigest({ ...digest, profile: { ...noProfile, decisions: [item('b_missing', '上线')] } }, weekInput()))
+      .toThrow(expect.objectContaining({ reason: 'unknown_block' }));
+    expect(() => validateSpaceDigest({ ...digest, profile: { ...noProfile, decisions: Array.from({ length: 21 }, () => item('b_old', '上线买家空间')) } },
+      weekInput())).toThrow(expect.objectContaining({ reason: 'schema_invalid' }));
   });
 
   it('keeps seven phases that run in parallel: several in progress, one current focus, none promoted to done', () => {
@@ -174,6 +185,24 @@ describe('SpaceProjectDigestRepository', () => {
     expect(h.digests.getForPageSource(page.id)?.digest).toEqual(profiled);
     h.digests.saveReady({ ...base, changeBasis: 'first_snapshot', digest: { ...profiled, profile: noProfile } });
     expect(h.digests.getForPageSource(page.id)?.digest).toEqual(profiled);
+  });
+
+  it('lets a digest with 待决定 replace one stored before decisions existed, once', () => {
+    const h = setup();
+    const page = savePage(h.sources, '2026-10-21T01:00:00.000Z', [block('b1', 'a', '目标')]);
+    const base = { projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: page.id, pageSourceVersion: page.sourceVersion,
+      pageUpdatedAt: page.occurredAt, generatedAt: at };
+    const { decisions: _decisions, ...oldProfile } = noProfile;
+    const old = { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile: { ...oldProfile, divergences: [{ text: '目标', blockId: 'b1', excerpt: '目标' }] } };
+    h.db.client.prepare(`INSERT INTO space_project_digests (id, project_key, page_id, page_source_id, page_source_version, page_updated_at,
+      status, change_basis, digest_json, failure_code, generated_at) VALUES ('d1', 'smart-listing', 'page_1', ?, ?, ?, 'ready', 'first_snapshot', ?, NULL, ?)`)
+      .run(page.id, page.sourceVersion, page.occurredAt, JSON.stringify(old), at.toISOString());
+    expect(h.digests.getForPageSource(page.id)?.digest).toEqual(old);
+    const current = { ...old, profile: { ...noProfile, decisions: [{ text: '目标', blockId: 'b1', excerpt: '目标' }] } };
+    h.digests.saveReady({ ...base, changeBasis: 'first_snapshot', digest: current });
+    expect(h.digests.getForPageSource(page.id)?.digest).toEqual(current);
+    h.digests.saveReady({ ...base, changeBasis: 'first_snapshot', digest: { ...current, profile: noProfile } });
+    expect(h.digests.getForPageSource(page.id)?.digest).toEqual(current);
   });
 
   it('returns the newest page version first', () => {

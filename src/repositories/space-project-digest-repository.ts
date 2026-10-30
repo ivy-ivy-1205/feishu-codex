@@ -22,7 +22,7 @@ interface SaveBase { projectKey: string; pageId: string; pageSourceId: string; p
 
 /**
  * One digest per stored page version; a ready digest is never replaced by a later failure. The one exception to
- * "ready stays": a digest stored before profiles existed is replaced once by a profiled one.
+ * "ready stays": a digest stored before profiles (or their 待决定 list) existed is replaced once by a current one.
  */
 export class SpaceProjectDigestRepository {
   constructor(readonly client: Database.Database) {}
@@ -36,6 +36,7 @@ export class SpaceProjectDigestRepository {
       ON CONFLICT(page_source_id) DO UPDATE SET status='ready', change_basis=excluded.change_basis,
         digest_json=excluded.digest_json, failure_code=NULL, generated_at=excluded.generated_at
       WHERE space_project_digests.status <> 'ready' OR json_extract(space_project_digests.digest_json, '$.profile') IS NULL
+        OR json_extract(space_project_digests.digest_json, '$.profile.decisions') IS NULL
     `).run(digestId(input.pageSourceId), input.projectKey, input.pageId, input.pageSourceId, input.pageSourceVersion,
       input.pageUpdatedAt, input.changeBasis, JSON.stringify(digest), input.generatedAt.toISOString());
   }
