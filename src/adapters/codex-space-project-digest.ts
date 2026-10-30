@@ -1,6 +1,6 @@
 import type { CodexJsonExecutor } from '../ports/json-executor.js';
 import {
-  SpaceDigestValidationError, spaceProjectDigestJsonSchema, validateSpaceDigest,
+  pruneUngroundedSpaceDigest, SpaceDigestValidationError, spaceProjectDigestJsonSchema, validateSpaceDigest,
   type SpaceProjectDigest, type SpaceProjectDigestAnalyzer, type SpaceProjectDigestInput
 } from '../services/space-project-digest.js';
 
@@ -9,9 +9,9 @@ export class CodexSpaceProjectDigestAnalyzer implements SpaceProjectDigestAnalyz
   constructor(private readonly options: { codex: CodexJsonExecutor }) {}
 
   async digest(input: SpaceProjectDigestInput): Promise<SpaceProjectDigest> {
-    let failure: SpaceDigestValidationError | null = null;
+    let failure: SpaceDigestValidationError | null = null, raw: unknown = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const raw = await this.options.codex.executeJson({ prompt: renderPrompt(input, failure?.reason ?? null),
+      raw = await this.options.codex.executeJson({ prompt: renderPrompt(input, failure?.reason ?? null),
         outputSchema: spaceProjectDigestJsonSchema });
       try { return validateSpaceDigest(raw, input); }
       catch (error) {
@@ -19,7 +19,8 @@ export class CodexSpaceProjectDigestAnalyzer implements SpaceProjectDigestAnalyz
         failure = error;
       }
     }
-    throw failure!;
+    // Preview 2026-10-30: a single miscopied excerpt twice in a row cost a whole page its digest; keep the grounded rest.
+    return pruneUngroundedSpaceDigest(raw, input);
   }
 }
 
