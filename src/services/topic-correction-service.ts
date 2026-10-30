@@ -36,7 +36,7 @@ export type FounderFeedbackDecision =
   | { kind: 'reject'; reason: 'invalid_input' | 'wrong_chat' | 'unknown_founder' | 'unrelated_message' | 'message_conflict' }
   | { kind: 'clarify'; reason: 'missing_reply_context' | 'ambiguous_feedback' | 'stale_context'; text: string }
   | { kind: 'drafted' | 'duplicate'; correctionKind: 'batch_correction'; status: 'pending_confirmation'; draftId: string; text: string }
-  | { kind: 'corrected' | 'duplicate'; correctionKind: TopicCorrection['kind'] | 'batch_correction';
+  | { kind: 'corrected' | 'duplicate'; correctionKind: TopicCorrection['kind'] | 'batch_correction' | 'alignment_judgement';
       status: 'applied' | 'awaiting_other_founder' | 'resolved' | 'historical_only' | 'support_withdrawn'; text: string };
 export interface FounderFeedbackDependencies { client: Database.Database; approvedChatIds: readonly string[]; now(): Date }
 
@@ -170,7 +170,7 @@ export function applyTopicCorrection(rawInput: FounderFeedbackInput, rawCorrecti
 export function staleFeedback(): FounderFeedbackDecision {
   return { kind: 'clarify', reason: 'stale_context', text: '这张卡对应的内容已更新，请回复最新卡片再确认。' };
 }
-function feedbackHash(input: FounderFeedbackInput): string { return sha256(canonicalJson(input)); }
+export function feedbackHash(input: FounderFeedbackInput): string { return sha256(canonicalJson(input)); }
 
 function latestPerspectiveSourceTime(client: Database.Database, perspective: CurrentPerspective | null): number | null {
   if (!perspective || perspective.evidenceIds.length === 0) return null;

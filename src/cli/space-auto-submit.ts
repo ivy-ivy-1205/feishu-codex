@@ -63,10 +63,24 @@ export function runSpaceAutoSubmitCli(args: readonly string[], dependencies: Spa
   }));
 }
 
+/**
+ * The stderr line `space-submit.sh` logs and the Mac script reports. A message could quote the page, so beyond the
+ * known codes only the error's name and a code-shaped `code` (SQLITE_BUSY, space_sync_envelope_conflict) are printed.
+ */
+export function spaceAutoSubmitErrorLine(error: unknown): string {
+  if (error instanceof Error && /^[A-Z0-9_]+$/u.test(error.message)) return `${error.message}. No page content logged.`;
+  const name = error instanceof Error && /^[A-Za-z]+$/u.test(error.name) ? error.name : 'UnknownError';
+  const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' &&
+    /^[A-Za-z0-9_]{1,64}$/u.test(error.code) ? ` ${error.code}` : '';
+  return `SPACE_AUTO_SUBMIT_FAILED (${name}${code}). No page content logged.`;
+}
+
 function main(): void {
   const databasePath = process.env.DATABASE_URL?.trim();
   if (!databasePath || /^postgres(?:ql)?:/u.test(databasePath)) throw new Error('SQLite database path required');
   const database = createSqliteDatabase(databasePath);
+  // The Bridge keeps writing while a submit runs; wait for its lock instead of failing after the 5 s default (2026-10-30).
+  database.client.pragma('busy_timeout = 30000');
   try {
     runSpaceAutoSubmitCli(process.argv.slice(2), { client: database.client, readFile: (path) => readFileSync(path, 'utf8'),
       now: () => new Date(), write: (line) => process.stdout.write(`${line}\n`) });
@@ -79,8 +93,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     main();
   } catch (error) {
-    const code = error instanceof Error && /^[A-Z0-9_]+$/u.test(error.message) ? error.message : 'SPACE_AUTO_SUBMIT_FAILED';
-    process.stderr.write(`${code}. No page content logged.\n`);
+    process.stderr.write(`${spaceAutoSubmitErrorLine(error)}\n`);
     process.exitCode = 1;
   }
 }

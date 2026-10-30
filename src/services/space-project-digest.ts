@@ -19,19 +19,24 @@ const phaseSchema = digestItemSchema.extend({ name: text(30), status: z.enum(['d
 
 /**
  * The page-level picture behind 查看项目进展: what the project is, its phases as the page divides them, and the page's
- * own completed / in-progress / pending / problems / divergences / next plan. Not time-windowed, so it never claims
- * "this week"; every item is grounded in a verbatim excerpt like the rest of the digest.
+ * own completed / in-progress / pending / problems / divergences / open decisions / next plan. Not time-windowed, so it
+ * never claims "this week"; every item is grounded in a verbatim excerpt like the rest of the digest.
+ * Ivy 2026-10-30: 分歧 and 待决定 list everything the page records; 20 is only a guard against runaway output.
  */
-export const spaceProjectProfileSchema = z.object({
+const spaceProjectProfileFields = {
   positioning: digestItemSchema.nullable(),
   phases: z.array(phaseSchema).max(8),
   completed: z.array(digestItemSchema).max(5),
   inProgress: z.array(digestItemSchema).max(3),
   pending: z.array(digestItemSchema).max(3),
   problems: z.array(digestItemSchema).max(3),
-  divergences: z.array(digestItemSchema).max(2),
+  divergences: z.array(digestItemSchema).max(20),
+  decisions: z.array(digestItemSchema).max(20),
   nextPlan: z.array(digestItemSchema).max(3)
-}).strict();
+};
+export const spaceProjectProfileSchema = z.object(spaceProjectProfileFields).strict();
+/** Profiles stored before 待决定 existed (2026-10-30) are still read; the worker regenerates them once. */
+const storedSpaceProjectProfileSchema = z.object({ ...spaceProjectProfileFields, decisions: spaceProjectProfileFields.decisions.optional() }).strict();
 
 const digestFields = {
   currentFocus: digestItemSchema.nullable(),
@@ -42,7 +47,7 @@ const digestFields = {
 /** Hard caps keep the work map a glance, not a page rewrite: 1 focus, ≤3 week, ≤2 today, ≤2 next/blockers. Every new digest carries a profile. */
 export const spaceProjectDigestSchema = z.object({ ...digestFields, profile: spaceProjectProfileSchema }).strict();
 /** Digests stored before profiles existed are still read; the worker regenerates them once. */
-export const storedSpaceProjectDigestSchema = z.object({ ...digestFields, profile: spaceProjectProfileSchema.optional() }).strict();
+export const storedSpaceProjectDigestSchema = z.object({ ...digestFields, profile: storedSpaceProjectProfileSchema.optional() }).strict();
 export const spaceProjectDigestJsonSchema = z.toJSONSchema(spaceProjectDigestSchema);
 
 export type SpaceProjectDigest = z.infer<typeof spaceProjectDigestSchema>;

@@ -47,7 +47,7 @@ const digest = {
   weekProgress: [{ text: '27 Cecil Street 页面上线', blockId: 'b1', excerpt: '页面' }, { text: '补齐户型图', blockId: 'b1', excerpt: '页面' }],
   todayProgress: [{ text: '补齐周边配套', blockId: 'b1', excerpt: '页面' }],
   nextSteps: [{ kind: 'blocker' as const, text: '第二套 listing 等 Amy 确认', blockId: 'b1', excerpt: '页面' }],
-  profile: { positioning: null, phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], nextPlan: [] }
+  profile: { positioning: null, phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], decisions: [], nextPlan: [] }
 };
 
 describe('Space project-page block', () => {
@@ -174,7 +174,7 @@ describe('Space project-page block', () => {
           { ...page('真实客户试用'), name: '客户试用', status: 'in_progress' as const, statusText: '可并行准备', focus: false },
           { ...page('复制到第二套房源'), name: '复制推广', status: 'upcoming' as const, statusText: '未开始', focus: false }],
         completed: [page('27 Cecil Street 页面上线')], inProgress: [page('Task 10 真实验收')], pending: [page('第二套房源选址')],
-        problems: [page('家庭数据读取后的最终回复失败')], divergences: [], nextPlan: [page('完成生产切换和回滚演练')] } } });
+        problems: [page('家庭数据读取后的最终回复失败')], divergences: [], decisions: [], nextPlan: [page('完成生产切换和回滚演练')] } } });
     const sources = new ContextSourceRepository(h.db.client);
     const captured = captureGroupMessageSource({ chatId, messageId: 'om_done', threadId: null, rootId: null, author: { openId: 'ou_ivy', displayName: null },
       senderType: 'user', messageType: 'text', text: '照片位置笔记已上线', occurredAt: at.toISOString() }, at);
@@ -186,7 +186,7 @@ describe('Space project-page block', () => {
     const message = buildFounderManualQueryMessages({ client: h.db.client, query: { kind: 'project_progress', topicName: 'Smart Listing' },
       queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!;
     const texts = (message.card.elements as { tag: string; text?: { content?: string } }[]).filter((e) => e.text).map((e) => e.text!.content!);
-    expect(texts.slice(0, 8)).toEqual([
+    expect(texts.slice(0, 9)).toEqual([
       '项目定位\n为买家提供可复用的房源空间\n当前状态：正在推进 · 当前重点：样板上线',
       ['阶段规划（共 4 个阶段，当前重点：样板上线）', '✓ 已完成　◐ 进行中　○ 未开始　▶ 当前重点',
         '✓ 能力底座：Amy V2 Task 1–9｜已完成并验收', '▶ 样板上线：27 Cecil Street 样板上线与验收｜进行中',
@@ -197,8 +197,9 @@ describe('Space project-page block', () => {
       '待推进\n- 第二套房源选址',
       '卡点与问题\n- 家庭数据读取后的最终回复失败',
       '分歧\n无',
+      '待决定\n无',
       '下一步计划\n- 完成生产切换和回滚演练']);
-    expect(texts[8]).toBe(['资料截至：群聊 尚无已分析消息 · Space 页面 10-21 更新（10-21 10:00 同步）',
+    expect(texts[9]).toBe(['资料截至：群聊 尚无已分析消息 · Space 页面 10-21 更新（10-21 10:00 同步）',
       '未标注来源的条目来自 Space 页面。明细发“查看处理状态”。'].join('\n'));
     // No repeated title, no "当前方向", no per-section boilerplate and no long processing-status block.
     const body = JSON.stringify(message.card);
@@ -226,7 +227,7 @@ describe('Space project-page block', () => {
       queryMessageId: 'om_progress', chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled: true })[0]!;
     const texts = (message.card.elements as { text?: { content?: string } }[]).flatMap((e) => e.text?.content ? [e.text.content] : []);
     // Ivy 2026-10-24: B-line content follows a fixed workflow and schedule, so it has no phase plan to show.
-    expect(texts.map((text) => text.split('\n')[0]).slice(0, 7)).toEqual(['项目定位', '已完成', '正在做', '待推进', '卡点与问题', '分歧', '下一步计划']);
+    expect(texts.map((text) => text.split('\n')[0]).slice(0, 8)).toEqual(['项目定位', '已完成', '正在做', '待推进', '卡点与问题', '分歧', '待决定', '下一步计划']);
     expect(texts[0]).toBe('项目定位\n用真实经历讲清个人能力如何变成团队成果\n当前状态：正在推进');
     expect(JSON.stringify(message.card)).not.toContain('阶段规划');
     expect(message.kind === 'founder_manual_query' && message.boardView).toMatchObject({ kind: 'project_progress', phases: [], phasesEmpty: null });
@@ -242,8 +243,8 @@ describe('Space project-page block', () => {
       queryMessageId: `om_overview_${spaceWorkMapEnabled}`, chatId, approvedChatIds: [chatId], now: at, spaceWorkMapEnabled })[0]!.card.elements as
       { text?: { content?: string } }[]).flatMap((element) => element.text?.content ? [element.text.content] : []);
     const shown = overview(true);
-    expect(shown[0]!.split('\n')[1]).toBe('真实分歧 1 项 · 缺少另一方表达 0 项 · 已确认共识 0 项');
-    expect(shown[1]).toBe('真实分歧（1）\n- Smart Listing｜第二套房先做楼花还是现房仍有不同判断（Space 页面 10-21）');
+    expect(shown[0]!.split('\n')[1]).toBe('真实分歧 1 项 · 待决定 0 项 · 缺少另一方表达 0 项 · 已确认共识 0 项');
+    expect(shown[1]).toBe('真实分歧（1）\n- 1. Smart Listing｜第二套房先做楼花还是现房仍有不同判断（Space 页面 10-21）');
     expect(shown.at(-1)).toContain('Space 页面最后同步 10-21 10:00');
     // Without the Space display flag the page stays out of every founder view, this one included.
     expect(overview(false)[1]).toBe('真实分歧（0）\n无');

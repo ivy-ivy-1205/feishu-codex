@@ -44,6 +44,28 @@ const migrationSql = `
     UNIQUE(chat_id, source_message_id)
   );
 
+  CREATE TABLE IF NOT EXISTS founder_alignment_judgements (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    item_kind TEXT NOT NULL CONSTRAINT founder_alignment_judgements_kind_allowed
+      CHECK(item_kind IN ('alignment_issue','space_item')),
+    item_key TEXT NOT NULL,
+    topic_id TEXT NOT NULL,
+    project_name TEXT NOT NULL,
+    item_text TEXT NOT NULL,
+    section TEXT NOT NULL CONSTRAINT founder_alignment_judgements_section_allowed
+      CHECK(section IN ('divergence','decision')),
+    verdict TEXT NOT NULL CONSTRAINT founder_alignment_judgements_verdict_allowed
+      CHECK(verdict IN ('resolved','not_divergence')),
+    statement TEXT,
+    founder TEXT NOT NULL CONSTRAINT founder_alignment_judgements_founder_allowed CHECK(founder IN ('ivy','james')),
+    evidence_id TEXT NOT NULL REFERENCES context_evidence(id),
+    source_message_id TEXT NOT NULL,
+    binding_message_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(item_kind, item_key)
+  );
+
   CREATE TABLE IF NOT EXISTS founder_work_map_preferences (
     chat_id TEXT PRIMARY KEY,
     hide_orphan_active INTEGER NOT NULL

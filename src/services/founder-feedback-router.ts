@@ -6,6 +6,7 @@ import type { TopicStage } from '../domain/topic.js';
 import { confirmFounderBatchCorrection, draftFounderBatchCorrection } from './founder-batch-correction.js';
 import { founderCommandText } from './founder-command-text.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
+import { alignmentReplyGuide, applyAlignmentJudgements, parseAlignmentJudgements } from './alignment-judgement-service.js';
 
 export type { FounderFeedbackDecision, FounderFeedbackDependencies } from './topic-correction-service.js';
 
@@ -27,6 +28,11 @@ export function routeFounderFeedback(raw: unknown, dependencies: FounderFeedback
   if (!input.replyTo) return { kind: 'clarify', reason: 'missing_reply_context', text: '请在对应工作地图或对齐问题卡片下回复，方便确认你指的是哪件事。' };
   const binding = outbox.findDeliveredFounderMessage(input.chatId, input.replyTo);
   if (!binding) return { kind: 'reject', reason: 'unrelated_message' };
+  if (binding.kind === 'alignment_overview') {
+    const commands = parseAlignmentJudgements(text);
+    return commands ? applyAlignmentJudgements(input, binding, commands, dependencies)
+      : { kind: 'clarify', reason: 'ambiguous_feedback', text: `没看懂要怎么处理。${alignmentReplyGuide}` };
+  }
   let correction: TopicCorrection | null = null;
   if (binding.kind === 'founder_work_map') {
     const batch=draftFounderBatchCorrection(input,binding,dependencies);if(batch)return batch;

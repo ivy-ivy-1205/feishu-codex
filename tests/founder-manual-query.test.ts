@@ -58,12 +58,12 @@ describe('founder manual queries',()=>{
     const message=buildFounderManualQueryMessages({client:db.client,query:{kind:'project_progress',topicName:'Smart Listing'},
       queryMessageId:'om_progress',chatId,approvedChatIds:[chatId],now:at})[0]!;
     const texts=(message.card.elements as {text?:{content?:string}}[]).flatMap(e=>e.text?.content?[e.text.content]:[]);
-    expect(texts.map(text=>text.split('\n')[0])).toEqual(['项目定位','阶段规划','已完成','正在做','待推进','卡点与问题','分歧','下一步计划',
+    expect(texts.map(text=>text.split('\n')[0])).toEqual(['项目定位','阶段规划','已完成','正在做','待推进','卡点与问题','分歧','待决定','下一步计划',
       '资料截至：群聊 尚无已分析消息']);
     // Without a Space page every item is from the group chat, so nothing needs a source mark.
     expect(texts[0]).toBe('项目定位\n验证房源服务\n当前状态：正在推进');
-    expect(texts.slice(1,8).every(text=>text.endsWith('\n无'))).toBe(true);
-    expect(texts[8]).toBe('资料截至：群聊 尚无已分析消息\n明细发“查看处理状态”。');
+    expect(texts.slice(1,9).every(text=>text.endsWith('\n无'))).toBe(true);
+    expect(texts[9]).toBe('资料截至：群聊 尚无已分析消息\n明细发“查看处理状态”。');
     db.close();
   });
 
@@ -369,17 +369,17 @@ describe('founder manual queries',()=>{
     const message=buildFounderManualQueryMessages({client:db.client,query:{kind:'open_alignment'},queryMessageId:'om_overview',
       chatId,approvedChatIds:[chatId],now:at})[0]!;
     const texts=(message.card.elements as {text?:{content?:string}}[]).flatMap(e=>e.text?.content?[e.text.content]:[]);
-    expect(texts.map(text=>text.split('\n')[0])).toEqual(['总览','真实分歧（1）','缺少另一方表达（2）','已确认共识（1）','资料截至：群聊 尚无已分析消息']);
-    expect(texts[0]!.split('\n')[1]).toBe('真实分歧 1 项 · 缺少另一方表达 2 项 · 已确认共识 1 项');
-    expect(texts[1]).toBe('真实分歧（1）\n- Smart Listing｜Ivy：第二套用楼花 ↔ James：第二套用现房（群聊 09-21）');
+    expect(texts.map(text=>text.split('\n')[0])).toEqual(['总览','真实分歧（1）','待决定（0）','缺少另一方表达（2）','已确认共识（1）','最近已解决（0）','资料截至：群聊 尚无已分析消息']);
+    expect(texts[0]!.split('\n')[1]).toBe('真实分歧 1 项 · 待决定 0 项 · 缺少另一方表达 2 项 · 已确认共识 1 项');
+    expect(texts[1]).toBe('真实分歧（1）\n- 1. Smart Listing｜Ivy：第二套用楼花 ↔ James：第二套用现房（群聊 09-21）');
     // Newest first; over 30 days without an answer is called out.
-    expect(texts[2]).toBe(['缺少另一方表达（2）','- Smart Listing｜Ivy 说：先验证房源页面；James 尚未回应（群聊 09-10）',
+    expect(texts[3]).toBe(['缺少另一方表达（2）','- Smart Listing｜Ivy 说：先验证房源页面；James 尚未回应（群聊 09-10）',
       '- AiJia AI Native 官网｜Ivy 说：官网先做需求入口；James 尚未回应（群聊 08-20 · 较久未回应）'].join('\n'));
-    expect(texts[3]).toBe('已确认共识（1）\n- Family First｜双方确认先做外立面（群聊 09-18）');
+    expect(texts[4]).toBe('已确认共识（1）\n- Family First｜双方确认先做外立面（群聊 09-18）');
     const body=JSON.stringify(message.card);
     for(const gone of ['自媒体生产线','EP00','AI 选房经验与知识库','处理状态（北京时间）','最后防漏复核'])expect(body).not.toContain(gone);
     expect(message.kind==='founder_manual_query'&&message.boardView).toMatchObject({kind:'alignment_overview',title:'待对齐总览',
-      counts:[{title:'真实分歧',count:1},{title:'缺少另一方表达',count:2},{title:'已确认共识',count:1}]});
+      counts:[{title:'真实分歧',count:1},{title:'待决定',count:0},{title:'缺少另一方表达',count:2},{title:'已确认共识',count:1}]});
     db.close();
   });
 

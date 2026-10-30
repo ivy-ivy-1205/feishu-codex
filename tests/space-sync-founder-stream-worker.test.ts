@@ -15,7 +15,7 @@ import { AlignmentRepository } from '../src/repositories/alignment-repository.js
 import { SpaceProjectDigestRepository } from '../src/repositories/space-project-digest-repository.js';
 import type { SpaceProjectDigestInput } from '../src/services/space-project-digest.js';
 
-const noProfile = { positioning: null, phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], nextPlan: [] };
+const noProfile = { positioning: null, phases: [], completed: [], inProgress: [], pending: [], problems: [], divergences: [], decisions: [], nextPlan: [] };
 
 const start = new Date('2026-10-19T00:00:00.000Z');
 const chat = 'oc_a84d5b6ca478220d0a37964b50776edb';
@@ -298,6 +298,27 @@ describe('Space project-page digest per page version', () => {
     for (let tick = 0; tick < 3; tick += 1) { await h.runtime.afterTick(); await h.runtime.runOnce(); }
     expect(h.calls).toHaveLength(1);
     expect(h.digests.getForPageSource(page.id)?.digest?.profile?.positioning).toMatchObject({ excerpt: '项目总览' });
+    expect(h.db.client.prepare("SELECT count(*) n FROM outbox").get()).toEqual({ n: 0 });
+  });
+
+  it('regenerates, once, a profiled digest stored before 待决定 existed, even after an earlier profile refresh', async () => {
+    const h = digestHarness(async (input) => ({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [],
+      profile: { ...noProfile, decisions: [{ text: '项目总览', blockId: input.blocks[0]!.id, excerpt: '项目总览' }] } }));
+    canonicalTopic(h);
+    const page = spacePageSource(h.sources);
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [page.id], capturedAt: start });
+    h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing', since: start.toISOString(), until: start.toISOString(),
+      sourceIds: [page.id], capturedAt: start, refresh: 'profile' });
+    h.db.client.prepare("UPDATE batch_jobs SET status='completed' WHERE type='analyze_founder_stream_space_batch'").run();
+    const { decisions: _decisions, ...oldProfile } = noProfile;
+    h.db.client.prepare(`INSERT INTO space_project_digests (id, project_key, page_id, page_source_id, page_source_version, page_updated_at,
+      status, change_basis, digest_json, failure_code, generated_at) VALUES ('old', 'smart_listing', 'page_1', ?, 1, ?, 'ready', 'first_snapshot', ?, NULL, ?)`)
+      .run(page.id, page.occurredAt, JSON.stringify({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile: oldProfile }),
+        start.toISOString());
+    for (let tick = 0; tick < 3; tick += 1) { await h.runtime.afterTick(); await h.runtime.runOnce(); }
+    expect(h.calls).toHaveLength(1);
+    expect(h.digests.getForPageSource(page.id)?.digest?.profile?.decisions).toEqual([expect.objectContaining({ excerpt: '项目总览' })]);
     expect(h.db.client.prepare("SELECT count(*) n FROM outbox").get()).toEqual({ n: 0 });
   });
 

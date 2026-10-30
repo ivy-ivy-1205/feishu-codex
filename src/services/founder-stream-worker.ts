@@ -194,7 +194,7 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           const versions = sources.listSourceVersions(page.logicalKey);
           // An older snapshot replayed late is history; only the page as it stands now gets a digest.
           const stored = spaceDigests.getForPageSource(page.id);
-          if (versions.some(v => v.sourceVersion > page.sourceVersion) || (stored?.status === 'ready' && stored.digest?.profile)) continue;
+          if (versions.some(v => v.sourceVersion > page.sourceVersion) || (stored?.status === 'ready' && stored.digest?.profile?.decisions)) continue;
           if (!options.spaceDigestAnalyzer) { digestResults.push({ page, result: { failureCode: 'analyzer_unavailable' } }); continue; }
           const digestInput = buildSpaceDigestInput({ projectKey: job.projectKey, projectName: projectDisplayName(options.client, job.projectKey) ?? target.displayName,
             page, versions, now: plannedAt });
@@ -574,17 +574,17 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
             sourceIds: batch.map(s=>s.id), capturedAt: stamp });
         }
       }
-      // A page's current digest stored before profiles existed is regenerated once, so 查看项目进展 gets its
-      // positioning and phases without anyone re-importing the page.
+      // A page's current digest stored before profiles (or 待决定) existed is regenerated once, so 查看项目进展 and
+      // 查看分歧 get the current fields without anyone re-importing the page.
       const latestPageByKey = new Map<string, ContextSourceRecord>();
       for (const source of allSources) if (source.sourceType === 'space_page_snapshot' && source.contentState === 'cleartext' &&
         source.availabilityStatus === 'available' && typeof source.metadata.pageId === 'string' &&
         (latestPageByKey.get(source.logicalKey)?.sourceVersion ?? -1) < source.sourceVersion) latestPageByKey.set(source.logicalKey, source);
       for (const page of latestPageByKey.values()) {
         const projectKey = projectKeyFor(page.metadata.pageId as string), stored = spaceDigests.getForPageSource(page.id);
-        if (!projectKey || !mapped(projectKey) || stored?.status !== 'ready' || stored.digest?.profile) continue;
+        if (!projectKey || !mapped(projectKey) || stored?.status !== 'ready' || stored.digest?.profile?.decisions) continue;
         options.jobRepository.enqueueSpaceStreamBatch({ projectKey, since: page.occurredAt, until: stamp.toISOString(),
-          sourceIds: [page.id], capturedAt: stamp, profileRefresh: true });
+          sourceIds: [page.id], capturedAt: stamp, refresh: stored.digest?.profile ? 'decisions' : 'profile' });
       }
     }).immediate();
   }

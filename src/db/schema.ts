@@ -184,6 +184,31 @@ export const founderFeedbackDrafts = sqliteTable('founder_feedback_drafts', {
   check('founder_feedback_drafts_status_allowed', sql`${table.status} IN ('pending','applied','cancelled')`)
 ]);
 
+/** 查看分歧 replies (Ivy 2026-10-30): one founder's 已解决 / 不是分歧 per item, with the reply kept as evidence. */
+export const founderAlignmentJudgements = sqliteTable('founder_alignment_judgements', {
+  id: text('id').primaryKey(),
+  chatId: text('chat_id').notNull(),
+  itemKind: text('item_kind', { enum: ['alignment_issue', 'space_item'] }).notNull(),
+  itemKey: text('item_key').notNull(),
+  topicId: text('topic_id').notNull(),
+  projectName: text('project_name').notNull(),
+  itemText: text('item_text').notNull(),
+  section: text('section', { enum: ['divergence', 'decision'] }).notNull(),
+  verdict: text('verdict', { enum: ['resolved', 'not_divergence'] }).notNull(),
+  statement: text('statement'),
+  founder: text('founder', { enum: ['ivy', 'james'] }).notNull(),
+  evidenceId: text('evidence_id').notNull().references(() => contextEvidence.id),
+  sourceMessageId: text('source_message_id').notNull(),
+  bindingMessageId: text('binding_message_id').notNull(),
+  createdAt: text('created_at').notNull()
+}, (table) => [
+  uniqueIndex('founder_alignment_judgements_item_unique').on(table.itemKind, table.itemKey),
+  check('founder_alignment_judgements_kind_allowed', sql`${table.itemKind} IN ('alignment_issue','space_item')`),
+  check('founder_alignment_judgements_section_allowed', sql`${table.section} IN ('divergence','decision')`),
+  check('founder_alignment_judgements_verdict_allowed', sql`${table.verdict} IN ('resolved','not_divergence')`),
+  check('founder_alignment_judgements_founder_allowed', sql`${table.founder} IN ('ivy','james')`)
+]);
+
 export const founderWorkMapPreferences = sqliteTable('founder_work_map_preferences', {
   chatId: text('chat_id').primaryKey(),
   hideOrphanActive: integer('hide_orphan_active').notNull(),
