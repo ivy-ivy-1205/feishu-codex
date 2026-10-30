@@ -4,6 +4,8 @@ import { migrateDatabase } from '../src/db/migrate.js';
 import { TopicRepository } from '../src/repositories/topic-repository.js';
 import { FounderTopicProjectBindingRepository } from '../src/repositories/founder-topic-project-binding-repository.js';
 import { runMergeFounderTopicsCli } from '../src/cli/merge-founder-topics.js';
+import { buildCurrentFounderWorkMap, founderLineRootName } from '../src/services/current-founder-work-map.js';
+import { founderLineRootNames } from '../src/services/founder-work-map-renderer.js';
 
 function setup(duplicateFirst = false, registerShown = false) {
   const db = createSqliteDatabase(':memory:'); migrateDatabase(db.client);
@@ -55,5 +57,20 @@ describe('merge-founder-topics CLI', () => {
     expect(h.run('--into', h.shown.id, '--from', h.duplicate.id, '--apply', '--change-ref', 'merge-bonnefin')).toBe(2);
     expect(JSON.parse(h.out.at(-1)!)).toMatchObject({ mode: 'rejected', status: 'would_replace_shown_topic' });
     expect(h.topics.listRelations()).toEqual([]);
+  });
+  it('keeps the merged project on the work map under its line when finished orphans are hidden (preview 2026-10-30)', () => {
+    const h = setup(true, true);
+    const line = h.topics.createTopic({ displayName: founderLineRootNames[0]!, stage: 'active_project', outcome: null, createdAt: new Date('2026-09-01T00:00:00.000Z') });
+    h.topics.addRelation({ fromTopicId: h.shown.id, toTopicId: line.id, relationType: 'part_of', rationale: 'A 线', createdAt: new Date('2026-10-27T00:00:00.000Z') });
+    const chatId = 'oc_a84d5b6ca478220d0a37964b50776edb';
+    h.db.client.prepare('INSERT INTO founder_work_map_preferences (chat_id, hide_orphan_active, source_message_id, updated_at) VALUES (?, 1, ?, ?)')
+      .run(chatId, 'om_pref', '2026-10-01T00:00:00.000Z');
+    const shownNames = () => buildCurrentFounderWorkMap({ client: h.db.client, chatId, since: '2026-08-31T00:00:00.000Z', until: '2026-10-30T09:00:00.000Z',
+      approvedChatIds: [chatId], expectedCanonicalTopicCount: h.topics.listCanonicalTopics().length }).boardView.topics.map((topic) => topic.name);
+    expect(shownNames()).toContain('56 Bonnefin 楼花展示项目总览');
+    expect(h.run('--into', h.shown.id, '--from', h.duplicate.id, '--apply', '--change-ref', 'merge-bonnefin')).toBe(0);
+    expect(shownNames()).toContain('56 Bonnefin 楼花展示项目总览');
+    expect(shownNames()).not.toContain('56 Bonnefin这个项目');
+    expect(founderLineRootName(h.db.client, h.shown.id)).toBe(founderLineRootNames[0]);
   });
 });

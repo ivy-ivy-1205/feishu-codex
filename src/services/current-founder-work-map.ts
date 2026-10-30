@@ -36,7 +36,7 @@ export function buildCurrentFounderWorkMap(input:CurrentFounderWorkMapInput):Cur
   const topics=new TopicRepository(input.client),alignment=new AlignmentRepository(input.client);
   const canonical=topics.listCanonicalTopics();
   if(canonical.length!==input.expectedCanonicalTopicCount)throw new Error('FOUNDER_WORK_MAP_TOPIC_COUNT_MISMATCH');
-  const rootByTopic=canonicalRoots(topics.listCurrentTopics(),topics.listRelations().filter(relation=>relation.relationType==='same_as'));
+  const rootByTopic=topics.canonicalRootByTopic();
   const canonicalById=new Map(canonical.map(topic=>[topic.id,topic]));
   const parentByChild=new Map<string,string>();
   for(const relation of topics.listRelations().filter(relation=>relation.relationType==='part_of')){
@@ -117,7 +117,7 @@ function assertInput(input:CurrentFounderWorkMapInput):void{
 /** The business line (A/B/C root name) a topic sits under through part_of, or null when it hangs under none. */
 export function founderLineRootName(client:Database.Database,topicId:string):string|null{
   const topics=new TopicRepository(client),canonical=topics.listCanonicalTopics();
-  const rootByTopic=canonicalRoots(topics.listCurrentTopics(),topics.listRelations().filter(relation=>relation.relationType==='same_as'));
+  const rootByTopic=topics.canonicalRootByTopic();
   const nameById=new Map(canonical.map(topic=>[topic.id,cleanDisplayName(topic.displayName)]));
   const parentByChild=new Map<string,string>();
   for(const relation of topics.listRelations().filter(relation=>relation.relationType==='part_of')){
@@ -131,14 +131,6 @@ export function founderLineRootName(client:Database.Database,topicId:string):str
     if(name&&founderLineRootNames.includes(name))return name;
   }
   return null;
-}
-
-function canonicalRoots(all:readonly CurrentTopic[],relations:readonly {fromTopicId:string;toTopicId:string}[]):Map<string,string>{
-  const byId=new Map(all.map(topic=>[topic.id,topic])),parent=new Map(all.map(topic=>[topic.id,topic.id]));
-  const find=(id:string):string=>{const current=parent.get(id)!;if(current===id)return id;const root=find(current);parent.set(id,root);return root};
-  for(const relation of relations){const a=find(relation.fromTopicId),b=find(relation.toTopicId);if(a===b)continue;
-    const root=byId.get(a)!.createdAt.localeCompare(byId.get(b)!.createdAt)<=0?a:b;parent.set(root===a?b:a,root)}
-  return new Map(all.map(topic=>[topic.id,find(topic.id)]));
 }
 
 function projectPerspective(topic:CurrentTopic,perspective:CurrentPerspective):NonNullable<FounderWorkMapTopic['perspectives']>[number]{

@@ -202,12 +202,11 @@ export class TopicRepository {
   }
 
   /**
-   * Collapse only explicit same_as components; directional part_of relations remain visible. The oldest member stands
-   * for the group, except that a member a founder registered to a project (its Space page, its line) always does
-   * (2026-10-30: the hidden 「56 Bonnefin这个项目」 predates the registered 「56 Bonnefin 楼花展示项目总览」).
+   * Each current topic's group representative across same_as relations. The oldest member stands for the group, except
+   * that a member a founder registered to a project (its Space page, its line) always does (2026-10-30: the hidden
+   * 「56 Bonnefin这个项目」 predates the registered 「56 Bonnefin 楼花展示项目总览」). Every same_as projection uses this.
    */
-  listCanonicalTopics(): CurrentTopic[] {
-    const topics = this.listCurrentTopics();
+  canonicalRootByTopic(topics: readonly CurrentTopic[] = this.listCurrentTopics()): Map<string, string> {
     const registered = new Set((this.client.prepare(`SELECT topic_id FROM founder_topic_project_bindings
       WHERE role = 'canonical' AND source <> 'analysis'`).all() as { topic_id: string }[]).map((row) => row.topic_id));
     const byId = new Map(topics.map((topic) => [topic.id, topic]));
@@ -217,19 +216,21 @@ export class TopicRepository {
       if (current === id) return id;
       const root = find(current); parent.set(id, root); return root;
     };
-    const join = (left: string, right: string) => {
-      const a = find(left), b = find(right);
-      if (a === b) return;
-      const first = byId.get(a)!, second = byId.get(b)!;
-      const canonical = registered.has(a) !== registered.has(b) ? (registered.has(a) ? a : b)
-        : first.createdAt.localeCompare(second.createdAt) <= 0 ? a : b;
-      parent.set(canonical === a ? b : a, canonical);
-    };
     for (const relation of this.listRelations()) {
-      if (relation.relationType === 'same_as' && byId.has(relation.fromTopicId) && byId.has(relation.toTopicId)) {
-        join(relation.fromTopicId, relation.toTopicId);
-      }
+      if (relation.relationType !== 'same_as' || !byId.has(relation.fromTopicId) || !byId.has(relation.toTopicId)) continue;
+      const a = find(relation.fromTopicId), b = find(relation.toTopicId);
+      if (a === b) continue;
+      const canonical = registered.has(a) !== registered.has(b) ? (registered.has(a) ? a : b)
+        : byId.get(a)!.createdAt.localeCompare(byId.get(b)!.createdAt) <= 0 ? a : b;
+      parent.set(canonical === a ? b : a, canonical);
     }
+    return new Map(topics.map((topic) => [topic.id, find(topic.id)]));
+  }
+
+  /** Collapse only explicit same_as components; directional part_of relations remain visible. */
+  listCanonicalTopics(): CurrentTopic[] {
+    const topics = this.listCurrentTopics(), rootByTopic = this.canonicalRootByTopic(topics);
+    const find = (id: string) => rootByTopic.get(id)!;
     const components = new Map<string, CurrentTopic[]>();
     for (const topic of topics) {
       const root = find(topic.id);
