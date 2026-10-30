@@ -220,6 +220,17 @@ describe('SpaceProjectDigestRepository', () => {
     expect(h.digests.getForPageSource(page.id)?.digest).toEqual(current);
   });
 
+  it('picks the newest version even when page times use different offsets', () => {
+    // 合伙人对齐室's first imports carried "+08:00"; later syncs are UTC. As text, 19:30+08:00 sorts after 11:22Z, so the older version won.
+    const h = setup();
+    const v1 = savePage(h.sources, '2026-10-25T19:30:00+08:00', [block('b1', 'a', '一')]);
+    const v2 = savePage(h.sources, '2026-10-25T11:22:59.146250Z', [block('b1', 'b', '二')]);
+    expect(v2.sourceVersion).toBeGreaterThan(v1.sourceVersion);
+    for (const page of [v1, v2]) h.digests.saveFailed({ projectKey: 'smart-listing', pageId: 'page_1', pageSourceId: page.id,
+      pageSourceVersion: page.sourceVersion, pageUpdatedAt: page.occurredAt, generatedAt: at, failureCode: 'X' });
+    expect(h.digests.getLatestForProject('smart-listing')?.pageSourceId).toBe(v2.id);
+  });
+
   it('returns the newest page version first', () => {
     const h = setup();
     const v1 = savePage(h.sources, '2026-10-20T01:00:00.000Z', [block('b1', 'a', '一')]);
