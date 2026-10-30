@@ -277,6 +277,17 @@ describe('carryOverSpaceClassifications', () => {
     expect(carryOverSpaceClassifications(next, previous, input()).profile.decisions).toEqual([{ text: '新写法', blockId: 'b3', excerpt: '主责与佣金待拍板' }]);
   });
 
+  it('restores every earlier item of a paragraph that held several, not just the first', () => {
+    const previous = digest({ decisions: [{ text: '问题一', blockId: 'b3', excerpt: '主责' }, { text: '问题二', blockId: 'b3', excerpt: '佣金' }] });
+    expect(carryOverSpaceClassifications(digest({}), previous, input()).profile.decisions.map((i) => i.text)).toEqual(['问题一', '问题二']);
+  });
+
+  it('leaves a paragraph that sat in two sections in both', () => {
+    const previous = digest({ decisions: [{ text: '待决', blockId: 'b3', excerpt: '主责' }], problems: [{ text: '待答复', blockId: 'b3', excerpt: '佣金' }] });
+    const out = carryOverSpaceClassifications(digest({}), previous, input()).profile;
+    expect([texts(out.decisions), texts(out.problems)]).toEqual([['b3'], ['b3']]);
+  });
+
   it('never grows 卡点 past its cap of 3', () => {
     const full = [item('b1', '渠道分工仍待确定'), item('b3', '主责与佣金待拍板'), item('b4', '另一个待定事项')];
     const previous = digest({ problems: [item('b2', '等建筑师答复 Q1–Q8')] });
