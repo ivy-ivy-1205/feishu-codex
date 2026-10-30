@@ -24,18 +24,8 @@ export function runMergeFounderTopicsCli(args: readonly string[], dependencies: 
   if (!into || !from || into === from || (values.apply && !changeRef)) throw new Error('MERGE_TOPICS_ARGUMENTS_INVALID');
   const topics = new TopicRepository(dependencies.client);
   const current = new Map(topics.listCurrentTopics().map((topic) => [topic.id, topic]));
-  // The shown topic of `id`'s same_as group: the group member listCanonicalTopics keeps.
-  const canonicalOf = (id: string) => {
-    const edges = topics.listRelations().filter((relation) => relation.relationType === 'same_as');
-    const group = new Set([id]);
-    for (let grown = true; grown;) {
-      grown = false;
-      for (const edge of edges) for (const [a, b] of [[edge.fromTopicId, edge.toTopicId], [edge.toTopicId, edge.fromTopicId]] as const) {
-        if (group.has(a) && !group.has(b)) { group.add(b); grown = true; }
-      }
-    }
-    return topics.listCanonicalTopics().find((topic) => group.has(topic.id))?.id ?? null;
-  };
+  // The shown topic of `id`'s same_as group, as every work-map projection computes it.
+  const canonicalOf = (id: string) => topics.canonicalRootByTopic().get(id) ?? null;
   const merge = () => topics.addRelation({ fromTopicId: into!, toTopicId: from!, relationType: 'same_as',
     rationale: `Ivy 确认属于同一项目（${changeRef ?? 'preview'}）`, createdAt: dependencies.now() });
   /** Applies the relation inside a transaction that is always rolled back, and reports whether `--into` stays shown. */
