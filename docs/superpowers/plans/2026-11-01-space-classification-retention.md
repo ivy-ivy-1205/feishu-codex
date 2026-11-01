@@ -19,7 +19,7 @@ Smart Listing ingestion is independent of candidate deployment. Check live page 
 
 **Files:** `src/services/space-project-digest.ts`, `src/services/founder-stream-worker.ts`, their existing test files.
 
-**Interfaces:** Add optional full-content hash to digest input blocks (always populated by the production builder). Carryover receives the previous digest input, reconstructed from the ready digest's own page source. Missing hash/input means unknown. For previously truncated inputs, preserve positive items only; absence cannot reliably be inferred from a reconstructed historical prompt.
+**Interfaces:** Add optional full-content hash to digest input blocks (always populated by the production builder). Carryover receives the previous digest input, reconstructed from the ready digest's own page source, plus the complete previous source blocks. Missing hash/input means unknown. Positive classifications use the complete historical source even if historical prompt reconstruction drops their paragraphs. For previously truncated inputs, preserve positive items only; absence cannot reliably be inferred from a reconstructed historical prompt.
 
 1. Add failing tests for partial same-paragraph loss, negative classifications, old-first caps, same-ID content changes beyond prompt truncation, unseen/missing history, legacy decisions, and worker snapshot selection.
 2. Run targeted tests. Expected: new regression cases fail under 41e9cbb.

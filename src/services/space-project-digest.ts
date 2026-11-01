@@ -122,11 +122,16 @@ export function buildSpaceDigestInput(input: { projectKey: string; projectName: 
  * reconstructing the prompt at generation completion can select different blocks than at the start of analysis.
  */
 export function carryOverSpaceClassifications(next: SpaceProjectDigest, previous: StoredSpaceProjectDigest | null,
-  input: SpaceProjectDigestInput, previousInput: SpaceProjectDigestInput | null): SpaceProjectDigest {
+  input: SpaceProjectDigestInput, previousInput: SpaceProjectDigestInput | null,
+  previousSourceBlocks?: readonly SpaceSyncBlock[]): SpaceProjectDigest {
   const before = previous?.profile;
   if (!before || !previousInput) return next;
   const blocks = new Map(input.blocks.map((block) => [block.id, block]));
-  const unchanged = new Set(previousInput.blocks.filter((old) => {
+  // Positive classifications prove the model saw that paragraph. Verify against the complete historical source even
+  // if reconstructing its budgeted prompt at completion time now excludes it (e.g. generation crossed a week boundary).
+  const oldBlocks = previousSourceBlocks?.map((block) => ({ id: block.id, markdown: block.markdown.slice(0, blockMarkdownLimit),
+    contentHash: createHash('sha256').update(block.markdown).digest('hex') })) ?? previousInput.blocks;
+  const unchanged = new Set(oldBlocks.filter((old) => {
     const current = blocks.get(old.id);
     return old.contentHash && current?.contentHash === old.contentHash && current.markdown === old.markdown;
   }).map((block) => block.id));
@@ -135,12 +140,13 @@ export function carryOverSpaceClassifications(next: SpaceProjectDigest, previous
   const profile = { ...next.profile, divergences: [...next.profile.divergences], decisions: [...next.profile.decisions],
     problems: [...next.profile.problems] };
   const previouslyClassified = new Set(names.flatMap((name) => (before[name] ?? []).map((item) => item.blockId)));
+  const previouslyVisible = new Set(previousInput.blocks.map((block) => block.id));
   for (const name of names) {
     const oldItems = before[name];
     if (!oldItems) continue;
     const retained = oldItems.filter((item) => unchanged.has(item.blockId) && blocks.get(item.blockId)!.markdown.includes(item.excerpt));
     const fresh = next.profile[name].filter((item) => !unchanged.has(item.blockId) ||
-      (previousInput.truncated && !previouslyClassified.has(item.blockId)));
+      (!previouslyClassified.has(item.blockId) && (previousInput.truncated || !previouslyVisible.has(item.blockId))));
     profile[name] = [...retained, ...fresh].slice(0, caps[name]);
   }
   return { ...next, profile };

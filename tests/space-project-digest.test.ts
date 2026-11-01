@@ -5,7 +5,7 @@ import { migrateDatabase } from '../src/db/migrate.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
 import { SpaceProjectDigestRepository } from '../src/repositories/space-project-digest-repository.js';
 import {
-  buildSpaceDigestInput, carryOverSpaceClassifications, SpaceDigestValidationError, validateSpaceDigest, type SpaceProjectDigestInput
+  buildSpaceDigestInput, carryOverSpaceClassifications, pageBlocks, SpaceDigestValidationError, validateSpaceDigest, type SpaceProjectDigestInput
 } from '../src/services/space-project-digest.js';
 import { CodexSpaceProjectDigestAnalyzer } from '../src/adapters/codex-space-project-digest.js';
 
@@ -344,6 +344,28 @@ describe('carryOverSpaceClassifications', () => {
     const out = carryOverSpaceClassifications(next, previous, input(), before).profile;
     expect(out.decisions).toEqual(next.profile.decisions);
     expect(out.problems).toEqual(previous.profile.problems);
+  });
+
+  it('retains positive items from full history when crossing a week changes truncated prompt selection', () => {
+    const h = setup();
+    const background = Array.from({ length: 40 }, (_, i) => block(`bg-${i}`, 'a', `背景${i}`.padEnd(3000, 'x')));
+    const target = block('target', 'b', '主责与佣金待拍板'.padEnd(3000, 'x'));
+    savePage(h.sources, '2026-10-25T02:00:00.000Z', [...background, block('target', 'c', '之前背景'.padEnd(3000, 'x'))]);
+    const previousPage = savePage(h.sources, '2026-11-01T15:00:00.000Z', [...background, target]);
+    const page = savePage(h.sources, '2026-11-01T16:02:00.000Z', [...background.slice(1), target]);
+    const build = (source: typeof page, time: string) => buildSpaceDigestInput({ projectKey: 'smart-listing', projectName: 'Smart Listing',
+      page: source, versions: h.sources.listSourceVersions(page.logicalKey), now: new Date(time) });
+    const actual = build(previousPage, '2026-11-01T15:59:00.000Z');
+    const reconstructed = build(previousPage, '2026-11-01T16:01:00.000Z');
+    const current = build(page, '2026-11-01T16:03:00.000Z');
+    expect(actual.blocks.some((b) => b.id === 'target')).toBe(true);
+    expect(reconstructed.blocks.some((b) => b.id === 'target')).toBe(false);
+    expect(reconstructed.truncated).toBe(true);
+    expect(current.blocks.some((b) => b.id === 'target')).toBe(true);
+    const previous = digest({ decisions: [item('target', '主责'), item('target', '佣金')] });
+    const out = carryOverSpaceClassifications(digest({}), previous, current, reconstructed, pageBlocks(previousPage));
+    expect(out.profile.decisions).toEqual(previous.profile.decisions);
+    expect(() => validateSpaceDigest(out, current)).not.toThrow();
   });
 
   it('does not infer stability when historical input or full content hashes are missing', () => {
