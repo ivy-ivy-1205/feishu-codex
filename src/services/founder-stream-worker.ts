@@ -201,9 +201,13 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           // Validated here too, so no analyzer implementation can bypass grounding or the change-window rule.
           try {
             const fresh = validateSpaceDigest(await options.spaceDigestAnalyzer.digest(digestInput), digestInput);
-            // Unchanged paragraphs keep the 卡点 / 分歧 / 待决定 section the earlier digest gave them; the model draws that line differently each run.
-            const ready = validateSpaceDigest(carryOverSpaceClassifications(fresh,
-              spaceDigests.getReadyAtOrBefore(job.projectKey, page.sourceVersion)?.digest ?? null, digestInput), digestInput);
+            // Use the ready digest's own snapshot, which may precede a failed intermediate version.
+            const previous = spaceDigests.getReadyAtOrBefore(job.projectKey, page.sourceVersion);
+            const previousPage = versions.find((version) => version.id === previous?.pageSourceId);
+            const previousInput = previous && previousPage ? buildSpaceDigestInput({ projectKey: job.projectKey,
+              projectName: digestInput.projectName, page: previousPage, versions, now: new Date(previous.generatedAt) }) : null;
+            const ready = validateSpaceDigest(carryOverSpaceClassifications(fresh, previous?.digest ?? null,
+              digestInput, previousInput), digestInput);
             digestResults.push({ page, result: { ready, basis: digestInput.changeBasis } });
           }
           catch (error) {

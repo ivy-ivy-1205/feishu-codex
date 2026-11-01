@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { createSqliteDatabase } from '../src/db/client.js';
 import { migrateDatabase } from '../src/db/migrate.js';
 import { ContextSourceRepository } from '../src/repositories/context-source-repository.js';
@@ -9,6 +10,7 @@ import {
 import { CodexSpaceProjectDigestAnalyzer } from '../src/adapters/codex-space-project-digest.js';
 
 const at = new Date('2026-10-21T02:00:00.000Z');
+const contentHash = (text: string) => createHash('sha256').update(text).digest('hex');
 const block = (id: string, hashChar: string, markdown: string) => ({ id, hash: hashChar.repeat(64), markdown });
 
 function setup() {
@@ -56,7 +58,7 @@ describe('buildSpaceDigestInput', () => {
     savePage(h.sources, '2026-10-21T01:00:00.000Z', [block('b1', 'z', '改了')]);
     const input = buildSpaceDigestInput({ projectKey: 'smart-listing', projectName: 'Smart Listing', page: older,
       versions: h.sources.listSources(), now: at });
-    expect(input.blocks).toEqual([{ id: 'b1', markdown: '目标', changedThisWeek: false, changedToday: false }]);
+    expect(input.blocks).toEqual([{ id: 'b1', markdown: '目标', contentHash: contentHash('目标'), changedThisWeek: false, changedToday: false }]);
   });
 });
 
@@ -248,61 +250,123 @@ describe('carryOverSpaceClassifications', () => {
       { id: 'b2', markdown: '等建筑师答复 Q1–Q8', changedThisWeek: false, changedToday: false },
       { id: 'b3', markdown: '主责与佣金待拍板', changedThisWeek: false, changedToday: false },
       { id: 'b4', markdown: '另一个待定事项', changedThisWeek: false, changedToday: false }
-    ] });
+    ].map((b) => ({ ...b, contentHash: contentHash(b.markdown) })) });
   const digest = (profile: Partial<Record<'problems' | 'divergences' | 'decisions', ReturnType<typeof item>[]>>) => ({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile: { ...noProfile, ...profile } });
   const texts = (items: { blockId: string }[]) => items.map((i) => i.blockId);
 
   it('keeps an earlier 待决定 the model dropped this time, while its paragraph is unchanged', () => {
     const previous = digest({ decisions: [item('b1', '渠道分工仍待确定')] });
     const next = digest({});
-    expect(texts(carryOverSpaceClassifications(next, previous, input()).profile.decisions)).toEqual(['b1']);
+    expect(texts(carryOverSpaceClassifications(next, previous, input(), input()).profile.decisions)).toEqual(['b1']);
   });
 
   it('moves a paragraph back to its earlier section when the model flipped it, without duplicating it', () => {
     const previous = digest({ problems: [item('b2', '等建筑师答复 Q1–Q8')] });
     const next = digest({ decisions: [item('b2', '等建筑师答复 Q1–Q8')] });
-    const out = carryOverSpaceClassifications(next, previous, input()).profile;
+    const out = carryOverSpaceClassifications(next, previous, input(), input()).profile;
     expect(texts(out.problems)).toEqual(['b2']);
     expect(out.decisions).toEqual([]);
   });
 
   it('does not carry an item whose paragraph was edited or is no longer on the page', () => {
     const previous = digest({ decisions: [item('b_gone', '改写前的段落')] });
-    expect(carryOverSpaceClassifications(digest({}), previous, input()).profile.decisions).toEqual([]);
+    expect(carryOverSpaceClassifications(digest({}), previous, input(), input()).profile.decisions).toEqual([]);
   });
 
-  it('keeps the new wording when both runs agree, and adds no duplicate', () => {
+  it('keeps the complete previous wording for an unchanged paragraph, without duplication', () => {
     const previous = digest({ decisions: [{ text: '旧写法', blockId: 'b3', excerpt: '主责与佣金待拍板' }] });
     const next = digest({ decisions: [{ text: '新写法', blockId: 'b3', excerpt: '主责与佣金待拍板' }] });
-    expect(carryOverSpaceClassifications(next, previous, input()).profile.decisions).toEqual([{ text: '新写法', blockId: 'b3', excerpt: '主责与佣金待拍板' }]);
+    expect(carryOverSpaceClassifications(next, previous, input(), input()).profile.decisions).toEqual([{ text: '旧写法', blockId: 'b3', excerpt: '主责与佣金待拍板' }]);
   });
 
   it('restores every earlier item of a paragraph that held several, not just the first', () => {
     const previous = digest({ decisions: [{ text: '问题一', blockId: 'b3', excerpt: '主责' }, { text: '问题二', blockId: 'b3', excerpt: '佣金' }] });
-    expect(carryOverSpaceClassifications(digest({}), previous, input()).profile.decisions.map((i) => i.text)).toEqual(['问题一', '问题二']);
+    expect(carryOverSpaceClassifications(digest({}), previous, input(), input()).profile.decisions.map((i) => i.text)).toEqual(['问题一', '问题二']);
   });
 
   it('leaves a paragraph that sat in two sections in both', () => {
     const previous = digest({ decisions: [{ text: '待决', blockId: 'b3', excerpt: '主责' }], problems: [{ text: '待答复', blockId: 'b3', excerpt: '佣金' }] });
-    const out = carryOverSpaceClassifications(digest({}), previous, input()).profile;
+    const out = carryOverSpaceClassifications(digest({}), previous, input(), input()).profile;
     expect([texts(out.decisions), texts(out.problems)]).toEqual([['b3'], ['b3']]);
   });
 
-  it('never grows 卡点 past its cap of 3', () => {
+  it('gives retained problems priority over new candidates while keeping the cap of 3', () => {
     const full = [item('b1', '渠道分工仍待确定'), item('b3', '主责与佣金待拍板'), item('b4', '另一个待定事项')];
     const previous = digest({ problems: [item('b2', '等建筑师答复 Q1–Q8')] });
-    expect(carryOverSpaceClassifications(digest({ problems: full }), previous, input()).profile.problems).toEqual(full);
+    const previousInput = { ...input(), blocks: input().blocks.filter((b) => b.id === 'b2') };
+    expect(carryOverSpaceClassifications(digest({ problems: full }), previous, input(), previousInput).profile.problems)
+      .toEqual([...previous.profile.problems, ...full.slice(0, 2)]);
+  });
+
+  it('restores the whole group when the model keeps only one item of the same paragraph', () => {
+    const previous = digest({ decisions: [item('b3', '主责'), item('b3', '佣金')] });
+    const next = digest({ decisions: [item('b3', '主责')] });
+    expect(carryOverSpaceClassifications(next, previous, input(), input()).profile.decisions).toEqual(previous.profile.decisions);
+  });
+
+  it('preserves absence from all three classifications for previously visible unchanged paragraphs', () => {
+    const next = digest({ decisions: [item('b1', '渠道分工仍待确定')], problems: [item('b2', '等建筑师答复 Q1–Q8')],
+      divergences: [item('b3', '主责')] });
+    const out = carryOverSpaceClassifications(next, digest({}), input(), input()).profile;
+    expect([out.decisions, out.problems, out.divergences]).toEqual([[], [], []]);
+  });
+
+  it('allows classifications for new paragraphs absent from the previous input', () => {
+    const before = { ...input(), blocks: input().blocks.filter((b) => b.id !== 'b4') };
+    const next = digest({ decisions: [item('b4', '另一个待定事项')] });
+    expect(carryOverSpaceClassifications(next, digest({}), input(), before)).toEqual(next);
+  });
+
+  it('reclassifies an edited paragraph even if its id and earlier excerpt still match', () => {
+    const current = input();
+    current.blocks[2] = { ...current.blocks[2]!, markdown: '主责与佣金待拍板；现在已决定', contentHash: contentHash('主责与佣金待拍板；现在已决定') };
+    const previous = digest({ decisions: [item('b3', '主责')] });
+    expect(carryOverSpaceClassifications(digest({}), previous, current, input()).profile.decisions).toEqual([]);
+  });
+
+  it('uses full content instead of a provider hash or the first 3000 characters to detect edits', () => {
+    const h = setup();
+    const prefix = '仍待决定'.repeat(800);
+    const v1 = savePage(h.sources, '2026-10-20T02:00:00.000Z', [block('same-id', 'a', prefix + '旧结尾')]);
+    const v2 = savePage(h.sources, '2026-10-21T02:00:00.000Z', [block('same-id', 'a', prefix + '新结尾')]);
+    const build = (page: typeof v1) => buildSpaceDigestInput({ projectKey: 'smart-listing', projectName: 'Smart Listing', page,
+      versions: h.sources.listSourceVersions(page.logicalKey), now: at });
+    const previousInput = build(v1), current = build(v2);
+    expect(current.blocks[0]!.markdown).toBe(previousInput.blocks[0]!.markdown);
+    const previous = digest({ decisions: [item('same-id', '仍待决定')] });
+    expect(carryOverSpaceClassifications(digest({}), previous, current, previousInput).profile.decisions).toEqual([]);
+  });
+
+  it('does not infer negative classifications from a reconstructed truncated historical input', () => {
+    const before = { ...input(), truncated: true };
+    const previous = digest({ problems: [item('b2', '等建筑师答复 Q1–Q8')] });
+    const next = digest({ decisions: [item('b1', '渠道分工仍待确定')] });
+    const out = carryOverSpaceClassifications(next, previous, input(), before).profile;
+    expect(out.decisions).toEqual(next.profile.decisions);
+    expect(out.problems).toEqual(previous.profile.problems);
+  });
+
+  it('does not infer stability when historical input or full content hashes are missing', () => {
+    const next = digest({});
+    const previous = digest({ decisions: [item('b1', '渠道分工仍待确定')] });
+    expect(carryOverSpaceClassifications(next, previous, input(), null)).toEqual(next);
+    const before = input();
+    delete before.blocks[0]!.contentHash;
+    expect(carryOverSpaceClassifications(next, previous, input(), before)).toEqual(next);
   });
 
   it('returns the new digest as it is when there is no earlier one, or the earlier one had no profile', () => {
     const next = digest({ decisions: [item('b1', '渠道分工仍待确定')] });
-    expect(carryOverSpaceClassifications(next, null, input())).toEqual(next);
-    expect(carryOverSpaceClassifications(next, { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [] }, input())).toEqual(next);
+    expect(carryOverSpaceClassifications(next, null, input(), input())).toEqual(next);
+    expect(carryOverSpaceClassifications(next, { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [] }, input(), input())).toEqual(next);
   });
 
   it('works on earlier digests stored before 待决定 existed', () => {
     const { decisions: _decisions, ...old } = noProfile;
     const previous = { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile: { ...old, problems: [item('b2', '等建筑师答复 Q1–Q8')] } };
-    expect(texts(carryOverSpaceClassifications(digest({}), previous, input()).profile.problems)).toEqual(['b2']);
+    const next = digest({ decisions: [item('b2', '等建筑师答复 Q1–Q8')] });
+    const out = carryOverSpaceClassifications(next, previous, input(), input()).profile;
+    expect(texts(out.problems)).toEqual(['b2']);
+    expect(out.decisions).toEqual(next.profile.decisions);
   });
 });

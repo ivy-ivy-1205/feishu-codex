@@ -348,6 +348,38 @@ describe('Space project-page digest per page version', () => {
     expect(stored?.problems).toEqual([]);
   });
 
+  it('retains whole groups and empty classifications using the ready snapshot, not a failed intermediate version', async () => {
+    let run = 0;
+    const h = digestHarness(async () => {
+      run += 1;
+      const entry = (blockId: string, excerpt: string) => ({ text: excerpt, blockId, excerpt });
+      return { currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [], profile: { ...noProfile,
+        decisions: run === 1 ? [entry('a', '主责'), entry('a', '佣金')] : [entry('b', '旧背景'), entry('c', '新待定')],
+        problems: run === 1 ? [] : [entry('a', '主责')] } };
+    });
+    canonicalTopic(h);
+    const save = (day: string, blocks: [string, string][]) => h.sources.saveSource({
+      sourceSystem: 'chatgpt_space', sourceType: 'space_page_snapshot', externalId: 'page_1', logicalKey: 'chatgpt_space:page:page_1',
+      occurredAt: `2026-10-${day}T01:00:00.000Z`, authors: [], locatorUri: 'https://chatgpt.com/space/page_1',
+      contentFormat: 'text/markdown', contentText: blocks.map((b) => b[1]).join('\n\n'),
+      metadata: { pageId: 'page_1', title: 'Smart Listing', blocks: blocks.map(([id, markdown]) => ({ id, markdown, hash: 'a'.repeat(64) })) },
+      availabilityStatus: 'available', capturedAt: start }).source;
+    const enqueue = (page: ReturnType<typeof save>) => h.jobs.enqueueSpaceStreamBatch({ projectKey: 'smart_listing',
+      since: start.toISOString(), until: start.toISOString(), sourceIds: [page.id], capturedAt: start });
+    const v1 = save('19', [['a', '主责与佣金待拍板'], ['b', '旧背景']]);
+    enqueue(v1); await h.runtime.runOnce();
+    const v2 = save('20', [['a', '主责与佣金已决定'], ['b', '旧背景']]);
+    h.digests.saveFailed({ projectKey: 'smart_listing', pageId: 'page_1', pageSourceId: v2.id, pageSourceVersion: v2.sourceVersion,
+      pageUpdatedAt: v2.occurredAt, generatedAt: start, failureCode: 'space_digest_invalid' });
+    const v3 = save('21', [['a', '主责与佣金待拍板'], ['b', '旧背景'], ['c', '新待定']]);
+    enqueue(v3); await h.runtime.runOnce();
+    expect(h.calls).toHaveLength(2);
+    const profile = h.digests.getForPageSource(v3.id)?.digest?.profile;
+    expect(profile?.decisions?.map((item) => item.excerpt)).toEqual(['主责', '佣金', '新待定']);
+    expect(profile?.problems).toEqual([]);
+    expect(h.db.client.prepare('SELECT count(*) n FROM outbox').get()).toEqual({ n: 0 });
+  });
+
   it('never re-digests a page whose digest already has a profile', async () => {
     const h = digestHarness(async (input) => ({ currentFocus: null, weekProgress: [], todayProgress: [], nextSteps: [],
       profile: { ...noProfile, positioning: { text: '项目总览', blockId: input.blocks[0]!.id, excerpt: '项目总览' } } }));
