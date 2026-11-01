@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import { spaceSyncBlockSchema, type SpaceSyncBlock } from '../domain/space-sync.js';
 import type { ContextSourceRecord } from '../repositories/context-source-repository.js';
 import { spacePageChangeWindows, type SpacePageChangeWindows } from './space-page-diff.js';
@@ -55,7 +56,11 @@ export type StoredSpaceProjectDigest = z.infer<typeof storedSpaceProjectDigestSc
 export type SpaceProjectProfile = z.infer<typeof spaceProjectProfileSchema>;
 export type SpaceDigestItem = z.infer<typeof digestItemSchema>;
 
-export interface SpaceDigestInputBlock { id: string; markdown: string; changedThisWeek: boolean; changedToday: boolean }
+export interface SpaceDigestInputBlock {
+  id: string; markdown: string; changedThisWeek: boolean; changedToday: boolean;
+  /** Hash of the full source text before prompt truncation. Missing means stability is unknown. */
+  contentHash?: string;
+}
 
 export interface SpaceProjectDigestInput {
   projectKey: string;
@@ -94,6 +99,7 @@ export function buildSpaceDigestInput(input: { projectKey: string; projectName: 
   const windows = spacePageChangeWindows(known.map((version) => ({ occurredAt: version.occurredAt, blocks: pageBlocks(version) })), input.now);
   const week = new Set(windows.weekChangedBlockIds), today = new Set(windows.todayChangedBlockIds);
   const all = pageBlocks(input.page).map((block) => ({ id: block.id, markdown: block.markdown.slice(0, blockMarkdownLimit),
+    contentHash: createHash('sha256').update(block.markdown).digest('hex'),
     changedThisWeek: week.has(block.id), changedToday: today.has(block.id) })).filter((block) => block.markdown.trim());
   const keep = new Set<string>();
   let used = 0;
@@ -105,6 +111,45 @@ export function buildSpaceDigestInput(input: { projectKey: string; projectName: 
     pageTitle: typeof input.page.metadata.title === 'string' ? input.page.metadata.title : input.projectName,
     pageUpdatedAt: input.page.occurredAt, changeBasis: windows.basis, truncated: keep.size < all.length,
     blocks: all.filter((block) => keep.has(block.id)) };
+}
+
+/**
+ * Keeps 卡点 / 分歧 / 待决定 from flickering between regenerations (Ivy 2026-10-30). The model draws the line between them
+ * a little differently each run. An unchanged paragraph keeps its entire previous group, including an empty group.
+ * Compare locally computed full-content hashes as well as visible text: block IDs and provider hashes need not change
+ * on edits, and a changed suffix may be outside the prompt. Retained items have priority within the existing caps.
+ * Missing history / hashes / legacy sections mean unknown. For truncated historical prompts only positive items carry:
+ * reconstructing the prompt at generation completion can select different blocks than at the start of analysis.
+ */
+export function carryOverSpaceClassifications(next: SpaceProjectDigest, previous: StoredSpaceProjectDigest | null,
+  input: SpaceProjectDigestInput, previousInput: SpaceProjectDigestInput | null,
+  previousSourceBlocks?: readonly SpaceSyncBlock[]): SpaceProjectDigest {
+  const before = previous?.profile;
+  if (!before || !previousInput) return next;
+  const blocks = new Map(input.blocks.map((block) => [block.id, block]));
+  // Positive classifications prove the model saw that paragraph. Verify against the complete historical source even
+  // if reconstructing its budgeted prompt at completion time now excludes it (e.g. generation crossed a week boundary).
+  const oldBlocks = previousSourceBlocks?.map((block) => ({ id: block.id, markdown: block.markdown.slice(0, blockMarkdownLimit),
+    contentHash: createHash('sha256').update(block.markdown).digest('hex') })) ?? previousInput.blocks;
+  const unchanged = new Set(oldBlocks.filter((old) => {
+    const current = blocks.get(old.id);
+    return old.contentHash && current?.contentHash === old.contentHash && current.markdown === old.markdown;
+  }).map((block) => block.id));
+  const caps = { divergences: 20, decisions: 20, problems: 3 } as const;
+  const names = ['divergences', 'decisions', 'problems'] as const;
+  const profile = { ...next.profile, divergences: [...next.profile.divergences], decisions: [...next.profile.decisions],
+    problems: [...next.profile.problems] };
+  const previouslyClassified = new Set(names.flatMap((name) => (before[name] ?? []).map((item) => item.blockId)));
+  const previouslyVisible = new Set(previousInput.blocks.map((block) => block.id));
+  for (const name of names) {
+    const oldItems = before[name];
+    if (!oldItems) continue;
+    const retained = oldItems.filter((item) => unchanged.has(item.blockId) && blocks.get(item.blockId)!.markdown.includes(item.excerpt));
+    const fresh = next.profile[name].filter((item) => !unchanged.has(item.blockId) ||
+      (!previouslyClassified.has(item.blockId) && (previousInput.truncated || !previouslyVisible.has(item.blockId))));
+    profile[name] = [...retained, ...fresh].slice(0, caps[name]);
+  }
+  return { ...next, profile };
 }
 
 /**

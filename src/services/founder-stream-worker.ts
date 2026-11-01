@@ -5,7 +5,7 @@ import { ContextSourceRepository, type ContextSourceRecord } from '../repositori
 import { JobRepository, LeaseLostError, type FounderDurableJob, type FounderStreamJob, type FounderStreamSpaceJob } from '../repositories/job-repository.js';
 import { SpaceSyncRepository } from '../repositories/space-sync-repository.js';
 import { confirmedSpaceProjectTopic, isResolvedSpaceComment, loadSpaceBatchSources, spaceCommentExcerpt } from './space-batch-processor.js';
-import { buildSpaceDigestInput, validateSpaceDigest, type SpaceProjectDigest, type SpaceProjectDigestAnalyzer } from './space-project-digest.js';
+import { buildSpaceDigestInput, carryOverSpaceClassifications, pageBlocks, validateSpaceDigest, type SpaceProjectDigest, type SpaceProjectDigestAnalyzer } from './space-project-digest.js';
 import { SpaceProjectDigestRepository } from '../repositories/space-project-digest-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { OutboxRepository } from '../repositories/outbox-repository.js';
@@ -199,8 +199,17 @@ export function createFounderStreamRuntime(options: FounderStreamOptions) {
           const digestInput = buildSpaceDigestInput({ projectKey: job.projectKey, projectName: projectDisplayName(options.client, job.projectKey) ?? target.displayName,
             page, versions, now: plannedAt });
           // Validated here too, so no analyzer implementation can bypass grounding or the change-window rule.
-          try { digestResults.push({ page, result: { ready: validateSpaceDigest(await options.spaceDigestAnalyzer.digest(digestInput), digestInput),
-            basis: digestInput.changeBasis } }); }
+          try {
+            const fresh = validateSpaceDigest(await options.spaceDigestAnalyzer.digest(digestInput), digestInput);
+            // Use the ready digest's own snapshot, which may precede a failed intermediate version.
+            const previous = spaceDigests.getReadyAtOrBefore(job.projectKey, page.sourceVersion);
+            const previousPage = versions.find((version) => version.id === previous?.pageSourceId);
+            const previousInput = previous && previousPage ? buildSpaceDigestInput({ projectKey: job.projectKey,
+              projectName: digestInput.projectName, page: previousPage, versions, now: new Date(previous.generatedAt) }) : null;
+            const ready = validateSpaceDigest(carryOverSpaceClassifications(fresh, previous?.digest ?? null,
+              digestInput, previousInput, previousPage ? pageBlocks(previousPage) : undefined), digestInput);
+            digestResults.push({ page, result: { ready, basis: digestInput.changeBasis } });
+          }
           catch (error) {
             // Bounded retries, then a visible "摘要未生成" gap instead of a silently missing summary.
             if (job.attempt < 2) throw error;
